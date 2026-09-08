@@ -9,3 +9,6 @@ dsh-reference/
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# 私人备份同步脚本（泄露私人仓库名，不入公开仓库）
+backup-private.cmd
