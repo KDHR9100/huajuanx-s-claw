@@ -62,6 +62,9 @@ body.has-bg .session-item:hover { background: color-mix(in srgb, var(--bg-hover)
 .app {
   display: grid;
   grid-template-columns: 260px 1fr auto;
+  /* 关键：行高锁定为视口高度。否则隐式行按内容计算，
+     聊天历史渲染后会把整行撑高，输入框/侧栏底部按钮被推出视口 */
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
   overflow: hidden;
 }
@@ -77,6 +80,8 @@ body.has-bg .session-item:hover { background: color-mix(in srgb, var(--bg-hover)
   padding: 14px 10px;
   gap: 10px;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .brand {
@@ -151,12 +156,58 @@ body.has-bg .session-item:hover { background: color-mix(in srgb, var(--bg-hover)
 .session-item .s-delete:hover { background: var(--danger); color: #fff; }
 .session-item .s-meta { font-size: 11.5px; color: var(--text-dim); display: flex; gap: 8px; }
 
+/* 置顶标记 */
+.session-item .s-pin { flex: none; font-size: 11px; line-height: 1; }
+
+/* 内联重命名输入框 */
+.session-item .s-rename {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 2px 6px;
+  outline: none;
+}
+
+/* 会话右键菜单 */
+.ctx-menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 140px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(60, 40, 40, 0.16);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.ctx-item {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 7px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text);
+  white-space: nowrap;
+}
+.ctx-item:hover { background: var(--accent-soft); }
+
 /* ---------- main ---------- */
 .main {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   height: 100%;
+  overflow: hidden;
 }
 
 .topbar {

@@ -58,7 +58,12 @@ await sleep(4000);
 // 清理上次运行残留的主题设置，从默认状态开始
 await evaluate(`localStorage.clear()`);
 await send("Page.navigate", { url: "http://localhost:5173/" });
-await sleep(6000);
+// 等聊天历史渲染完（网格行高回归只有历史渲染后才能暴露），最长 25 秒
+for (let i = 0; i < 25; i++) {
+  const n = await evaluate(`document.querySelectorAll(".bubble").length`);
+  if (n && n > 0) { await sleep(1500); break; }
+  await sleep(1000);
+}
 
 // ---- 1) 矮窗口下输入框可见性（主会话有 31k tokens 的长历史）----
 const composer = await evaluate(`(function(){

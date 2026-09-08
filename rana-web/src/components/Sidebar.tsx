@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "../store/useAppStore";
 import { gateway } from "../lib/gateway";
 
@@ -20,12 +21,56 @@ function fmtTokens(n?: number) {
 /** 服务端禁止删除的会话：global 与 agent 主会话（isMain），删除会被 gateway 拒绝 */
 const isProtectedSession = (key: string, isMain?: boolean) => isMain === true || key === "global";
 
+interface CtxMenuState {
+  key: string;
+  title: string;
+  x: number;
+  y: number;
+}
+
 export default function Sidebar() {
   const sessions = useAppStore((s) => s.sessions);
+  const pinned = useAppStore((s) => s.pinned);
+  const togglePin = useAppStore((s) => s.togglePin);
   const currentKey = useAppStore((s) => s.currentKey);
   const setCurrentKey = useAppStore((s) => s.setCurrentKey);
   const runs = useAppStore((s) => s.runs);
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
+  const [creating, setCreating] = useState(false);
+  const [menu, setMenu] = useState<CtxMenuState | null>(null);
+  const [renamingKey, setRenamingKey] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const renameRef = useRef<HTMLInputElement>(null);
+
+  // 置顶的会话固定排在最前（按置顶先后），其余保持服务端顺序
+  const ordered = useMemo(() => {
+    const rank = (k: string) => {
+      const i = pinned.indexOf(k);
+      return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+    };
+    return [...sessions].sort((a, b) => rank(a.key) - rank(b.key));
+  }, [sessions, pinned]);
+
+  // 右键菜单：点击任意处 / 窗口失焦 / Esc 关闭
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenu(null);
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("blur", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+
+  useEffect(() => {
+    if (renamingKey) renameRef.current?.select();
+  }, [renamingKey]);
 
   const pick = (key: string) => {
     if (key === currentKey) return;
@@ -34,7 +79,39 @@ export default function Sidebar() {
   };
 
   const newSession = () => {
-    void gateway.createSession().catch((e) => console.warn("新建会话失败:", e));
+    if (creating) return;
+    setCreating(true);
+    void gateway
+      .createSession()
+      .catch((e) => console.warn("新建会话失败:", e))
+      .finally(() => setCreating(false));
+  };
+
+  const openMenu = (e: React.MouseEvent, key: string, title: string) => {
+    if (key.startsWith("pending-create:")) return; // 创建中的会话暂不可操作
+    e.preventDefault();
+    setMenu({ key, title, x: e.clientX, y: e.clientY });
+  };
+
+  const startRename = () => {
+    if (!menu) return;
+    setRenamingKey(menu.key);
+    setRenameValue(menu.title);
+    setMenu(null);
+  };
+
+  const commitRename = async () => {
+    const key = renamingKey;
+    setRenamingKey(null);
+    if (!key) return;
+    const next = renameValue.trim();
+    const current = useAppStore.getState().sessions.find((x) => x.key === key)?.title ?? "";
+    if (!next || next === current) return;
+    try {
+      await gateway.renameSession(key, next);
+    } catch (e) {
+      window.alert(`重命名失败：${(e as Error).message}`);
+    }
   };
 
   const deleteSession = (key: string, title: string, active: boolean) => {
@@ -51,11 +128,11 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="brand">Rana ✿</div>
-      <button className="btn" onClick={newSession} disabled={sessions.some((s) => s.key === currentKey && s.hasActiveRun)}>
-        ＋ 新会话
+      <button className="btn" onClick={newSession} disabled={creating || sessions.some((s) => s.key === currentKey && s.hasActiveRun)}>
+        {creating ? "创建中…" : "＋ 新会话"}
       </button>
       <div className="session-list">
-        {sessions.map((s) => (
+        {ordered.map((s) => (
           <div
             key={s.key}
             className={`session-item${s.key === currentKey ? " active" : ""}`}
@@ -63,12 +140,36 @@ export default function Sidebar() {
             tabIndex={0}
             onClick={() => pick(s.key)}
             onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && pick(s.key)}
+            onContextMenu={(e) => openMenu(e, s.key, s.title ?? s.key)}
           >
             <div className="s-main">
-              <span className="s-title">
-                {s.hasActiveRun || runs[s.key] ? "⏳ " : ""}
-                {s.title}
-              </span>
+              {pinned.includes(s.key) && (
+                <span className="s-pin" title="已置顶">
+                  📌
+                </span>
+              )}
+              {renamingKey === s.key ? (
+                <input
+                  ref={renameRef}
+                  className="s-rename"
+                  value={renameValue}
+                  maxLength={100}
+                  placeholder="会话名称"
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  onBlur={() => void commitRename()}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === "Enter") void commitRename();
+                    if (e.key === "Escape") setRenamingKey(null);
+                  }}
+                />
+              ) : (
+                <span className="s-title">
+                  {s.hasActiveRun || runs[s.key] ? "⏳ " : ""}
+                  {s.title}
+                </span>
+              )}
               {!isProtectedSession(s.key, s.isMain) && (
                 <button
                   className="s-delete"
@@ -94,6 +195,29 @@ export default function Sidebar() {
       <button className="btn ghost" onClick={() => setSettingsOpen(true)}>
         ⚙ 外观设置
       </button>
+      {menu && (
+        <div
+          className="ctx-menu"
+          style={{
+            left: Math.min(menu.x, window.innerWidth - 150),
+            top: Math.min(menu.y, window.innerHeight - 100),
+          }}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <button className="ctx-item" onClick={startRename}>
+            ✏️ 重命名
+          </button>
+          <button
+            className="ctx-item"
+            onClick={() => {
+              togglePin(menu.key);
+              setMenu(null);
+            }}
+          >
+            📌 {pinned.includes(menu.key) ? "取消置顶" : "置顶"}
+          </button>
+        </div>
+      )}
     </aside>
   );
 }

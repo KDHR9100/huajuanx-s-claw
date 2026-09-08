@@ -16,6 +16,8 @@ interface AppState {
   sessions: SessionRow[];
   currentKey?: string;
   mainSessionKey?: string;
+  /** 置顶的会话 key（按置顶先后排序，持久化在 localStorage） */
+  pinned: string[];
 
   messages: Record<string, ChatMessage[]>;
 
@@ -32,6 +34,7 @@ interface AppState {
   setSessions: (sessions: SessionRow[]) => void;
   mergeSession: (row: Partial<SessionRow> & { key: string }) => void;
   removeSession: (key: string) => void;
+  togglePin: (key: string) => void;
   setCurrentKey: (key: string) => void;
   setMainSessionKey: (key: string) => void;
   setModels: (models: ModelInfo[]) => void;
@@ -45,9 +48,22 @@ interface AppState {
   setSettingsOpen: (open: boolean) => void;
 }
 
+export const PINNED_STORAGE_KEY = "rana-web.pinned";
+
+function loadPinned(): string[] {
+  try {
+    const raw = localStorage.getItem(PINNED_STORAGE_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export const useAppStore = create<AppState>((set) => ({
   conn: "connecting",
   sessions: [],
+  pinned: loadPinned(),
   messages: {},
   models: [],
   runs: {},
@@ -91,12 +107,20 @@ export const useAppStore = create<AppState>((set) => ({
       delete messages[key];
       const runs = { ...s.runs };
       delete runs[key];
+      const pinned = s.pinned.filter((k) => k !== key);
+      if (pinned.length !== s.pinned.length) localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify(pinned));
       // 删除的是当前会话时：优先回到主会话，否则回列表第一个
       const fallback =
         s.mainSessionKey && s.mainSessionKey !== key && sessions.some((x) => x.key === s.mainSessionKey)
           ? s.mainSessionKey
           : sessions[0]?.key;
-      return { sessions, messages, runs, currentKey: s.currentKey === key ? fallback : s.currentKey };
+      return { sessions, messages, runs, pinned, currentKey: s.currentKey === key ? fallback : s.currentKey };
+    }),
+  togglePin: (key) =>
+    set((s) => {
+      const pinned = s.pinned.includes(key) ? s.pinned.filter((k) => k !== key) : [key, ...s.pinned];
+      localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify(pinned));
+      return { pinned };
     }),
   updateSettings: (patch) =>
     set((s) => {

@@ -66,6 +66,10 @@ class GatewayConnection {
   private token = "";
   private hello: HelloOk | null = null;
   private connecting: Promise<void> | null = null;
+  /** 乐观创建中的会话：tempKey → 服务端真实 key 的 Promise（sendChat/delete 需先等它） */
+  private pendingCreates = new Map<string, Promise<string>>();
+  /** 正在后台删除的会话 key：防止列表刷新把会话短暂“复活” */
+  private deletingKeys = new Set<string>();
 
   get helloOk(): HelloOk | null {
     return this.hello;
@@ -343,7 +347,8 @@ class GatewayConnection {
       const rows = (res.sessions ?? res.list ?? []) as Array<Record<string, unknown>>;
       const mapped: SessionRow[] = rows.map((r) => ({
         key: String(r.key),
-        title: String(r.displayName ?? r.derivedTitle ?? r.label ?? r.key),
+        // 用户设置的自定义标签（sessions.patch label）优先于服务端派生标题
+        title: String(r.label ?? r.displayName ?? r.derivedTitle ?? r.key),
         updatedAt: (r.updatedAt as number) ?? (r.lastActivityAt as number),
         model: r.model ? String(r.model) : undefined,
         inputTokens: r.inputTokens as number | undefined,
@@ -355,7 +360,13 @@ class GatewayConnection {
         sessionId: r.sessionId ? String(r.sessionId) : undefined,
         isMain: r.isMain === true,
       }));
-      store().setSessions(mapped);
+      // 后台删除中的会话先过滤掉，避免陈旧列表让刚删的会话闪回
+      const kept = mapped.filter((r) => !this.deletingKeys.has(r.key));
+      // 乐观创建中的占位会话：服务端列表还没有它，保留以免被刷新冲掉
+      const pendingRows = store().sessions.filter(
+        (x) => x.key.startsWith("pending-create:") && !kept.some((m) => m.key === x.key),
+      );
+      store().setSessions(pendingRows.length ? [...pendingRows, ...kept] : kept);
     } catch (e) {
       console.warn("[gateway] sessions.list 失败:", e);
     }
@@ -414,22 +425,33 @@ class GatewayConnection {
   async sendChat(sessionKey: string, text: string) {
     const trimmed = text.trim();
     if (!trimmed) return;
+    // 会话处于乐观创建期：先等后台创建拿到真实 key 再发送
+    let key = sessionKey;
+    if (key.startsWith("pending-create:")) {
+      const p = this.pendingCreates.get(key);
+      if (!p) return; // 创建已失败并被清理
+      try {
+        key = await p;
+      } catch {
+        return;
+      }
+    }
     const idempotencyKey = crypto.randomUUID();
     const msgId = `local-${idempotencyKey}`;
-    store().appendMessage(sessionKey, { id: msgId, role: "user", text: trimmed, ts: Date.now() });
+    store().appendMessage(key, { id: msgId, role: "user", text: trimmed, ts: Date.now() });
     const liveId = `pending-${idempotencyKey}`;
-    store().appendMessage(sessionKey, { id: liveId, role: "assistant", text: "", ts: Date.now(), streaming: true });
-    store().setRun(sessionKey, { runId: idempotencyKey, msgId: liveId, text: "", lastSeq: 0 });
+    store().appendMessage(key, { id: liveId, role: "assistant", text: "", ts: Date.now(), streaming: true });
+    store().setRun(key, { runId: idempotencyKey, msgId: liveId, text: "", lastSeq: 0 });
     try {
-      const res = (await this.request("chat.send", { sessionKey, message: trimmed, idempotencyKey })) as Record<string, unknown>;
+      const res = (await this.request("chat.send", { sessionKey: key, message: trimmed, idempotencyKey })) as Record<string, unknown>;
       const runId = String(res.runId ?? idempotencyKey);
-      const r = store().runs[sessionKey];
-      if (r && r.runId === idempotencyKey) store().setRun(sessionKey, { ...r, runId });
+      const r = store().runs[key];
+      if (r && r.runId === idempotencyKey) store().setRun(key, { ...r, runId });
       void this.refreshSessions();
     } catch (e) {
       const s = store();
-      s.patchMessage(sessionKey, liveId, { streaming: false, error: String((e as Error).message) });
-      s.setRun(sessionKey, undefined);
+      s.patchMessage(key, liveId, { streaming: false, error: String((e as Error).message) });
+      s.setRun(key, undefined);
     }
   }
 
@@ -453,35 +475,104 @@ class GatewayConnection {
   }
 
   async createSession(): Promise<string> {
-    const res = (await this.request("sessions.create", {})) as Record<string, unknown>;
-    const row = (res.session ?? res) as Record<string, unknown>;
-    const key = String(row.key ?? res.key ?? "");
-    if (!key) throw new Error("sessions.create 未返回 key");
+    // 乐观创建：先插入本地占位会话并立即切换（服务端创建含 SQLite 写入较慢），
+    // 完成后把消息/运行态迁移到真实 key；期间发消息会先等创建完成（见 sendChat）
+    const tempKey = `pending-create:${crypto.randomUUID()}`;
+    store().mergeSession({ key: tempKey, title: "新会话", updatedAt: Date.now() });
+    store().setCurrentKey(tempKey);
+    store().setMessages(tempKey, []);
+    const pending = this.request("sessions.create", {})
+      .then((raw) => {
+        const res = raw as Record<string, unknown>;
+        const row = (res.session ?? res) as Record<string, unknown>;
+        const key = String(row.key ?? res.key ?? "");
+        if (!key) throw new Error("sessions.create 未返回 key");
+        this.migratePendingSession(tempKey, key, row);
+        return key;
+      })
+      .catch((e: Error) => {
+        store().removeSession(tempKey);
+        window.alert(`新建会话失败：${e.message}`);
+        throw e;
+      });
+    this.pendingCreates.set(tempKey, pending);
+    pending.finally(() => this.pendingCreates.delete(tempKey)).catch(() => {});
+    return tempKey;
+  }
+
+  /** 乐观创建完成：把占位会话下的本地状态迁移到服务端真实 key */
+  private migratePendingSession(tempKey: string, key: string, row: Record<string, unknown>) {
+    const s = store();
+    const msgs = s.messages[tempKey];
+    const run = s.runs[tempKey];
+    store().removeSession(tempKey);
     store().mergeSession({
       key,
       title: (row.displayName as string) ?? (row.derivedTitle as string) ?? "新会话",
       model: row.model as string | undefined,
       updatedAt: Date.now(),
     });
-    store().setCurrentKey(key);
-    store().setMessages(key, []);
+    if (msgs?.length) store().setMessages(key, msgs);
+    if (run) store().setRun(key, run);
+    if (store().currentKey === tempKey) store().setCurrentKey(key);
     void this.refreshSessions();
-    return key;
+  }
+
+  /** 重命名会话：乐观更新标题，服务端 sessions.patch label 为权威来源 */
+  async renameSession(sessionKey: string, label: string) {
+    if (sessionKey.startsWith("pending-create:")) throw new Error("会话还在创建中，请稍后再试");
+    store().mergeSession({ key: sessionKey, title: label });
+    try {
+      await this.request("sessions.patch", { key: sessionKey, label });
+    } catch (e) {
+      // 失败回滚：以服务端列表标题为准
+      void this.refreshSessions();
+      throw e;
+    }
   }
 
   async deleteSession(sessionKey: string) {
-    // 有活动 run 时先中止，避免删除被服务端拒绝
-    if (store().runs[sessionKey]) await this.abort(sessionKey).catch(() => {});
+    // 会话还在乐观创建期：先等真实 key（创建失败则已被清理，无需再删）
+    let key = sessionKey;
+    if (key.startsWith("pending-create:")) {
+      const p = this.pendingCreates.get(key);
+      if (!p) return;
+      const real = await p.catch(() => "");
+      if (!real) return;
+      key = real;
+    }
     // webchat 只有 operator.write：归档属 lifecycle patch（需 sessionId 作乐观锁），
     // 之后以 archivedOnly 删除（同样只需 write 权限）
-    const row = store().sessions.find((x) => x.key === sessionKey);
+    let row = store().sessions.find((x) => x.key === key);
+    if (!row?.sessionId) {
+      // 新建后会话行可能还没等到列表刷新（缺 sessionId），先补一次
+      await this.refreshSessions();
+      row = store().sessions.find((x) => x.key === key);
+    }
     if (!row?.sessionId) throw new Error("缺少会话标识（sessionId），无法删除");
-    await this.request("sessions.patch", { key: sessionKey, archived: true, expectedSessionId: row.sessionId });
-    await this.request("sessions.delete", { key: sessionKey, archivedOnly: true, deleteTranscript: true });
-    store().removeSession(sessionKey);
-    // 删除后若切到了别的会话，补加载其历史
-    const next = store().currentKey;
-    if (next) void this.loadHistory(next);
+    const wasCurrent = store().currentKey === key;
+    // 乐观移除：服务端 SQLite 删除可达 8s+，先让界面即时响应，慢操作转后台
+    this.deletingKeys.add(key);
+    store().removeSession(key);
+    // 只有删的是当前会话才需要加载回退会话的历史，避免多余往返
+    if (wasCurrent) {
+      const next = store().currentKey;
+      if (next) void this.loadHistory(next);
+    }
+    try {
+      // 有活动 run 时先中止，避免删除被服务端拒绝
+      if (store().runs[key]) await this.abort(key).catch(() => {});
+      await this.request("sessions.patch", { key, archived: true, expectedSessionId: row.sessionId });
+      await this.request("sessions.delete", { key, archivedOnly: true, deleteTranscript: true });
+      // 删除完成后仍短暂过滤，防止陈旧列表把会话闪回
+      setTimeout(() => this.deletingKeys.delete(key), 15_000);
+    } catch (e) {
+      // 失败回滚：把会话放回列表，由调用方提示错误
+      this.deletingKeys.delete(key);
+      store().mergeSession(row);
+      void this.refreshSessions();
+      throw e;
+    }
   }
 }
 
