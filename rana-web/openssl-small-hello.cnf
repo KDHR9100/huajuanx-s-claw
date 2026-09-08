@@ -1,0 +1,11 @@
+# 限制 TLS groups，去掉后量子 KEM（X25519MLKEM768），缩小 ClientHello
+openssl_conf = openssl_init
+
+[openssl_init]
+ssl_conf = ssl_sect
+
+[ssl_sect]
+system_default = system_default_sect
+
+[system_default_sect]
+Groups = X25519:P-256

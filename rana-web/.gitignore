@@ -1,0 +1,24 @@
+# ===== 依赖与构建产物 =====
+node_modules/
+dist/
+*.local
+tsconfig.tsbuildinfo
+
+# ===== 密钥与令牌 —— 绝不上传（公开仓库）=====
+.env
+.env.*
+# 网关配对令牌 / 设备身份探针产物
+.probe-devicetoken.json
+.probe-identity.json
+# 旧 aliyun-maas provider 配置备份（含 API Key）
+aliyun-maas-backup.json
+
+# ===== 日志（可能含对话内容与令牌）=====
+*.log
+
+# ===== 一次性网络调试脚本（引用本地密钥/临时产物）=====
+probe*.mjs
+make-body.mjs
+
+# ===== 测试截图（可能含对话内容）=====
+ui-feature-check.png

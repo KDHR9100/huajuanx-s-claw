@@ -1,0 +1,11 @@
+# ===== 个人数据与密钥 —— 绝不上传（公开仓库）=====
+# OpenClaw 主目录：含 API 密钥配置、会话记录、长期记忆、个人档案(SOUL/USER/MEMORY.md)
+.openclaw/
+# 第三方参考仓库克隆（deepseek-ai/deepseek-harness，自带 .git）
+dsh-reference/
+
+# ===== 系统文件 =====
+*.lnk
+Thumbs.db
+.DS_Store
+desktop.ini
