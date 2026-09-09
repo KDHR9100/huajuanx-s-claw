@@ -27,15 +27,28 @@ function ReasoningBlock({ reasoning, thinking }: { reasoning: string; thinking: 
   );
 }
 
-function Bubble({ role, text, streaming, error, model, ts }: {
+/** chat 事件 state=status 的生命周期阶段 → 中文提示 */
+const PHASE_LABELS: Record<string, string> = {
+  preparing_workspace: "准备工作区",
+  naming_worktree: "命名工作树",
+  creating_worktree: "创建工作树",
+  running_setup: "运行初始化",
+  provisioning_environment: "配置运行环境",
+  preparing_context: "准备上下文",
+  starting_model: "模型生成中",
+};
+
+function Bubble({ role, text, streaming, error, model, ts, status }: {
   role: "user" | "assistant";
   text: string;
   streaming?: boolean;
   error?: string;
   model?: string;
   ts: number;
+  status?: string;
 }) {
   const { reasoning, thinking, text: body } = role === "assistant" ? splitReasoning(text) : { reasoning: "", thinking: false, text };
+  const statusLine = streaming && status ? PHASE_LABELS[status] ?? status : "";
   return (
     <div className={`msg ${role}`}>
       <div className="bubble">
@@ -48,6 +61,7 @@ function Bubble({ role, text, streaming, error, model, ts }: {
           </span>
         ) : null}
         {streaming && body ? <span className="typing-dots"><span /><span /><span /></span> : null}
+        {statusLine && <div className="run-status">⚙ {statusLine}</div>}
         {error && <div style={{ color: "var(--danger)", marginTop: 6 }}>⚠ {error}</div>}
       </div>
       <div className="msg-meta">
@@ -98,7 +112,7 @@ export default function ChatStream() {
           </div>
         )}
         {messages.map((m) => (
-          <Bubble key={m.id} role={m.role} text={m.text} streaming={m.streaming} error={m.error} model={m.model} ts={m.ts} />
+          <Bubble key={m.id} role={m.role} text={m.text} streaming={m.streaming} error={m.error} model={m.model} ts={m.ts} status={m.status} />
         ))}
       </div>
     </div>

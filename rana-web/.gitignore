@@ -22,3 +22,6 @@ make-body.mjs
 
 # ===== 测试截图（可能含对话内容）=====
 ui-feature-check.png
+
+# ===== 本地素材目录（不上传）=====
+.eva-parts/

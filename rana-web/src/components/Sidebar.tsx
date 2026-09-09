@@ -182,7 +182,7 @@ export default function Sidebar() {
                   {s.title}
                 </span>
               )}
-              {!isProtectedSession(s.key, s.isMain) && (
+              {!isProtectedSession(s.key, s.isMain) ? (
                 <button
                   className="s-delete"
                   title="删除会话"
@@ -193,6 +193,10 @@ export default function Sidebar() {
                 >
                   ✕
                 </button>
+              ) : (
+                <span className="s-delete protected" title="agent 主会话受 gateway 保护不可删除（可重命名/置顶；清空对话内容请发送 /reset，换新会话发送 /new）">
+                  🔒
+                </span>
               )}
             </div>
             <span className="s-meta">

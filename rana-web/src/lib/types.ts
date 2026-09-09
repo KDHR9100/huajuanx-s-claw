@@ -15,6 +15,8 @@ export interface ChatMessage {
   usage?: UsageInfo;
   model?: string;
   error?: string;
+  /** 运行阶段（chat 事件 state=status 的 phase），仅流式期间有意义 */
+  status?: string;
 }
 
 export interface SessionRow {
