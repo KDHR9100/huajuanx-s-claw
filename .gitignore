@@ -25,3 +25,7 @@ rana-web/wechat-mode-*.cmd
 rana-web/fix-ws-path.mjs
 # 私密记忆桥（NSFW 场景基础设施，不入公开仓库；共享桥 memory-bridge.mjs 保持公开）
 rana-web/private-memory-bridge.mjs
+
+# LM Studio 控制台（本地模型加载管理，node_modules 不入库）
+node_modules/
+lmctl/
