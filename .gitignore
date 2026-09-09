@@ -1,6 +1,8 @@
 # ===== 个人数据与密钥 —— 绝不上传（公开仓库）=====
 # OpenClaw 主目录：含 API 密钥配置、会话记录、长期记忆、个人档案(SOUL/USER/MEMORY.md)
 .openclaw/
+# ZCode 本地会话数据（工作区副本）
+.zcode/
 # 第三方参考仓库克隆（deepseek-ai/deepseek-harness，自带 .git）
 dsh-reference/
 
@@ -21,3 +23,5 @@ rana-web/tmp-*
 rana-web/openclaw.*
 rana-web/wechat-mode-*.cmd
 rana-web/fix-ws-path.mjs
+# 私密记忆桥（NSFW 场景基础设施，不入公开仓库；共享桥 memory-bridge.mjs 保持公开）
+rana-web/private-memory-bridge.mjs

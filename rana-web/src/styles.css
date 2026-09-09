@@ -206,6 +206,17 @@ body.has-bg .session-item:hover { background: color-mix(in srgb, var(--bg-hover)
 /* 置顶标记 */
 .session-item .s-pin { flex: none; font-size: 11px; line-height: 1; }
 
+/* 未读小圆点：会话有新消息且非当前会话 */
+.session-item .s-unread {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.session-item.unread .s-title { color: var(--accent); }
+
 /* 内联重命名输入框 */
 .session-item .s-rename {
   flex: 1;

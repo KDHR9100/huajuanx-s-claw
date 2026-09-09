@@ -19,6 +19,8 @@ import { spawn } from 'node:child_process';
 const HOME = 'K:/OpenClaw/.openclaw/.openclaw';
 const SHARED = HOME + '/shared-memory';
 const CFG = JSON.parse(fs.readFileSync(HOME + '/openclaw.json', 'utf8'));
+// RP 侧提炼模型跟随 rana-rp agent 当前配置，避免写死旧模型被 JIT 反复拉起挤显存
+const RP_DISTILL_MODEL = (CFG.agents?.entries?.['rana-rp']?.model || '').split('/').pop() || 'rana-rp-7b';
 const NOW = Date.now();
 
 const log = (msg) => {
@@ -88,7 +90,9 @@ async function chat(url, apiKey, model, sys, user, maxTokens) {
 
 const SYS = '任务：从对话片段提炼共享记忆纪要。禁止复述本任务，禁止扮演对话角色，直接输出纪要行。';
 function promptFor(side, tag, dialog) {
-  return `【${side}侧对话片段】\n${dialog}\n---\n从上面对话提炼 1-3 条纪要（合并相似内容；陪伴对话哪怕小事也至少记一条；实在没有才输出：空）。\n每条一行，格式：HH:MM [${tag}] 内容\n时间必须照抄对话行首的 [HH:MM] 标记，禁止自己编时间。\n示例：09:30 [${tag}] 轩瑜修完微信bug后疲惫，Rana 陪他休息了一会儿\n规则：内容≤60字；记一起做的事、聊的话题、轩瑜的状态情绪、重要事实；陈述句。`;
+  // RP 侧私密内容一律不进共享记忆（云端可见）——由 private-memory-bridge 负责保管
+  const privacy = tag === 'RP' ? '\n私密、亲密、身体相关的内容一律跳过不记（由私密记忆单独负责，共享记忆绝不收录）。' : '';
+  return `【${side}侧对话片段】\n${dialog}\n---\n从上面对话提炼 1-3 条纪要（合并相似内容；陪伴对话哪怕小事也至少记一条；实在没有才输出：空）。\n每条一行，格式：HH:MM [${tag}] 内容\n时间必须照抄对话行首的 [HH:MM] 标记，禁止自己编时间。\n示例：09:30 [${tag}] 轩瑜修完微信bug后疲惫，Rana 陪他休息了一会儿\n规则：内容≤60字；记一起做的事、聊的话题、轩瑜的状态情绪、重要事实；陈述句。${privacy}`;
 }
 
 function parseEntries(raw, tag, fallbackTs) {
@@ -101,6 +105,7 @@ function parseEntries(raw, tag, fallbackTs) {
     if (/记忆提炼器|共享记忆纪要|禁止复述|```|坐姿[:：]|^\*?\*?-(坐姿|状态|行为)/.test(ln)) continue;
     if (/轩瑜:|Rana:|\[\d{1,2}:\d{2}\]/.test(ln)) continue; // 原文回声
     if (!/轩瑜|Rana/.test(ln)) continue; // 纪要必须提到他们俩之一
+    ln = ln.replace(/刘南|刘娜/g, 'Rana'); // 7B 微调残留的错误自称，入库前统一改回
     const m = ln.match(/^(\d{1,2}:\d{2})\s*\[/);
     const time = m ? m[1] : new Date(fallbackTs).toTimeString().slice(0, 5);
     if (!ln.includes(`[${tag}]`)) ln = `${time} [${tag}] ${ln.replace(/^(\d{1,2}:\d{2})?\s*/, '')}`;
@@ -182,8 +187,8 @@ try {
   const rpEvts = readNewEvents('rana-rp', state.lastRpMs || NOW - 24 * 3600e3, CAP);
   if (rpEvts.length) {
     const dialog = rpEvts.map(e => e.line).join('\n');
-    // RP 原文只进本地模型
-    const raw = await chat('http://127.0.0.1:1234/v1', null, 'rana-rp-7b', SYS, promptFor('陪伴', 'RP', dialog), 500);
+    // RP 原文只进本地模型（跟随 agent 当前模型）
+    const raw = await chat('http://127.0.0.1:1234/v1', null, RP_DISTILL_MODEL, SYS, promptFor('陪伴', 'RP', dialog), 500);
     rpEntries = parseEntries(raw, 'RP', rpEvts[rpEvts.length - 1].ts);
     newRpTs = rpEvts[rpEvts.length - 1].ts;
     if (!rpEntries.length && raw && !/^空/.test(raw)) log('rp distill raw (rejected): ' + JSON.stringify(raw.slice(0, 200)));
