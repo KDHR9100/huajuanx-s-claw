@@ -22,6 +22,8 @@ interface AppState {
   pinned: string[];
 
   messages: Record<string, ChatMessage[]>;
+  /** 有新消息但未查看的会话（key → 最近一次时间），切到该会话即清除 */
+  unread: Record<string, number>;
 
   models: ModelInfo[];
   /** 每个会话正在进行的 run（v1：每会话同时最多一个） */
@@ -50,6 +52,7 @@ interface AppState {
   appendMessage: (key: string, message: ChatMessage) => void;
   patchMessage: (key: string, msgId: string, patch: Partial<ChatMessage>) => void;
   setRun: (key: string, run: StreamingRun | undefined) => void;
+  markUnread: (key: string) => void;
   togglePanel: () => void;
   setShowReasoning: (v: boolean) => void;
   updateSettings: (patch: Partial<ThemeSettings>) => void;
@@ -81,6 +84,7 @@ export const useAppStore = create<AppState>((set) => ({
   sessions: [],
   pinned: loadPinned(),
   messages: {},
+  unread: {},
   models: [],
   runs: {},
   panelOpen: true,
@@ -101,7 +105,13 @@ export const useAppStore = create<AppState>((set) => ({
       next[idx] = { ...next[idx], ...row };
       return { sessions: next };
     }),
-  setCurrentKey: (currentKey) => set({ currentKey }),
+  setCurrentKey: (currentKey) =>
+    set((s) => {
+      if (s.unread[currentKey] === undefined) return { currentKey };
+      const unread = { ...s.unread };
+      delete unread[currentKey];
+      return { currentKey, unread };
+    }),
   setMainSessionKey: (mainSessionKey) => set({ mainSessionKey }),
   setModels: (models) => set({ models }),
   setMessages: (key, messages) => set((s) => ({ messages: { ...s.messages, [key]: messages } })),
@@ -118,6 +128,7 @@ export const useAppStore = create<AppState>((set) => ({
       return { messages: { ...s.messages, [key]: next } };
     }),
   setRun: (key, run) => set((s) => ({ runs: { ...s.runs, [key]: run } })),
+  markUnread: (key) => set((s) => ({ unread: { ...s.unread, [key]: Date.now() } })),
   togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
   setShowReasoning: (showReasoning) => {
     localStorage.setItem(REASONING_KEY, showReasoning ? "1" : "0");
@@ -130,6 +141,8 @@ export const useAppStore = create<AppState>((set) => ({
       delete messages[key];
       const runs = { ...s.runs };
       delete runs[key];
+      const unread = { ...s.unread };
+      delete unread[key];
       const pinned = s.pinned.filter((k) => k !== key);
       if (pinned.length !== s.pinned.length) localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify(pinned));
       // 删除的是当前会话时：优先回到主会话，否则回列表第一个
@@ -137,7 +150,7 @@ export const useAppStore = create<AppState>((set) => ({
         s.mainSessionKey && s.mainSessionKey !== key && sessions.some((x) => x.key === s.mainSessionKey)
           ? s.mainSessionKey
           : sessions[0]?.key;
-      return { sessions, messages, runs, pinned, currentKey: s.currentKey === key ? fallback : s.currentKey };
+      return { sessions, messages, runs, unread, pinned, currentKey: s.currentKey === key ? fallback : s.currentKey };
     }),
   togglePin: (key) =>
     set((s) => {

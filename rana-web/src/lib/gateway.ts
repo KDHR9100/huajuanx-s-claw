@@ -44,6 +44,16 @@ interface PendingReq {
   timer: ReturnType<typeof setTimeout>;
 }
 
+/** session.message 事件载荷：单条落库消息（含微信等外部渠道写入的） */
+interface SessionMessagePayload {
+  sessionKey: string;
+  agentId?: string;
+  message?: Record<string, unknown>;
+  messageId?: string;
+  messageSeq?: number;
+  runId?: string;
+}
+
 function extractText(m: unknown): string {
   if (!m || typeof m !== "object") return "";
   const row = m as Record<string, unknown>;
@@ -76,6 +86,12 @@ class GatewayConnection {
   private deletingKeys = new Set<string>();
   /** 删除操作串行队列：服务端逐个处理，客户端排队避免超时堆积 */
   private deleteChain: Promise<void> = Promise.resolve();
+  /** 已订阅消息流的会话 key（微信等外部渠道的 chat/session.message 事件只投给订阅连接） */
+  private msgSubKey: string | null = null;
+  /** 刚终态的 runId 缓存：chat final 已渲染的回复，忽略随后重复的落库事件 */
+  private finalRunIds = new Set<string>();
+  /** sessions.changed 触发的列表刷新防抖 */
+  private sessionRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
   get helloOk(): HelloOk | null {
     return this.hello;
@@ -131,6 +147,7 @@ class GatewayConnection {
         });
         this.pending.clear();
         this.ws = null;
+        this.msgSubKey = null; // 重连后会随 hello-ok 重新订阅
         if (this.manualClose) {
           store().setConn("closed");
           resolve();
@@ -220,6 +237,10 @@ class GatewayConnection {
         if (!s.currentKey) s.setCurrentKey(mainKey ?? s.sessions[0]?.key ?? "global");
         const cur = useAppStore.getState().currentKey;
         if (cur) void this.loadHistory(cur);
+        // 全量订阅会话事件（sessions.changed / session.message，其他会话只用于标未读），
+        // 当前会话再单独订阅消息流以收到微信等外部渠道的流式 chat 事件
+        void this.request("sessions.subscribe", {}).catch(() => {});
+        void this.syncMessageSubscription(cur);
       })
       .catch((e: Error) => {
         store().setConn("error", e.message);
@@ -285,8 +306,17 @@ class GatewayConnection {
       this.onChatEvent(payload as ChatEventPayload);
       return;
     }
+    if (event === "session.message") {
+      this.onSessionMessage(payload as SessionMessagePayload);
+      return;
+    }
     if (event === "sessions.changed") {
-      void this.refreshSessions();
+      const p = (payload ?? {}) as { sessionKey?: string; phase?: string };
+      // 非当前会话有新落库消息 → 标未读（当前会话的消息由订阅流实时渲染）
+      if (p.sessionKey && p.sessionKey !== store().currentKey && p.phase === "message") {
+        store().markUnread(p.sessionKey);
+      }
+      this.scheduleRefreshSessions();
       return;
     }
     if (event === "shutdown") {
@@ -319,6 +349,7 @@ class GatewayConnection {
       return;
     }
     if (p.state === "final") {
+      this.rememberFinalRun(p.runId);
       const msgId = ensureAssistant();
       const finalText = extractText(p.message) || useAppStore.getState().runs[key]?.text || "";
       useAppStore.getState().patchMessage(key, msgId, { text: finalText, streaming: false, status: undefined });
@@ -327,6 +358,7 @@ class GatewayConnection {
       return;
     }
     if (p.state === "error") {
+      this.rememberFinalRun(p.runId);
       const msgId = ensureAssistant();
       useAppStore.getState().patchMessage(key, msgId, { streaming: false, status: undefined, error: p.errorMessage ?? p.errorKind ?? "运行出错" });
       useAppStore.getState().setRun(key, undefined);
@@ -334,6 +366,7 @@ class GatewayConnection {
       return;
     }
     if (p.state === "aborted") {
+      this.rememberFinalRun(p.runId);
       const cur = useAppStore.getState();
       const r = cur.runs[key];
       if (r) {
@@ -352,6 +385,67 @@ class GatewayConnection {
       cur.patchMessage(key, msgId, { status: phase });
       return;
     }
+  }
+
+  /** 落库消息推送（sessions.subscribe / sessions.messages.subscribe）：外部渠道对话的实时入库 */
+  private onSessionMessage(p: SessionMessagePayload) {
+    if (!p?.sessionKey) return;
+    const key = p.sessionKey;
+    const s = store();
+    if (key !== s.currentKey) {
+      s.markUnread(key);
+      return;
+    }
+    const msg = p.message ?? {};
+    const role = String(msg.role ?? "");
+    if (role !== "user" && role !== "assistant") return;
+    // 该回复已由 chat 流式事件渲染（run 进行中，或 final 已落）→ 跳过
+    if (role === "assistant" && (s.runs[key] || (p.runId !== undefined && this.finalRunIds.has(p.runId)))) return;
+    const text = extractText(msg);
+    if (!text) return;
+    const list = s.messages[key] ?? [];
+    const last = list[list.length - 1];
+    // 本地乐观追加/流式渲染过的消息会再收到一份落库事件，按内容去重
+    if (last && last.role === role && last.text === text) return;
+    s.appendMessage(key, {
+      id: String(p.messageId ?? `sm-${p.messageSeq ?? Date.now()}`),
+      role: role as "user" | "assistant",
+      text,
+      ts: (msg.timestamp as number) ?? (msg.ts as number) ?? Date.now(),
+      model: msg.model ? String(msg.model) : undefined,
+    });
+  }
+
+  /** 换绑当前会话的消息订阅：微信等外部渠道的事件只投给订阅连接 */
+  async syncMessageSubscription(key?: string) {
+    if (!key || key === this.msgSubKey || key.startsWith("pending-create:")) return;
+    const prev = this.msgSubKey;
+    this.msgSubKey = key;
+    if (prev) void this.request("sessions.messages.unsubscribe", { key: prev }).catch(() => {});
+    try {
+      await this.request("sessions.messages.subscribe", { key });
+    } catch (e) {
+      console.warn("[gateway] sessions.messages.subscribe 失败:", e);
+      this.msgSubKey = null;
+    }
+  }
+
+  private rememberFinalRun(runId: string) {
+    if (!runId) return;
+    this.finalRunIds.add(runId);
+    if (this.finalRunIds.size > 50) {
+      const oldest = this.finalRunIds.values().next().value;
+      if (oldest !== undefined) this.finalRunIds.delete(oldest);
+    }
+  }
+
+  /** sessions.changed 每次落库都发，列表刷新做尾部防抖 */
+  private scheduleRefreshSessions() {
+    if (this.sessionRefreshTimer) return;
+    this.sessionRefreshTimer = setTimeout(() => {
+      this.sessionRefreshTimer = null;
+      void this.refreshSessions();
+    }, 1500);
   }
 
   // ---------- 高层 API ----------
@@ -628,6 +722,11 @@ class GatewayConnection {
 }
 
 export const gateway = new GatewayConnection();
+
+// 会话切换时跟随换绑消息订阅（无论从侧边栏点击还是删除回退等路径触发）
+useAppStore.subscribe((s, prev) => {
+  if (s.currentKey && s.currentKey !== prev.currentKey) void gateway.syncMessageSubscription(s.currentKey);
+});
 
 // E2E 调试钩子：无头验证脚本可经 window.gw 直接调用 gateway
 if (typeof window !== "undefined") (window as unknown as Record<string, unknown>).gw = gateway;

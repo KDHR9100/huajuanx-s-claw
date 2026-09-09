@@ -35,6 +35,7 @@ export default function Sidebar() {
   const currentKey = useAppStore((s) => s.currentKey);
   const setCurrentKey = useAppStore((s) => s.setCurrentKey);
   const runs = useAppStore((s) => s.runs);
+  const unread = useAppStore((s) => s.unread);
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
   const setLmOpen = useAppStore((s) => s.setLmOpen);
   const setCloudOpen = useAppStore((s) => s.setCloudOpen);
@@ -147,7 +148,7 @@ export default function Sidebar() {
         {ordered.map((s) => (
           <div
             key={s.key}
-            className={`session-item${s.key === currentKey ? " active" : ""}`}
+            className={`session-item${s.key === currentKey ? " active" : ""}${unread[s.key] && s.key !== currentKey ? " unread" : ""}`}
             role="button"
             tabIndex={0}
             onClick={() => pick(s.key)}
@@ -160,6 +161,7 @@ export default function Sidebar() {
                   📌
                 </span>
               )}
+              {unread[s.key] && s.key !== currentKey && <span className="s-unread" title="有新消息" />}
               {renamingKey === s.key ? (
                 <input
                   ref={renameRef}
