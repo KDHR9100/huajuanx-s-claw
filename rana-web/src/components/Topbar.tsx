@@ -72,14 +72,28 @@ export default function Topbar() {
   const currentKey = useAppStore((s) => s.currentKey);
   const togglePanel = useAppStore((s) => s.togglePanel);
   const panelOpen = useAppStore((s) => s.panelOpen);
+  const showReasoning = useAppStore((s) => s.showReasoning);
+  const setShowReasoning = useAppStore((s) => s.setShowReasoning);
 
   const title = sessions.find((s) => s.key === currentKey)?.title ?? "Rana";
   const dot = conn === "connected" ? "ok" : conn === "connecting" ? "wait" : "err";
+  // 本地模型（lmstudio provider / tifa agent）才显示思考开关：云端模型不输出 <think>
+  const cur = sessions.find((s) => s.key === currentKey);
+  const isLocalModel = (cur?.model ?? "").includes("lmstudio") || (currentKey ?? "").startsWith("agent:rana-rp");
 
   return (
     <header className="topbar">
       <span className={`conn-dot ${dot}`} title={conn} />
       <span className="title">{title}</span>
+      {isLocalModel && (
+        <button
+          className={`btn ghost reason-toggle${showReasoning ? "" : " off"}`}
+          onClick={() => setShowReasoning(!showReasoning)}
+          title={showReasoning ? "显示思考过程中：点击关闭" : "思考过程已隐藏：点击开启"}
+        >
+          💭 思考{showReasoning ? "" : "（关）"}
+        </button>
+      )}
       <ModelPicker />
       {!panelOpen && (
         <button className="btn ghost" onClick={togglePanel}>

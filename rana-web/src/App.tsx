@@ -9,6 +9,7 @@ import Composer from "./components/Composer";
 import UsagePanel from "./components/UsagePanel";
 import SettingsModal from "./components/SettingsModal";
 import LmStudioModal from "./components/LmStudioModal";
+import CloudConfigModal from "./components/CloudConfigModal";
 
 export default function App() {
   const connError = useAppStore((s) => s.connError);
@@ -34,6 +35,7 @@ export default function App() {
       </div>
       <SettingsModal />
       <LmStudioModal />
+      <CloudConfigModal />
     </>
   );
 }

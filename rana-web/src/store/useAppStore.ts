@@ -26,11 +26,15 @@ interface AppState {
   runs: Record<string, StreamingRun | undefined>;
 
   panelOpen: boolean;
+  /** 显示模型思考过程（<think> 折叠块）；关闭时完全不渲染 */
+  showReasoning: boolean;
 
   settings: ThemeSettings;
   settingsOpen: boolean;
   /** LM Studio 本地模型管理面板 */
   lmOpen: boolean;
+  /** 云端模型配置面板 */
+  cloudOpen: boolean;
 
   setConn: (conn: ConnState, connError?: string) => void;
   setSessions: (sessions: SessionRow[]) => void;
@@ -45,13 +49,20 @@ interface AppState {
   patchMessage: (key: string, msgId: string, patch: Partial<ChatMessage>) => void;
   setRun: (key: string, run: StreamingRun | undefined) => void;
   togglePanel: () => void;
+  setShowReasoning: (v: boolean) => void;
   updateSettings: (patch: Partial<ThemeSettings>) => void;
   resetSettings: () => void;
   setSettingsOpen: (open: boolean) => void;
   setLmOpen: (open: boolean) => void;
+  setCloudOpen: (open: boolean) => void;
 }
 
 export const PINNED_STORAGE_KEY = "rana-web.pinned";
+const REASONING_KEY = "rana-web.show-reasoning";
+
+function loadShowReasoning(): boolean {
+  return localStorage.getItem(REASONING_KEY) !== "0";
+}
 
 function loadPinned(): string[] {
   try {
@@ -71,10 +82,12 @@ export const useAppStore = create<AppState>((set) => ({
   models: [],
   runs: {},
   panelOpen: true,
+  showReasoning: loadShowReasoning(),
 
   settings: loadSettings(),
   settingsOpen: false,
   lmOpen: false,
+  cloudOpen: false,
 
   setConn: (conn, connError) => set((s) => ({ conn, connError: connError ?? (conn === "connected" ? undefined : s.connError) })),
   setSessions: (sessions) => set({ sessions }),
@@ -104,6 +117,10 @@ export const useAppStore = create<AppState>((set) => ({
     }),
   setRun: (key, run) => set((s) => ({ runs: { ...s.runs, [key]: run } })),
   togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
+  setShowReasoning: (showReasoning) => {
+    localStorage.setItem(REASONING_KEY, showReasoning ? "1" : "0");
+    set({ showReasoning });
+  },
   removeSession: (key) =>
     set((s) => {
       const sessions = s.sessions.filter((x) => x.key !== key);
@@ -142,4 +159,5 @@ export const useAppStore = create<AppState>((set) => ({
     }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setLmOpen: (lmOpen) => set({ lmOpen }),
+  setCloudOpen: (cloudOpen) => set({ cloudOpen }),
 }));

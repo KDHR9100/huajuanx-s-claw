@@ -140,6 +140,18 @@ body.has-bg .session-item:hover { background: color-mix(in srgb, var(--bg-hover)
 
 .session-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
 
+/* 新会话 + 蒂法并排 */
+.new-session-row { display: flex; gap: 8px; }
+.new-session-row .btn { flex: 1; }
+.btn.tifa {
+  background: var(--accent-soft);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  flex: none;
+  padding: 9px 12px;
+}
+.btn.tifa:hover { filter: none; background: color-mix(in srgb, var(--accent) 26%, var(--soft-base)); }
+
 .session-item {
   text-align: left;
   border: none;
@@ -375,6 +387,49 @@ body.has-bg .session-item:hover { background: color-mix(in srgb, var(--bg-hover)
 
 .msg-meta { font-size: 11px; color: var(--text-dim); margin-top: 4px; padding: 0 4px; display: flex; gap: 10px; }
 
+/* 思考过程折叠块（<think> 解析） */
+.think-block { margin: 0 0 8px; }
+.think-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-dim);
+  border-radius: 999px;
+  font-size: 12px;
+  padding: 4px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.think-toggle:hover { border-color: var(--accent); color: var(--text); }
+.think-block.thinking .think-toggle {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  color: var(--accent);
+}
+.think-block.thinking .think-icon { animation: think-pulse 1.2s ease-in-out infinite; }
+.think-len { font-size: 11px; opacity: 0.7; }
+.think-body {
+  margin-top: 6px;
+  padding: 8px 12px;
+  border-left: 3px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: var(--bg);
+  border-radius: 0 8px 8px 0;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  max-height: 240px;
+  overflow-y: auto;
+}
+@keyframes think-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+/* 顶栏思考显示开关 */
+.reason-toggle.off { opacity: 0.6; }
+
 .typing-dots { display: inline-flex; gap: 4px; padding: 4px 2px; }
 .typing-dots span {
   width: 6px; height: 6px; border-radius: 50%;
@@ -585,6 +640,15 @@ body.dragging iframe, body.dragging .chat-scroll { pointer-events: none; }
   background: var(--err-bg);
   color: var(--danger);
   border: 1px solid var(--err-border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+}
+
+.set-ok {
+  background: color-mix(in srgb, var(--ok) 14%, var(--bg-panel));
+  color: var(--ok);
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
   border-radius: 10px;
   padding: 8px 12px;
   font-size: 12.5px;

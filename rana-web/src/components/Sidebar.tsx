@@ -37,6 +37,7 @@ export default function Sidebar() {
   const runs = useAppStore((s) => s.runs);
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
   const setLmOpen = useAppStore((s) => s.setLmOpen);
+  const setCloudOpen = useAppStore((s) => s.setCloudOpen);
   const [creating, setCreating] = useState(false);
   const [menu, setMenu] = useState<CtxMenuState | null>(null);
   const [renamingKey, setRenamingKey] = useState<string | null>(null);
@@ -79,11 +80,11 @@ export default function Sidebar() {
     void gateway.loadHistory(key);
   };
 
-  const newSession = () => {
+  const newSession = (agentId?: string) => {
     if (creating) return;
     setCreating(true);
     void gateway
-      .createSession()
+      .createSession(agentId === "rana-rp" ? "rana-rp" : agentId)
       .catch((e) => console.warn("新建会话失败:", e))
       .finally(() => setCreating(false));
   };
@@ -129,9 +130,19 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="brand">Rana ✿</div>
-      <button className="btn" onClick={newSession} disabled={creating || sessions.some((s) => s.key === currentKey && s.hasActiveRun)}>
-        {creating ? "创建中…" : "＋ 新会话"}
-      </button>
+      <div className="new-session-row">
+        <button className="btn" onClick={() => newSession()} disabled={creating || sessions.some((s) => s.key === currentKey && s.hasActiveRun)}>
+          {creating ? "创建中…" : "＋ 新会话"}
+        </button>
+        <button
+          className="btn tifa"
+          onClick={() => newSession("rana-rp")}
+          disabled={creating || sessions.some((s) => s.key === currentKey && s.hasActiveRun)}
+          title="和 Rana（本地 RP 模型）开始私下聊天"
+        >
+          🌸 Rana·RP
+        </button>
+      </div>
       <div className="session-list">
         {ordered.map((s) => (
           <div
@@ -193,6 +204,9 @@ export default function Sidebar() {
         ))}
         {sessions.length === 0 && <div className="s-meta" style={{ padding: "8px 10px" }}>暂无会话</div>}
       </div>
+      <button className="btn ghost" onClick={() => setCloudOpen(true)}>
+        ☁ 云端模型
+      </button>
       <button className="btn ghost" onClick={() => setLmOpen(true)}>
         🖥 本地模型
       </button>
