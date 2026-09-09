@@ -36,6 +36,7 @@ export default function Sidebar() {
   const setCurrentKey = useAppStore((s) => s.setCurrentKey);
   const runs = useAppStore((s) => s.runs);
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
+  const setLmOpen = useAppStore((s) => s.setLmOpen);
   const [creating, setCreating] = useState(false);
   const [menu, setMenu] = useState<CtxMenuState | null>(null);
   const [renamingKey, setRenamingKey] = useState<string | null>(null);
@@ -192,6 +193,9 @@ export default function Sidebar() {
         ))}
         {sessions.length === 0 && <div className="s-meta" style={{ padding: "8px 10px" }}>暂无会话</div>}
       </div>
+      <button className="btn ghost" onClick={() => setLmOpen(true)}>
+        🖥 本地模型
+      </button>
       <button className="btn ghost" onClick={() => setSettingsOpen(true)}>
         ⚙ 外观设置
       </button>

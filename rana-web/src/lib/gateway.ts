@@ -10,6 +10,8 @@ import type { ChatMessage, ModelInfo, SessionRow } from "./types";
 const TOKEN_KEY = "rana-web.gateway-token";
 const HELLO_TIMEOUT_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 30_000;
+/** 删除链路专用超时：服务端串行删除单个 ~7s，排队时更要留足余量 */
+const DELETE_TIMEOUT_MS = 120_000;
 const MAX_RECONNECT = 6;
 
 const store = () => useAppStore.getState();
@@ -70,6 +72,8 @@ class GatewayConnection {
   private pendingCreates = new Map<string, Promise<string>>();
   /** 正在后台删除的会话 key：防止列表刷新把会话短暂“复活” */
   private deletingKeys = new Set<string>();
+  /** 删除操作串行队列：服务端逐个处理，客户端排队避免超时堆积 */
+  private deleteChain: Promise<void> = Promise.resolve();
 
   get helloOk(): HelloOk | null {
     return this.hello;
@@ -505,16 +509,20 @@ class GatewayConnection {
     const s = store();
     const msgs = s.messages[tempKey];
     const run = s.runs[tempKey];
+    // removeSession 对"当前会话"会切到回退会话，先记住是否占位会话正处于活跃态
+    const wasCurrent = s.currentKey === tempKey;
     store().removeSession(tempKey);
     store().mergeSession({
       key,
       title: (row.displayName as string) ?? (row.derivedTitle as string) ?? "新会话",
       model: row.model as string | undefined,
       updatedAt: Date.now(),
+      // create 响应自带 sessionId：立即可删，不必等下一次列表刷新
+      sessionId: row.sessionId ? String(row.sessionId) : undefined,
     });
     if (msgs?.length) store().setMessages(key, msgs);
     if (run) store().setRun(key, run);
-    if (store().currentKey === tempKey) store().setCurrentKey(key);
+    if (wasCurrent) store().setCurrentKey(key);
     void this.refreshSessions();
   }
 
@@ -551,6 +559,8 @@ class GatewayConnection {
     }
     if (!row?.sessionId) throw new Error("缺少会话标识（sessionId），无法删除");
     const wasCurrent = store().currentKey === key;
+    // removeSession 会清掉 runs[key]，先记住是否有活动 run（删除前需中止）
+    const hadRun = Boolean(store().runs[key]);
     // 乐观移除：服务端 SQLite 删除可达 8s+，先让界面即时响应，慢操作转后台
     this.deletingKeys.add(key);
     store().removeSession(key);
@@ -559,19 +569,48 @@ class GatewayConnection {
       const next = store().currentKey;
       if (next) void this.loadHistory(next);
     }
-    try {
-      // 有活动 run 时先中止，避免删除被服务端拒绝
-      if (store().runs[key]) await this.abort(key).catch(() => {});
-      await this.request("sessions.patch", { key, archived: true, expectedSessionId: row.sessionId });
-      await this.request("sessions.delete", { key, archivedOnly: true, deleteTranscript: true });
+    // 服务端逐个处理删除（实测单个 ~7s）：并发触发会在 30s 默认超时处堆积误报，
+    // 因此客户端串行排队，且超时后先核对服务端状态再定成败
+    const attempt = async () => {
+      if (hadRun) await this.abort(key).catch(() => {});
+      await this.request("sessions.patch", { key, archived: true, expectedSessionId: row.sessionId }, DELETE_TIMEOUT_MS);
+      await this.request("sessions.delete", { key, archivedOnly: true, deleteTranscript: true }, DELETE_TIMEOUT_MS);
+    };
+    const task = this.deleteChain.then(async () => {
+      try {
+        await attempt();
+      } catch (e) {
+        // 超时/报错不代表真失败：请求可能在客户端放弃后才完成，先查列表核实
+        if (await this.sessionStillActive(key)) {
+          try {
+            await attempt(); // 确认还在才重试一次
+          } catch (e2) {
+            // 真失败：把会话放回列表，由调用方提示错误
+            this.deletingKeys.delete(key);
+            store().mergeSession(row);
+            void this.refreshSessions();
+            throw e2;
+          }
+        }
+      }
       // 删除完成后仍短暂过滤，防止陈旧列表把会话闪回
       setTimeout(() => this.deletingKeys.delete(key), 15_000);
-    } catch (e) {
-      // 失败回滚：把会话放回列表，由调用方提示错误
-      this.deletingKeys.delete(key);
-      store().mergeSession(row);
-      void this.refreshSessions();
-      throw e;
+    });
+    this.deleteChain = task.then(
+      () => undefined,
+      () => undefined,
+    );
+    return task;
+  }
+
+  /** 会话是否仍活跃于服务端列表（归档/删除后不再出现；查询失败按"仍在"保守处理） */
+  private async sessionStillActive(key: string): Promise<boolean> {
+    try {
+      const res = (await this.request("sessions.list", {}, 15_000)) as { sessions?: unknown[]; list?: unknown[] };
+      const rows = (res.sessions ?? res.list ?? []) as Array<Record<string, unknown>>;
+      return rows.some((r) => String(r.key) === key);
+    } catch {
+      return true;
     }
   }
 }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "../store/useAppStore";
 import { gateway } from "../lib/gateway";
-import { ALIAS_FALLBACK, modelSuffix } from "../lib/types";
+import { modelSuffix } from "../lib/types";
 
 function shortName(id?: string) {
   if (!id) return "默认模型";
@@ -40,11 +40,6 @@ function ModelPicker() {
     }
   };
 
-  // 别名 chips：仅显示当前 models 列表里能对上的（按后缀匹配）
-  const aliasChips = Object.entries(ALIAS_FALLBACK)
-    .filter(([, id]) => models.some((m) => modelSuffix(m.id) === modelSuffix(id)))
-    .map(([alias, id]) => ({ alias, id }));
-
   const isActive = (modelId: string) => !!current && modelSuffix(current) === modelSuffix(modelId);
 
   return (
@@ -55,22 +50,10 @@ function ModelPicker() {
       </button>
       {open && (
         <div className="mp-menu">
-          <div className="mp-label">快捷别名</div>
-          <div className="alias-chips">
-            {aliasChips.map(({ alias, id }) => (
-              <button key={alias} className={`chip${current === id ? " active" : ""}`} disabled={busy} onClick={() => void apply(id)}>
-                {alias}
-              </button>
-            ))}
-            {aliasChips.length === 0 && <span className="mp-label">（无可用别名）</span>}
-          </div>
           <div className="mp-label">全部模型（{models.length}）</div>
           {models.map((m) => (
             <button key={m.id} className={`mp-item${isActive(m.id) ? " active" : ""}`} disabled={busy} onClick={() => void apply(m.id)}>
-              <span className="m-name">
-                {aliasChips.find((c) => c.id === m.id)?.alias ? `${aliasChips.find((c) => c.id === m.id)!.alias} · ` : ""}
-                {m.name}
-              </span>
+              <span className="m-name">{m.name}</span>
               <span className="m-sub">
                 {m.id}
                 {m.contextWindow ? ` · ${(m.contextWindow / 1000).toFixed(0)}k ctx` : ""}

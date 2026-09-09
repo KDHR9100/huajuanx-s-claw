@@ -1,7 +1,7 @@
-// 外观设置弹窗：主题色自定义 + 背景图（上传/URL）+ 不透明度。
+// 外观设置弹窗：主题色自定义（含历史）+ 夜间模式 + 背景图（上传/URL）+ 不透明度。
 import { useRef, useState } from "react";
 import { useAppStore } from "../store/useAppStore";
-import { PRESET_ACCENTS } from "../lib/theme";
+import { PRESET_ACCENTS, pushAccentHistory } from "../lib/theme";
 
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // dataURL 存 localStorage，控制在 4MB 内
 
@@ -52,6 +52,11 @@ export default function SettingsModal() {
     setUrlValue("");
   };
 
+  /** 应用主题色：自定义色（非预设）自动记入历史 */
+  const applyAccent = (color: string) => {
+    update({ accent: color, accentHistory: pushAccentHistory(settings.accentHistory, color) });
+  };
+
   return (
     <div className="modal-overlay" onClick={close}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -75,10 +80,45 @@ export default function SettingsModal() {
               />
             ))}
             <label className={`swatch custom${PRESET_ACCENTS.includes(settings.accent.toLowerCase()) ? "" : " active"}`} title="自定义颜色">
-              <input type="color" value={settings.accent} onChange={(e) => update({ accent: e.target.value })} />
+              <input type="color" value={settings.accent} onChange={(e) => applyAccent(e.target.value)} />
               <span>＋</span>
             </label>
           </div>
+          {settings.accentHistory.length > 0 && (
+            <div className="set-subsection">
+              <div className="set-hint">最近使用的自定义颜色</div>
+              <div className="swatches history">
+                {settings.accentHistory.map((c) => (
+                  <button
+                    key={c}
+                    className={`swatch${settings.accent.toLowerCase() === c.toLowerCase() ? " active" : ""}`}
+                    style={{ background: c }}
+                    title={c}
+                    onClick={() => update({ accent: c })}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="set-section">
+          <h4>界面模式</h4>
+          <div className="mode-toggle">
+            <button
+              className={`mode-btn${settings.mode !== "dark" ? " active" : ""}`}
+              onClick={() => update({ mode: "light" })}
+            >
+              ☀️ 浅色
+            </button>
+            <button
+              className={`mode-btn${settings.mode === "dark" ? " active" : ""}`}
+              onClick={() => update({ mode: "dark" })}
+            >
+              🌙 夜间
+            </button>
+          </div>
+          <div className="set-hint">夜间模式下面板转为黑色与黑色半透明，可与背景图叠加</div>
         </section>
 
         <section className="set-section">

@@ -53,6 +53,26 @@ export default defineConfig({
         ws: true,
         rewriteWsOrigin: true,
       },
+      // LM Studio 本地 REST（127.0.0.1:1234）未开 CORS，
+      // 走同源代理供前端面板调用（加载/卸载本地模型）
+      "/lmstudio": {
+        target: "http://127.0.0.1:1234",
+        rewrite: (p) => p.replace(/^\/lmstudio/, ""),
+      },
+    },
+  },
+  preview: {
+    port: 5173,
+    proxy: {
+      "/gateway": {
+        target: "http://127.0.0.1:18789",
+        ws: true,
+        rewriteWsOrigin: true,
+      },
+      "/lmstudio": {
+        target: "http://127.0.0.1:1234",
+        rewrite: (p) => p.replace(/^\/lmstudio/, ""),
+      },
     },
   },
 });

@@ -52,14 +52,11 @@ export interface ThemeSettings {
   bgImage: string;
   /** 背景图不透明度 0-1 */
   bgOpacity: number;
+  /** 浅色 / 夜间模式 */
+  mode: "light" | "dark";
+  /** 最近使用的自定义颜色（非预设），最新在前，最多 8 个 */
+  accentHistory: string[];
 }
-
-export const ALIAS_FALLBACK: Record<string, string> = {
-  flash: "qwen3.8-flash",
-  max: "qwen3.8-max",
-  glm: "glm-5.2",
-  pro: "deepseek-v4-pro",
-};
 
 /** 模型 id 归一化：去掉 provider 前缀（aliyun-maas/qwen3.8-flash → qwen3.8-flash） */
 export function modelSuffix(id?: string): string {

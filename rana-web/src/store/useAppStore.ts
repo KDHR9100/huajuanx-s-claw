@@ -29,6 +29,8 @@ interface AppState {
 
   settings: ThemeSettings;
   settingsOpen: boolean;
+  /** LM Studio 本地模型管理面板 */
+  lmOpen: boolean;
 
   setConn: (conn: ConnState, connError?: string) => void;
   setSessions: (sessions: SessionRow[]) => void;
@@ -46,6 +48,7 @@ interface AppState {
   updateSettings: (patch: Partial<ThemeSettings>) => void;
   resetSettings: () => void;
   setSettingsOpen: (open: boolean) => void;
+  setLmOpen: (open: boolean) => void;
 }
 
 export const PINNED_STORAGE_KEY = "rana-web.pinned";
@@ -71,6 +74,7 @@ export const useAppStore = create<AppState>((set) => ({
 
   settings: loadSettings(),
   settingsOpen: false,
+  lmOpen: false,
 
   setConn: (conn, connError) => set((s) => ({ conn, connError: connError ?? (conn === "connected" ? undefined : s.connError) })),
   setSessions: (sessions) => set({ sessions }),
@@ -137,4 +141,5 @@ export const useAppStore = create<AppState>((set) => ({
       return { settings: next };
     }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  setLmOpen: (lmOpen) => set({ lmOpen }),
 }));
