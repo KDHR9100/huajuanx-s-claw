@@ -28,6 +28,87 @@ function readGatewayToken(): string {
   return "";
 }
 
+const OPENCLAW_CONFIG = "K:\\openclaw\\.openclaw\\.openclaw\\openclaw.json";
+const CLOUD_PROVIDER = "aliyun-maas";
+
+function readCloudProvider() {
+  const cfg = JSON.parse(fs.readFileSync(OPENCLAW_CONFIG, "utf8")) as {
+    models?: { providers?: Record<string, { baseUrl?: string; apiKey?: string }> };
+  };
+  const prov = cfg.models?.providers?.[CLOUD_PROVIDER] ?? {};
+  return { baseUrl: prov.baseUrl ?? "", apiKey: prov.apiKey ?? "" };
+}
+
+/** 云端模型配置端点：GET 读（key 打码），POST 写 openclaw.json 并触发 gateway 热重载 */
+function ranaProviderConfigMiddleware(): Plugin {
+  const handler = (
+    req: { method?: string; on: (ev: string, cb: (c?: string) => void) => void },
+    res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void },
+  ) => {
+    res.setHeader("content-type", "application/json");
+    try {
+      if (req.method === "GET") {
+        const cur = readCloudProvider();
+        res.end(JSON.stringify({
+          baseUrl: cur.baseUrl,
+          apiKeyMasked: cur.apiKey ? cur.apiKey.slice(0, 5) + "…" + cur.apiKey.slice(-4) : "",
+          hasKey: Boolean(cur.apiKey),
+        }));
+        return;
+      }
+      if (req.method === "POST") {
+        let body = "";
+        req.on("data", (c?: string) => { body += c ?? ""; });
+        req.on("end", () => {
+          try {
+            const { baseUrl, apiKey } = JSON.parse(body) as { baseUrl?: string; apiKey?: string };
+            if (!baseUrl || !/^https?:\/\//.test(baseUrl)) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: "baseUrl 必须以 http(s):// 开头" }));
+              return;
+            }
+            const cur = readCloudProvider();
+            if (!apiKey && !cur.apiKey) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: "当前无 key，必须填写 apiKey" }));
+              return;
+            }
+            fs.copyFileSync(OPENCLAW_CONFIG, OPENCLAW_CONFIG + ".bak-cloud");
+            const cfg = JSON.parse(fs.readFileSync(OPENCLAW_CONFIG, "utf8")) as Record<string, unknown> & {
+              models: { providers: Record<string, { baseUrl?: string; apiKey?: string }> };
+            };
+            cfg.models.providers[CLOUD_PROVIDER] = {
+              ...cfg.models.providers[CLOUD_PROVIDER],
+              baseUrl: baseUrl.replace(/\/+$/, ""),
+              apiKey: apiKey || cur.apiKey,
+            };
+            fs.writeFileSync(OPENCLAW_CONFIG, JSON.stringify(cfg, null, 2), "utf8");
+            res.end(JSON.stringify({ ok: true, saved: { baseUrl } }));
+          } catch (e) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: (e as Error).message }));
+          }
+        });
+        return;
+      }
+      res.statusCode = 405;
+      res.end(JSON.stringify({ error: "method not allowed" }));
+    } catch (e) {
+      res.statusCode = 500;
+      res.end(JSON.stringify({ error: (e as Error).message }));
+    }
+  };
+  return {
+    name: "rana-provider-config",
+    configureServer(server) {
+      server.middlewares.use("/__rana/provider-config", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use("/__rana/provider-config", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+  };
+}
+
 function ranaDevConfig(): Plugin {
   return {
     name: "rana-dev-config",
@@ -44,7 +125,7 @@ function ranaDevConfig(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), ranaDevConfig()],
+  plugins: [react(), ranaDevConfig(), ranaProviderConfigMiddleware()],
   server: {
     port: 5173,
     proxy: {

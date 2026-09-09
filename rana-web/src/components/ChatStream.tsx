@@ -1,11 +1,30 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "../store/useAppStore";
 import Markdown from "./Markdown";
+import { splitReasoning } from "../lib/reasoning";
 
 function fmtTime(ts: number) {
   if (!ts) return "";
   const d = new Date(ts);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/** 思考过程折叠块：流式思考时展开显示"思考中"，完成后收起可手动展开 */
+function ReasoningBlock({ reasoning, thinking }: { reasoning: string; thinking: boolean }) {
+  const showReasoning = useAppStore((s) => s.showReasoning);
+  const [open, setOpen] = useState(false);
+  if (!showReasoning) return null;
+  const expanded = thinking || open;
+  return (
+    <div className={`think-block${thinking ? " thinking" : ""}`}>
+      <button className="think-toggle" onClick={() => setOpen((v) => !v)}>
+        <span className="think-icon">💭</span>
+        {thinking ? "思考中…" : open ? "收起思考过程" : "已深度思考"}
+        {!thinking && <span className="think-len">{reasoning.length} 字</span>}
+      </button>
+      {expanded && <div className="think-body">{reasoning}</div>}
+    </div>
+  );
 }
 
 function Bubble({ role, text, streaming, error, model, ts }: {
@@ -16,17 +35,19 @@ function Bubble({ role, text, streaming, error, model, ts }: {
   model?: string;
   ts: number;
 }) {
+  const { reasoning, thinking, text: body } = role === "assistant" ? splitReasoning(text) : { reasoning: "", thinking: false, text };
   return (
     <div className={`msg ${role}`}>
       <div className="bubble">
-        {text ? <Markdown text={text} /> : streaming ? (
+        {(reasoning || thinking) && <ReasoningBlock reasoning={reasoning} thinking={thinking} />}
+        {body ? <Markdown text={body} /> : streaming && !thinking ? (
           <span className="typing-dots">
             <span />
             <span />
             <span />
           </span>
         ) : null}
-        {streaming && text ? <span className="typing-dots"><span /><span /><span /></span> : null}
+        {streaming && body ? <span className="typing-dots"><span /><span /><span /></span> : null}
         {error && <div style={{ color: "var(--danger)", marginTop: 6 }}>⚠ {error}</div>}
       </div>
       <div className="msg-meta">

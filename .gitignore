@@ -13,3 +13,11 @@ desktop.ini
 # 本地工具脚本（不入公开仓库）
 backup-private.cmd
 push-public.cmd
+
+# 本地临时文件与备份快照
+tmp-*
+db-safety-*/
+rana-web/tmp-*
+rana-web/openclaw.*
+rana-web/wechat-mode-*.cmd
+rana-web/fix-ws-path.mjs

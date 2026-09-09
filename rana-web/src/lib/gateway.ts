@@ -378,7 +378,8 @@ class GatewayConnection {
 
   async refreshModels() {
     try {
-      const res = (await this.request("models.list", { view: "configured" })) as { models?: unknown[]; items?: unknown[] };
+      // 多智能体模式下 gateway 要求显式 owner；模型目录对两个 agent 一致，用 main 的即可
+      const res = (await this.request("models.list", { view: "configured", agentId: "main" })) as { models?: unknown[]; items?: unknown[] };
       const rows = (res.models ?? res.items ?? []) as Array<Record<string, unknown>>;
       const mapped: ModelInfo[] = rows.map((r) => {
         const id = String(r.id ?? r.modelId ?? r.model ?? "");
@@ -478,14 +479,14 @@ class GatewayConnection {
     }
   }
 
-  async createSession(): Promise<string> {
+  async createSession(agentId?: string): Promise<string> {
     // 乐观创建：先插入本地占位会话并立即切换（服务端创建含 SQLite 写入较慢），
     // 完成后把消息/运行态迁移到真实 key；期间发消息会先等创建完成（见 sendChat）
     const tempKey = `pending-create:${crypto.randomUUID()}`;
-    store().mergeSession({ key: tempKey, title: "新会话", updatedAt: Date.now() });
+    store().mergeSession({ key: tempKey, title: agentId === "rana-rp" ? "Rana·RP" : "新会话", updatedAt: Date.now() });
     store().setCurrentKey(tempKey);
     store().setMessages(tempKey, []);
-    const pending = this.request("sessions.create", {})
+    const pending = this.request("sessions.create", { agentId: agentId ?? "main" })
       .then((raw) => {
         const res = raw as Record<string, unknown>;
         const row = (res.session ?? res) as Record<string, unknown>;
