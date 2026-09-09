@@ -7,6 +7,8 @@ interface StreamingRun {
   msgId: string;
   text: string;
   lastSeq: number;
+  /** 最近一次 status 阶段（preparing_workspace…starting_model） */
+  status?: string;
 }
 
 interface AppState {

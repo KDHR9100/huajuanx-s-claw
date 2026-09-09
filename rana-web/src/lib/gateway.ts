@@ -34,6 +34,8 @@ interface ChatEventPayload {
   errorMessage?: string;
   errorKind?: string;
   stopReason?: string;
+  /** state=status 时的生命周期阶段（preparing_workspace…starting_model） */
+  phase?: string;
 }
 
 interface PendingReq {
@@ -313,20 +315,20 @@ class GatewayConnection {
       const nextText = p.replace ? String(p.deltaText ?? "") : r.text + String(p.deltaText ?? "");
       const seq = p.seq ?? r.lastSeq + 1;
       cur.setRun(key, { ...r, text: nextText, lastSeq: seq });
-      cur.patchMessage(key, msgId, { text: nextText, streaming: true, model: cur.messages[key]?.find((m) => m.id === msgId)?.model });
+      cur.patchMessage(key, msgId, { text: nextText, streaming: true, status: undefined, model: cur.messages[key]?.find((m) => m.id === msgId)?.model });
       return;
     }
     if (p.state === "final") {
       const msgId = ensureAssistant();
       const finalText = extractText(p.message) || useAppStore.getState().runs[key]?.text || "";
-      useAppStore.getState().patchMessage(key, msgId, { text: finalText, streaming: false });
+      useAppStore.getState().patchMessage(key, msgId, { text: finalText, streaming: false, status: undefined });
       useAppStore.getState().setRun(key, undefined);
       void this.refreshSessions();
       return;
     }
     if (p.state === "error") {
       const msgId = ensureAssistant();
-      useAppStore.getState().patchMessage(key, msgId, { streaming: false, error: p.errorMessage ?? p.errorKind ?? "运行出错" });
+      useAppStore.getState().patchMessage(key, msgId, { streaming: false, status: undefined, error: p.errorMessage ?? p.errorKind ?? "运行出错" });
       useAppStore.getState().setRun(key, undefined);
       void this.refreshSessions();
       return;
@@ -335,12 +337,21 @@ class GatewayConnection {
       const cur = useAppStore.getState();
       const r = cur.runs[key];
       if (r) {
-        cur.patchMessage(key, r.msgId, { streaming: false });
+        cur.patchMessage(key, r.msgId, { streaming: false, status: undefined });
         cur.setRun(key, undefined);
       }
       return;
     }
-    // state === "status"：v1 忽略
+    // state === "status"：生命周期阶段（准备工作区/启动模型…），显示在气泡内的状态行
+    if (p.state === "status") {
+      const msgId = ensureAssistant();
+      const cur = useAppStore.getState();
+      const r = cur.runs[key];
+      const phase = typeof p.phase === "string" ? p.phase : "";
+      if (r) cur.setRun(key, { ...r, status: phase });
+      cur.patchMessage(key, msgId, { status: phase });
+      return;
+    }
   }
 
   // ---------- 高层 API ----------
