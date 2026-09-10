@@ -29,3 +29,6 @@ ui-feature-check.png
 git-activity.repos.json
 # 乐奈自定义头像（用户上传图片，不入公开仓库）
 .avatars/
+
+# 早报本地数据（新闻内容，仅本地）
+.news/

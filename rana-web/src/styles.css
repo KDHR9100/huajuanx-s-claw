@@ -1153,3 +1153,38 @@ body.has-bg .room { display: none; }
 .rana-avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
 .av .rana-avatar-img { width: 40px; height: 40px; }
 .empty-face .rana-avatar-img { width: 88px; height: 88px; }
+
+/* ========== 早报页 ========== */
+.news-group { margin-bottom: 22px; }
+.ng-title { font-size: 15px; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+.news-item {
+  display: flex; flex-direction: column; gap: 3px;
+  background: var(--panel-t); backdrop-filter: blur(8px);
+  border: 1.5px solid var(--border); border-radius: 14px;
+  padding: 11px 14px; margin-bottom: 8px;
+  text-decoration: none; color: var(--text);
+  box-shadow: var(--shadow);
+  transition: border-color 0.2s, transform 0.18s cubic-bezier(.34,1.56,.64,1);
+}
+.news-item:hover { border-color: var(--accent); transform: translateX(3px); }
+.news-item .n-title { font-size: 14px; font-weight: 600; line-height: 1.5; }
+.news-item .n-sum { font-size: 12.5px; color: var(--text-dim); line-height: 1.55; }
+.news-item .n-src { font-size: 11px; color: var(--accent-strong); opacity: 0.85; }
+.news-item.plain { flex-direction: row; align-items: baseline; gap: 10px; }
+.news-item.plain .n-idx {
+  flex: none; font-size: 11px; color: var(--accent-strong);
+  background: var(--accent-soft); border-radius: 6px; padding: 1px 7px;
+}
+
+/* ========== 定时任务分组 ========== */
+.task-group { margin-bottom: 18px; }
+.tg-label {
+  font-size: 13px; font-weight: 650; color: var(--accent-strong);
+  display: flex; align-items: center; gap: 7px;
+  padding: 2px 6px 8px;
+}
+.tg-label::after { content: "ω"; color: var(--accent); opacity: 0.7; font-size: 12px; }
+.tg-count {
+  font-size: 11px; color: var(--text-dim); background: var(--accent-soft);
+  border-radius: 999px; padding: 1px 8px;
+}

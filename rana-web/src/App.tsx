@@ -10,6 +10,7 @@ import ChatStream from "./components/ChatStream";
 import Composer from "./components/Composer";
 import SysPage from "./components/SysPage";
 import CronPage from "./components/CronPage";
+import NewsPage from "./components/NewsPage";
 import SettingsModal from "./components/SettingsModal";
 import LmStudioModal from "./components/LmStudioModal";
 import CloudConfigModal from "./components/CloudConfigModal";
@@ -53,6 +54,12 @@ export default function App() {
             <main className="main">
               {connError && <div className="err-banner">⚠ {connError}</div>}
               <CronPage />
+            </main>
+          )}
+          {view === "news" && (
+            <main className="main">
+              {connError && <div className="err-banner">⚠ {connError}</div>}
+              <NewsPage />
             </main>
           )}
         </div>
