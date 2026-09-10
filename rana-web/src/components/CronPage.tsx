@@ -68,6 +68,34 @@ function scheduleText(j: CronJob) {
   return s.kind ?? "—";
 }
 
+/** 任务分组：系统收敛任务置顶，普通任务按功能类别归组 */
+const GROUPS: Array<{ id: string; name: string; match: (j: CronJob) => boolean }> = [
+  {
+    id: "system",
+    name: "⚙ 系统任务（由 OpenClaw 配置管理）",
+    match: (j) => j.payload?.kind === "skillCollectionReview" || j.payload?.kind === "heartbeat",
+  },
+  { id: "news", name: "📰 资讯", match: (j) => /news-report|morning-report/i.test(j.name ?? "") },
+  { id: "git", name: "🐾 Git 报告", match: (j) => /git-activity/i.test(j.name ?? "") },
+  { id: "memory", name: "🌉 记忆", match: (j) => /memory|dreaming/i.test(j.name ?? "") },
+  { id: "backup", name: "📦 备份", match: (j) => /backup/i.test(j.name ?? "") },
+  { id: "other", name: "📌 其他", match: () => true },
+];
+
+function groupJobs(jobs: CronJob[]) {
+  const out: Array<{ group: (typeof GROUPS)[number]; jobs: CronJob[] }> = [];
+  for (const g of GROUPS) out.push({ group: g, jobs: [] });
+  for (const j of jobs) {
+    for (const slot of out) {
+      if (slot.group.match(j)) {
+        slot.jobs.push(j);
+        break;
+      }
+    }
+  }
+  return out.filter((s) => s.jobs.length > 0);
+}
+
 export default function CronPage() {
   const [jobs, setJobs] = useState<CronJob[] | null>(null);
   const [error, setError] = useState("");
@@ -126,7 +154,10 @@ export default function CronPage() {
         </div>
         <div className="task-list">
           {jobs === null && !error && <div className="card pending"><p className="pending-text">……在数。</p></div>}
-          {jobs?.map((j) => {
+          {jobs && groupJobs(jobs).map(({ group, jobs: gjobs }) => (
+            <div key={group.id} className="task-group">
+              <div className="tg-label">{group.name}<span className="tg-count">{gjobs.length}</span></div>
+              {gjobs.map((j) => {
             const name = j.displayName ?? j.name ?? j.id.slice(0, 8);
             const last = j.state?.lastRunStatus;
             // 系统收敛任务（技能回顾/心跳）：gateway 禁止客户端启停，UI 只读展示
@@ -188,6 +219,8 @@ export default function CronPage() {
               </div>
             );
           })}
+            </div>
+          ))}
         </div>
         {runNotice && <div className="task-foot">{runNotice}</div>}
         <div className="task-foot">新建 / 改时间 / 删除：先用命令行（openclaw cron …）· 页面操作会即时生效</div>

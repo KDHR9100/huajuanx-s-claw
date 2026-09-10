@@ -7,6 +7,7 @@ const TABS: Array<{ id: AppView; label: string }> = [
   { id: "chat", label: "💬 会话" },
   { id: "sys", label: "🖥️ 电脑状态" },
   { id: "cron", label: "⏰ 定时任务" },
+  { id: "news", label: "📰 早报" },
 ];
 
 export default function TopNav() {

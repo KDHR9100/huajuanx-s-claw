@@ -503,6 +503,34 @@ function ranaAvatarMiddleware(): Plugin {
   };
 }
 
+/**
+ * 早报数据端点：GET /__rana/news 读本地 .news/report.json（由 news-report.mjs 每天 08:00 生成）。
+ * 无文件/读失败返回 {empty:true}，前端展示引导文案。
+ */
+function ranaNewsMiddleware(): Plugin {
+  const file = path.join(path.dirname(fileURLToPath(import.meta.url)), ".news", "report.json");
+  const newsHandler = (
+    _req: unknown,
+    res: { setHeader: (k: string, v: string) => void; end: (s: string) => void },
+  ) => {
+    res.setHeader("content-type", "application/json");
+    try {
+      res.end(fs.readFileSync(file, "utf8"));
+    } catch {
+      res.end(JSON.stringify({ empty: true }));
+    }
+  };
+  return {
+    name: "rana-news",
+    configureServer(server) {
+      server.middlewares.use("/__rana/news", newsHandler as Parameters<typeof server.middlewares.use>[1]);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use("/__rana/news", newsHandler as Parameters<typeof server.middlewares.use>[1]);
+    },
+  };
+}
+
 function ranaDevConfig(): Plugin {
   return {
     name: "rana-dev-config",
@@ -519,7 +547,7 @@ function ranaDevConfig(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), ranaDevConfig(), ranaProviderConfigMiddleware(), ranaSysStatusMiddleware(), ranaAvatarMiddleware()],
+  plugins: [react(), ranaDevConfig(), ranaProviderConfigMiddleware(), ranaSysStatusMiddleware(), ranaAvatarMiddleware(), ranaNewsMiddleware()],
   server: {
     port: 5173,
     proxy: {
