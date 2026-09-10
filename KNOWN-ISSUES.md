@@ -21,6 +21,18 @@
 
 ## 登记区
 
+## [已解决·会复发] Clash 7897 被 Windows 动态端口保留段圈占 → 代理失效 → git 推送 GitHub 挂死（2026-09-11）
+
+- 症状：`git push` 报 `Failed to connect to github.com port 443 via 127.0.0.1`（直连被墙必须走代理）；Clash Verge 界面看似正常、clash-verge.exe / verge-mihomo.exe 进程都在，但 `netstat` 查 7897 无监听，mihomo 只开着 DNS:53。**注意与"Clash 内核半死"区分：重启 Verge 进程无效**，sidecar 日志（`%APPDATA%\io.github.clash-verge-rev.clash-verge-rev\logs\sidecar\`）里能看到真凶：`Start Mixed(http+socks) server error: listen tcp :7897: bind: An attempt was made to access a socket in a way forbidden by its access permissions.`
+- 根因：Windows 的 Hyper-V/WSL NAT（winnat 服务）会在**动态端口范围内随机圈占保留段**，本机动态端口范围被设成了 1024–15000（默认应为 49152–65535，过宽），7860–7959 保留段把 7897 圈进去，任何进程都无法绑定。保留段每次 winnat 重启/系统重启会重新随机分配，所以表现为"时好时坏"。
+- 解决方案（照方抓药，需管理员）：
+  1. `netsh int ipv4 show excludedportrange protocol=tcp` 确认 7897 落在某个保留段内；
+  2. 提权重启 NAT 让段重算：`net stop winnat && net start winnat`（会闪断 WSL 虚拟网络）；
+  3. mihomo 会被 Verge 看门自动重拉并成功绑定（验证 `netstat -ano | findstr 7897` 出现 LISTENING）；
+  4. （本次未做成）趁 7897 空闲时永久保留给自己：`netsh int ipv4 add excludedportrange protocol=tcp startport=7897 numberofports=1`——端口被 mihomo 占着时 add 会失败，需先停核心。
+- 预防（待拍板，未实施）：把动态端口范围收回默认高位段 `netsh int ipv4 set dynamic tcp start=49152 num=16384`，Hyper-V 就永远圈不到 7897；但不确定当初是谁把范围改到 1024 的（Docker/虚拟化软件常见），改前需确认无软件依赖。
+- 状态：已解决（推送成功、7897 正常监听）；保留段随机漂移，**下次系统重启可能复发**，按解决方案 1–3 操作即可。
+
 ## [已解决·自愈] 微信会话调用 ask_user 交互工具 → 会话阻塞 15 分钟 + 同窗口微信长连接收不到消息（2026-09-11）
 
 - 症状：凌晨微信聊天中她回完一段话后突然沉默，用户补发消息无人应答；同一轮对话微信端比 rana-web 网页端多收到一条；`openclaw channels status` 显示 weixin `running` 但 `in:` 停在最后一条成功消息时间（补发的那条根本没到网关，死信队列 `channels dead-letters list` 也是空）；网关日志每 30s 刷 `stalled session: agent:main:main state=processing reason=blocked_tool_call activeTool=ask_user lastProgress=tool:ask_user:started recovery=none`。
