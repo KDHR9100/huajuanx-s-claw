@@ -22,6 +22,12 @@ const CFG = JSON.parse(fs.readFileSync(HOME + '/openclaw.json', 'utf8'));
 // RP 侧提炼模型跟随 rana-rp agent 当前配置，避免写死旧模型被 JIT 反复拉起挤显存
 const RP_DISTILL_MODEL = (CFG.agents?.entries?.['rana-rp']?.model || '').split('/').pop() || 'rana-rp-7b';
 const NOW = Date.now();
+// 本地兜底过滤表（privacy-patterns 文件含私人词表，不入公开仓库；缺文件时兜底跳过，提示词层防护仍在）
+const LOCAL_FILTERS = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(new URL('./memory-bridge.privacy-patterns.json', import.meta.url), 'utf8'));
+  } catch { return {}; }
+})();
 
 const log = (msg) => {
   const line = `${new Date().toISOString()} ${msg}`;
@@ -92,7 +98,9 @@ const SYS = '任务：从对话片段提炼共享记忆纪要。禁止复述本�
 function promptFor(side, tag, dialog) {
   // RP 侧私密内容一律不进共享记忆（云端可见）——由 private-memory-bridge 负责保管
   const privacy = tag === 'RP' ? '\n私密、亲密、身体相关的内容一律跳过不记（由私密记忆单独负责，共享记忆绝不收录）。' : '';
-  return `【${side}侧对话片段】\n${dialog}\n---\n从上面对话提炼 1-3 条纪要（合并相似内容；陪伴对话哪怕小事也至少记一条；实在没有才输出：空）。\n每条一行，格式：HH:MM [${tag}] 内容\n时间必须照抄对话行首的 [HH:MM] 标记，禁止自己编时间。\n示例：09:30 [${tag}] 轩瑜修完微信bug后疲惫，Rana 陪他休息了一会儿\n规则：内容≤60字；记一起做的事、聊的话题、轩瑜的状态情绪、重要事实；陈述句。${privacy}`;
+  // 工作侧心跳/备份等运维自活动对陪伴侧毫无价值（heartbeat target=last 直接混在主会话里）
+  const ops = tag === '工作' ? '\n跳过 Rana 自己的运维活动（心跳检查、备份、git/推送、巡检、监控、排障、重启重载、定时任务）——除非轩瑜本人有明显情绪或做了决定，否则一律不记。' : '';
+  return `【${side}侧对话片段】\n${dialog}\n---\n从上面对话提炼 1-3 条纪要（合并相似内容；陪伴对话哪怕小事也至少记一条；实在没有才输出：空）。\n每条一行，格式：HH:MM [${tag}] 内容\n时间必须照抄对话行首的 [HH:MM] 标记，禁止自己编时间。\n示例：09:30 [${tag}] 轩瑜修完微信bug后疲惫，Rana 陪他休息了一会儿\n规则：内容≤60字；记一起做的事、聊的话题、轩瑜的状态情绪、重要事实；陈述句。${privacy}${ops}`;
 }
 
 function parseEntries(raw, tag, fallbackTs) {
@@ -104,6 +112,9 @@ function parseEntries(raw, tag, fallbackTs) {
     // 防模型复述任务/角色扮演/舞台指令/照抄对话（本地 7B 常见毛病）
     if (/记忆提炼器|共享记忆纪要|禁止复述|```|坐姿[:：]|^\*?\*?-(坐姿|状态|行为)/.test(ln)) continue;
     if (/轩瑜:|Rana:|\[\d{1,2}:\d{2}\]/.test(ln)) continue; // 原文回声
+    // 隐私兜底/运维噪音兜底：正则表放本地 privacy-patterns 文件（不入公开仓库），缺文件时跳过
+    if (tag === 'RP' && LOCAL_FILTERS.rpPrivacy && new RegExp(LOCAL_FILTERS.rpPrivacy).test(ln)) continue;
+    if (tag === '工作' && LOCAL_FILTERS.opsNoise && new RegExp(LOCAL_FILTERS.opsNoise, 'i').test(ln)) continue;
     if (!/轩瑜|Rana/.test(ln)) continue; // 纪要必须提到他们俩之一
     ln = ln.replace(/刘南|刘娜/g, 'Rana'); // 7B 微调残留的错误自称，入库前统一改回
     const m = ln.match(/^(\d{1,2}:\d{2})\s*\[/);

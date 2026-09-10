@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+
+const execFileP = promisify(execFile);
 
 // gateway 默认监听 ws://127.0.0.1:18789。
 // 前端直连该地址；若浏览器 Origin 被网关拒绝，可改用 /gateway 代理路径
@@ -254,6 +259,250 @@ function ranaProviderConfigMiddleware(): Plugin {
   };
 }
 
+/**
+ * 电脑状态端点（本机只读监控 + 电源计划切换）：
+ * - GET /__rana/sys/status  聚合系统数据（硬盘/CPU/内存/开机时长/显卡/电源计划），8 秒缓存
+ * - POST /__rana/sys/power {guid}  切换电源计划（仅接受 GUID 格式参数、仅本机回环来源）
+ * 所有子进程调用均用 execFile 数组参数（不经 shell、无字符串拼接）。
+ */
+function ranaSysStatusMiddleware(): Plugin {
+  const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const CACHE_MS = 8000;
+  let cache: { at: number; data: unknown } | null = null;
+
+  /** Windows 系统数据：一次 PowerShell 调用拿硬盘/CPU/内存/开机时长 */
+  const querySystem = async () => {
+    // eslint-disable-next-line no-useless-escape -- PS 里 @() 强制数组
+    const ps = [
+      "[Console]::OutputEncoding=[Text.Encoding]::UTF8",
+      "$os = Get-CimInstance Win32_OperatingSystem",
+      "$cpu = (Get-CimInstance Win32_Processor | Measure-Object LoadPercentage -Average).Average",
+      "$disks = @(Get-Volume | Where-Object DriveLetter | ForEach-Object { [pscustomobject]@{ drive = [string]$_.DriveLetter; label = [string]$_.FileSystemLabel; sizeGB = [math]::Round($_.Size/1GB); freeGB = [math]::Round($_.SizeRemaining/1GB) } })",
+      "[pscustomobject]@{ disks = $disks; cpu = $cpu; memTotalGB = [math]::Round($os.TotalVisibleMemorySize/1MB,1); memFreeGB = [math]::Round($os.FreePhysicalMemory/1MB,1); uptimeHours = [math]::Round(((Get-Date) - $os.LastBootUpTime).TotalHours,1) } | ConvertTo-Json -Compress -Depth 3",
+    ].join("; ");
+    const { stdout } = await execFileP("powershell", ["-NoProfile", "-NonInteractive", "-Command", ps], {
+      encoding: "utf8",
+      timeout: 15000,
+      windowsHide: true,
+    });
+    return JSON.parse(stdout);
+  };
+
+  /** 显卡：nvidia-smi CSV（无显卡/超时返回 null，前端单独降级） */
+  const queryGpu = async () => {
+    try {
+      const { stdout } = await execFileP(
+        "nvidia-smi",
+        ["--query-gpu=name,memory.total,memory.used,temperature.gpu,utilization.gpu", "--format=csv,noheader,nounits"],
+        { encoding: "utf8", timeout: 8000, windowsHide: true },
+      );
+      const parts = stdout.trim().split("\n")[0].split(",").map((s) => s.trim());
+      if (parts.length < 5) return null;
+      return {
+        name: parts[0],
+        memTotalMB: Number(parts[1]),
+        memUsedMB: Number(parts[2]),
+        tempC: Number(parts[3]),
+        utilPct: Number(parts[4]),
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  /** 电源计划列表 + 当前激活（powercfg 输出为 GBK 编码，需按 GBK 解码；GUID 行末带名称） */
+  const queryPower = async () => {
+    const dec = new TextDecoder("gbk");
+    const parse = (s: string) =>
+      Array.from(s.matchAll(/([0-9a-f-]{36})\s*\*?\s*\(([^)]+)\)/gi)).map((m) => ({ guid: m[1], name: m[2].trim() }));
+    const [list, active] = await Promise.all([
+      execFileP("powercfg", ["/list"], { encoding: "buffer", timeout: 8000, windowsHide: true }),
+      execFileP("powercfg", ["/getactivescheme"], { encoding: "buffer", timeout: 8000, windowsHide: true }),
+    ]);
+    const plans = parse(dec.decode(Buffer.from(list.stdout)));
+    const activeGuid = parse(dec.decode(Buffer.from(active.stdout)))[0]?.guid ?? "";
+    return { plans, activeGuid };
+  };
+
+  const buildStatus = async () => {
+    const [sys, gpu, power] = await Promise.all([querySystem(), queryGpu().catch(() => null), queryPower().catch(() => null)]);
+    return { sys, gpu, power, ts: Date.now() };
+  };
+
+  const isLoopback = (req: { socket?: { remoteAddress?: string }; headers?: Record<string, unknown> }) => {
+    const ra = req.socket?.remoteAddress ?? "";
+    if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(ra)) return false;
+    const origin = String(req.headers?.origin ?? "");
+    if (origin && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) return false;
+    return true;
+  };
+
+  const json = (res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void }, code: number, out: unknown) => {
+    res.setHeader("content-type", "application/json");
+    res.statusCode = code;
+    res.end(JSON.stringify(out));
+  };
+
+  const handler = (
+    req: { method?: string; url?: string; socket?: { remoteAddress?: string }; headers?: Record<string, unknown>; on: (ev: string, cb: (c?: string) => void) => void },
+    res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void },
+  ) => {
+    if (req.method === "GET") {
+      if (cache && Date.now() - cache.at < CACHE_MS) {
+        json(res, 200, cache.data);
+        return;
+      }
+      buildStatus()
+        .then((data) => {
+          cache = { at: Date.now(), data };
+          json(res, 200, data);
+        })
+        .catch((e: Error) => json(res, 500, { error: e.message }));
+      return;
+    }
+    if (req.method === "POST") {
+      if (!isLoopback(req)) {
+        json(res, 403, { error: "仅本机可操作" });
+        return;
+      }
+      let body = "";
+      req.on("data", (c?: string) => { body += c ?? ""; });
+      req.on("end", () => {
+        let guid = "";
+        try {
+          guid = String((JSON.parse(body) as { guid?: string }).guid ?? "");
+        } catch { /* 空_body 等 */ }
+        if (!GUID_RE.test(guid)) {
+          json(res, 400, { error: "guid 格式不对" });
+          return;
+        }
+        execFileP("powercfg", ["/setactive", guid], { encoding: "utf8", timeout: 8000, windowsHide: true })
+          .then(() => {
+            cache = null; // 立即失效，下次查询拿新状态
+            json(res, 200, { ok: true, guid });
+          })
+          .catch((e: Error) => json(res, 500, { error: `切不动：${e.message}` }));
+      });
+      return;
+    }
+    json(res, 405, { error: "method not allowed" });
+  };
+
+  return {
+    name: "rana-sys-status",
+    configureServer(server) {
+      server.middlewares.use("/__rana/sys/status", handler as Parameters<typeof server.middlewares.use>[1]);
+      server.middlewares.use("/__rana/sys/power", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use("/__rana/sys/status", handler as Parameters<typeof server.middlewares.use>[1]);
+      server.middlewares.use("/__rana/sys/power", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+  };
+}
+
+/**
+ * 乐奈头像端点（图片只存本地 .avatars/ 目录，该目录已进 .gitignore 不入公开仓库）：
+ * - GET    /__rana/avatar   当前头像（无则 404）
+ * - POST   /__rana/avatar   上传（png/jpg/webp ≤4MB，raw body + content-type 判类型；仅本机回环）
+ * - DELETE /__rana/avatar   恢复默认手绘脸（删除文件）
+ */
+function ranaAvatarMiddleware(): Plugin {
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), ".avatars");
+  const EXT_BY_TYPE: Record<string, string> = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+  };
+  const files = () => {
+    try {
+      return fs.readdirSync(dir).filter((f) => /\.(png|jpg|webp)$/.test(f));
+    } catch {
+      return [];
+    }
+  };
+  const current = () => files().map((f) => path.join(dir, f))[0];
+
+  const json = (res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void }, code: number, out: unknown) => {
+    res.setHeader("content-type", "application/json");
+    res.statusCode = code;
+    res.end(JSON.stringify(out));
+  };
+  const isLoopback = (req: { socket?: { remoteAddress?: string }; headers?: Record<string, unknown> }) => {
+    const ra = req.socket?.remoteAddress ?? "";
+    if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(ra)) return false;
+    const origin = String(req.headers?.origin ?? "");
+    if (origin && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) return false;
+    return true;
+  };
+
+  const handler = (
+    req: { method?: string; headers?: Record<string, unknown>; socket?: { remoteAddress?: string }; on: (ev: string, cb: (c?: string) => void) => void },
+    res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string | Buffer) => void },
+  ) => {
+    if (req.method === "GET") {
+      const file = current();
+      if (!file) {
+        json(res, 404, { error: "no avatar" });
+        return;
+      }
+      const ext = path.extname(file).slice(1);
+      res.setHeader("content-type", ext === "png" ? "image/png" : ext === "jpg" ? "image/jpeg" : "image/webp");
+      res.setHeader("cache-control", "no-cache");
+      res.end(fs.readFileSync(file));
+      return;
+    }
+    if (!isLoopback(req)) {
+      json(res, 403, { error: "仅本机可操作" });
+      return;
+    }
+    if (req.method === "DELETE") {
+      for (const f of files()) fs.rmSync(path.join(dir, f));
+      json(res, 200, { ok: true, cleared: true });
+      return;
+    }
+    if (req.method === "POST") {
+      const ext = EXT_BY_TYPE[String(req.headers?.["content-type"] ?? "")] ?? "";
+      if (!ext) {
+        json(res, 400, { error: "只支持 png / jpg / webp" });
+        return;
+      }
+      const chunks: Buffer[] = [];
+      let size = 0;
+      req.on("data", (c?: string) => {
+        size += c?.length ?? 0;
+        if (size > 4 * 1024 * 1024) {
+          json(res, 413, { error: "图片太大（限 4MB）" });
+          return;
+        }
+        chunks.push(Buffer.from(c ?? "", "binary"));
+      });
+      req.on("end", () => {
+        try {
+          fs.mkdirSync(dir, { recursive: true });
+          for (const f of files()) fs.rmSync(path.join(dir, f)); // 单一头像：旧的清掉
+          fs.writeFileSync(path.join(dir, `avatar.${ext}`), Buffer.concat(chunks));
+          json(res, 200, { ok: true, url: `/__rana/avatar?t=${Date.now()}` });
+        } catch (e) {
+          json(res, 500, { error: (e as Error).message });
+        }
+      });
+      return;
+    }
+    json(res, 405, { error: "method not allowed" });
+  };
+
+  return {
+    name: "rana-avatar",
+    configureServer(server) {
+      server.middlewares.use("/__rana/avatar", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use("/__rana/avatar", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+  };
+}
+
 function ranaDevConfig(): Plugin {
   return {
     name: "rana-dev-config",
@@ -270,7 +519,7 @@ function ranaDevConfig(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), ranaDevConfig(), ranaProviderConfigMiddleware()],
+  plugins: [react(), ranaDevConfig(), ranaProviderConfigMiddleware(), ranaSysStatusMiddleware(), ranaAvatarMiddleware()],
   server: {
     port: 5173,
     proxy: {

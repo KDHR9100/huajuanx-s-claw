@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-mode="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rana · 风格 E 她的房间（效果图）</title>
+<style>
+  /* ============================================================
+   * 风格 E「她的房间」：
+   *  - 顶部一排导航：会话 / 电脑状态 / 定时任务 / ✚(以后再加)
+   *  - 整个应用住进她的房间：墙、窗、搁板(芭菲/毛线球/铃铛/相框)、吉他
+   *  - 电脑状态页 = 钉在墙上的仪表卡（硬盘/电源计划/显卡/CPU内存）
+   *  - 定时任务页 = 她的作息表（数据来自 openclaw cron list 的真实任务）
+   *  - 设置弹窗带「乐奈的头像」上传位（图片只存本地不进 git）
+   * ============================================================ */
+  :root { --av: .45s; }
+  :root[data-mode="light"] {
+    --bg: #f5faf0;
+    --panel: #fdfffb;
+    --panel-t: color-mix(in srgb, #fdfffb 86%, transparent);
+    --sidebar: #edf5e6;
+    --border: #dcead6;
+    --text: #38462f;
+    --text2: #74876a;
+    --accent: #77dd77;
+    --accent-strong: #45b45c;
+    --accent-soft: #e2f5dd;
+    --chip: #eff8ea;
+    --danger: #d95c5c;
+    --wall-top: #f2f8ea;
+    --wall-bottom: #e6f2dc;
+    --wainscot: #cfe5c0;
+    --win-frame: #ffffff;
+    --sky-top: #c9e9ff;
+    --sky-bottom: #f2fae6;
+    --plank: #d9b98f;
+    --plank-dark: #c2a074;
+    --user-bubble: linear-gradient(135deg, #ffb3c8, #ff97b4);
+    --user-text: #5a2030;
+    --shadow: 0 10px 30px rgba(90, 190, 110, .16);
+    --glow1: rgba(119, 221, 119, .15);
+    --glow2: rgba(255, 170, 195, .12);
+    --star: rgba(255,255,255,0);
+  }
+  :root[data-mode="dark"] {
+    --bg: #141b15;
+    --panel: #1f2b1f;
+    --panel-t: color-mix(in srgb, #1f2b1f 84%, transparent);
+    --sidebar: #1a261a;
+    --border: #33472f;
+    --text: #ecf5e6;
+    --text2: #9db595;
+    --accent: #8ae08a;
+    --accent-strong: #6bcf78;
+    --accent-soft: #2b3f28;
+    --chip: #263626;
+    --danger: #e07a7a;
+    --wall-top: #18231a;
+    --wall-bottom: #121a13;
+    --wainscot: #1c2a1d;
+    --win-frame: #2c3a2e;
+    --sky-top: #131f38;
+    --sky-bottom: #1a2a1e;
+    --plank: #6b563e;
+    --plank-dark: #57452f;
+    --user-bubble: linear-gradient(135deg, #c2567b, #a63a60);
+    --user-text: #ffeaf1;
+    --shadow: 0 10px 30px rgba(0, 0, 0, .4);
+    --glow1: rgba(119, 221, 119, .07);
+    --glow2: rgba(90, 169, 230, .06);
+    --star: rgba(255,255,255,.9);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    transition: background var(--av), color var(--av);
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(closest-corner at 16% 8%, var(--glow1), transparent 60%),
+      radial-gradient(closest-corner at 88% 94%, var(--glow2), transparent 56%);
+  }
+  ::selection { background: rgba(119, 221, 119, .35); }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--accent) 45%, transparent);
+    border-radius: 99px; border: 2px solid transparent; background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--accent) 75%, transparent); background-clip: padding-box; }
+
+  /* ============ 她的房间：背景场景层 ============ */
+  .room { position: fixed; top: 56px; left: 0; right: 0; bottom: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+  .wall { position: absolute; inset: 0; background: linear-gradient(180deg, var(--wall-top), var(--wall-bottom)); transition: background var(--av); }
+  /* 墙裙 */
+  .wainscot { position: absolute; left: 0; right: 0; bottom: 0; height: 64px; background: var(--wainscot); border-top: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); transition: background var(--av); }
+  /* 窗 */
+  .window {
+    position: absolute; right: 5%; top: 9%;
+    width: 230px; height: 160px;
+    background: var(--win-frame);
+    border-radius: 18px;
+    padding: 9px;
+    box-shadow: 0 8px 24px rgba(60, 110, 60, .18);
+    transition: background var(--av);
+  }
+  .win-sky {
+    position: relative; width: 100%; height: 100%;
+    border-radius: 12px; overflow: hidden;
+    background: linear-gradient(180deg, var(--sky-top), var(--sky-bottom));
+    transition: background var(--av);
+  }
+  .win-sky::before, .win-sky::after { content: ""; position: absolute; background: var(--win-frame); }
+  .win-sky::before { left: 50%; top: 0; bottom: 0; width: 6px; translate: -50%; }
+  .win-sky::after { top: 50%; left: 0; right: 0; height: 6px; translate: 0 -50%; }
+  .sun {
+    position: absolute; right: 14px; top: 12px;
+    width: 38px; height: 38px; border-radius: 50%;
+    background: #ffd76e; box-shadow: 0 0 26px rgba(255, 215, 110, .9);
+    z-index: 2; transition: all var(--av);
+  }
+  :root[data-mode="dark"] .sun { background: #eef3d2; box-shadow: 0 0 20px rgba(230, 240, 200, .4); }
+  .stars { position: absolute; inset: 0; z-index: 1; opacity: 0; transition: opacity var(--av); }
+  :root[data-mode="dark"] .stars { opacity: 1; }
+  .stars i { position: absolute; width: 2.5px; height: 2.5px; border-radius: 50%; background: #fff; opacity: var(--star); animation: twinkle 2.6s ease-in-out infinite; }
+  .stars i:nth-child(1) { left: 16%; top: 20%; }
+  .stars i:nth-child(2) { left: 34%; top: 12%; animation-delay: .7s; }
+  .stars i:nth-child(3) { left: 55%; top: 26%; animation-delay: 1.3s; }
+  .stars i:nth-child(4) { left: 72%; top: 15%; animation-delay: .4s; }
+  .stars i:nth-child(5) { left: 26%; top: 40%; animation-delay: 1.9s; width: 2px; height: 2px; }
+  @keyframes twinkle { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+  .win-cloud {
+    position: absolute; left: 12%; top: 30%;
+    width: 56px; height: 16px; border-radius: 99px;
+    background: #fff; opacity: .9; z-index: 2;
+    animation: drift 9s ease-in-out infinite alternate;
+    transition: background var(--av);
+  }
+  .win-cloud::before { content: ""; position: absolute; width: 22px; height: 22px; border-radius: 50%; background: #fff; top: -10px; left: 9px; transition: background var(--av); }
+  :root[data-mode="dark"] .win-cloud, :root[data-mode="dark"] .win-cloud::before { background: #31453a; opacity: .5; }
+  @keyframes drift { from { translate: 0 0; } to { translate: 20px 3px; } }
+  /* 搁板 + 小物件 */
+  .shelf { position: absolute; left: 3.5%; top: 15%; width: 190px; text-align: center; }
+  .shelf .items { display: flex; align-items: flex-end; justify-content: space-around; padding: 0 8px; }
+  .shelf .plank { height: 10px; border-radius: 5px; background: linear-gradient(180deg, var(--plank), var(--plank-dark)); box-shadow: 0 4px 8px rgba(80, 60, 30, .18); transition: background var(--av); }
+  .shelf .bracket { display: inline-block; width: 10px; height: 14px; margin: 2px 26px 0; background: var(--plank-dark); border-radius: 0 0 4px 4px; transition: background var(--av); }
+  .it-parfait { width: 34px; }
+  .it-yarn { width: 34px; animation: yarnroll 7s ease-in-out infinite; }
+  @keyframes yarnroll { 0%, 82%, 100% { rotate: 0deg; } 88% { rotate: 24deg; } 94% { rotate: -10deg; } }
+  .it-bell { width: 24px; margin-bottom: 4px; animation: ringsway 4.5s ease-in-out infinite; transform-origin: 50% 8%; }
+  @keyframes ringsway { 0%, 84%, 100% { transform: rotate(0); } 88% { transform: rotate(12deg); } 92% { transform: rotate(-9deg); } 96% { transform: rotate(0); } }
+  .it-frame {
+    width: 40px; height: 44px; border-radius: 8px;
+    background: var(--win-frame); border: 2px solid var(--plank-dark);
+    display: flex; align-items: center; justify-content: center;
+    transition: background var(--av);
+  }
+  .it-frame svg { width: 28px; height: 28px; }
+  /* 吉他靠在墙角 */
+  .guitar-corner { position: absolute; right: 2.2%; bottom: 58px; width: 96px; rotate: 6deg; opacity: .85; filter: drop-shadow(0 4px 8px rgba(40, 80, 40, .22)); }
+  /* 灯串：蓝黄绿交替小圆点 */
+  .garland { position: absolute; left: 0; right: 0; top: 10px; display: flex; justify-content: center; gap: 34px; opacity: .65; }
+  .garland i { width: 7px; height: 7px; border-radius: 50%; }
+  .garland i:nth-child(3n+1) { background: #5aa9e6; }
+  .garland i:nth-child(3n+2) { background: #f0c94a; }
+  .garland i:nth-child(3n)   { background: var(--accent); }
+
+  /* ============ 顶部导航 ============ */
+  .topnav {
+    position: relative; z-index: 10;
+    height: 56px;
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel-t);
+    backdrop-filter: blur(10px);
+    transition: border-color var(--av), background var(--av);
+  }
+  .brand {
+    font-size: 19px; font-weight: 700; letter-spacing: .5px;
+    display: flex; align-items: center; gap: 8px;
+    color: var(--accent-strong);
+    margin-right: 10px;
+  }
+  .brand svg { width: 24px; height: 24px; animation: ringsway 4.5s ease-in-out infinite; transform-origin: 50% 8%; }
+  .twin { display: inline-flex; gap: 3px; margin-left: 2px; }
+  .twin i { width: 5px; height: 5px; border-radius: 50%; }
+  .twin i:nth-child(1) { background: #5aa9e6; }
+  .twin i:nth-child(2) { background: #f0c94a; }
+
+  .tab {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: transparent;
+    color: var(--text2);
+    border: 1.5px solid transparent;
+    border-radius: 999px;
+    padding: 7px 15px;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .2s;
+    user-select: none;
+  }
+  .tab:hover { color: var(--accent-strong); background: var(--accent-soft); }
+  .tab.on { background: var(--accent-soft); color: var(--accent-strong); border-color: var(--accent); }
+  .tab.plus { opacity: .55; border-style: dashed; }
+
+  .nav-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .nav-btn {
+    width: 34px; height: 34px; border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--chip); color: var(--text2);
+    font-size: 15px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all .2s;
+  }
+  .nav-btn:hover { border-color: var(--accent); color: var(--accent-strong); transform: translateY(-1px); }
+  .status-dot { width: 9px; height: 9px; border-radius: 50%; background: #5cad8a; box-shadow: 0 0 0 3px rgba(92,173,138,.2); margin-right: 2px; }
+
+  /* ============ 页面容器 ============ */
+  .pages { position: relative; z-index: 1; height: calc(100vh - 56px); }
+  .page { display: none; height: 100%; }
+  .page.on { display: block; }
+
+  /* ============ 页1：会话 ============ */
+  #page-chat { display: none; }
+  #page-chat.on { display: grid; grid-template-columns: 262px 1fr; }
+  .sidebar {
+    background: var(--panel-t);
+    border-right: 1px solid var(--border);
+    backdrop-filter: blur(10px);
+    display: flex; flex-direction: column;
+    padding: 14px 12px 12px;
+    transition: background var(--av), border-color var(--av);
+  }
+  .new-chat {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+    color: #fff; border: none; border-radius: 14px;
+    padding: 10px; font-size: 14px; font-weight: 650; cursor: pointer;
+    box-shadow: 0 4px 14px rgba(85, 180, 100, .38);
+    transition: transform .18s cubic-bezier(.34,1.56,.64,1), box-shadow .18s;
+  }
+  .new-chat:hover { transform: translateY(-2px) scale(1.02); box-shadow: 0 7px 18px rgba(85,180,100,.46); }
+  .new-chat:active { transform: scale(.97); }
+  .rp-btn {
+    margin-top: 8px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    background: var(--chip); color: var(--accent-strong);
+    border: 1.5px dashed var(--accent); border-radius: 14px;
+    padding: 8px; font-size: 13.5px; font-weight: 600; cursor: pointer;
+    transition: background .18s, transform .18s cubic-bezier(.34,1.56,.64,1);
+  }
+  .rp-btn:hover { transform: scale(1.02); background: var(--accent-soft); }
+  .sec-label { font-size: 11.5px; color: var(--text2); padding: 16px 8px 6px; display: flex; align-items: baseline; gap: 5px; }
+  .sec-label::after { content: "ω"; color: var(--accent); opacity: .8; font-size: 12px; }
+  .sess-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+  .sess { padding: 9px 10px; border-radius: 13px; cursor: pointer; transition: background .18s, transform .18s; position: relative; }
+  .sess:hover { background: var(--accent-soft); transform: translateX(3px); }
+  .sess.active { background: var(--panel); box-shadow: 0 3px 12px rgba(119,221,119,.22); border: 1px solid var(--border); }
+  .sess .name { font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 5px; }
+  .sess .sub { font-size: 11.5px; color: var(--text2); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sess .unread { position: absolute; top: 10px; right: 10px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-strong); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+  .side-foot { display: flex; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .ghost {
+    flex: 1; background: none; border: none; color: var(--text2);
+    font-size: 16px; padding: 8px 0; border-radius: 10px; cursor: pointer;
+    transition: background .18s, transform .18s cubic-bezier(.34,1.56,.64,1);
+  }
+  .ghost:hover { background: var(--accent-soft); transform: translateY(-2px) scale(1.08); }
+
+  .chat-col { display: flex; flex-direction: column; min-width: 0; }
+  .chat { flex: 1; overflow-y: auto; padding: 22px 26px 10px; }
+  .chat-inner { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+  .msg { display: flex; gap: 10px; animation: pop .5s cubic-bezier(.34,1.56,.64,1) both; }
+  .msg.user { flex-direction: row-reverse; }
+  @keyframes pop {
+    0% { opacity: 0; transform: translateY(14px) scale(.92); }
+    60% { transform: translateY(-3px) scale(1.02); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .av-wrap { position: relative; flex-shrink: 0; }
+  .av {
+    width: 40px; height: 40px; border-radius: 50%;
+    border: 2.5px solid var(--panel);
+    background: #eef7e8;
+    box-shadow: 0 3px 10px rgba(119,221,119,.38);
+    transition: transform .25s cubic-bezier(.34,1.56,.64,1);
+  }
+  .msg.rana:hover .av { transform: scale(1.1) rotate(-6deg); }
+  .av.user-av {
+    background: linear-gradient(135deg, #b8c6d9, #93a5bf);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 15px; font-weight: 700;
+    box-shadow: 0 3px 8px rgba(147,165,191,.4);
+  }
+  .av-bell { position: absolute; right: -5px; top: -4px; width: 15px; height: 15px; filter: drop-shadow(0 1px 2px rgba(160,110,0,.35)); }
+  .stack { max-width: 76%; display: flex; flex-direction: column; }
+  .msg.user .stack { align-items: flex-end; }
+  .bubble {
+    position: relative; padding: 11px 15px;
+    font-size: 14.5px; line-height: 1.75;
+    border-radius: 20px; word-break: break-word;
+  }
+  .msg.rana .bubble {
+    background: var(--panel-t); border: 1.5px solid var(--border);
+    backdrop-filter: blur(8px);
+    border-bottom-left-radius: 6px;
+    box-shadow: 0 3px 12px rgba(119,221,119,.14);
+    transition: box-shadow .2s;
+  }
+  .msg.rana:hover .bubble { box-shadow: 0 5px 18px rgba(119,221,119,.3); }
+  .msg.user .bubble { background: var(--user-bubble); color: var(--user-text); border-bottom-right-radius: 6px; box-shadow: 0 4px 14px rgba(255,109,147,.28); }
+  .bubble pre {
+    background: #24301f; color: #eaf5e2; border-radius: 12px;
+    padding: 10px 13px; font-family: Consolas, "Courier New", monospace;
+    font-size: 12.5px; margin: .5em 0; overflow-x: auto; line-height: 1.6;
+  }
+  .bubble .code-kw { color: #9be89b; }
+  .bubble .code-str { color: #ffd9a0; }
+  .bubble :not(pre) > code {
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    color: var(--accent-strong); border-radius: 5px; padding: 1px 5px;
+    font-family: Consolas, monospace; font-size: .9em;
+  }
+  .meta { font-size: 11.5px; color: var(--text2); margin: 5px 6px 0; opacity: .85; }
+  details.think { margin-bottom: 6px; }
+  details.think summary {
+    list-style: none; display: inline-flex; align-items: center; gap: 6px;
+    background: var(--chip); border: 1px solid var(--border); color: var(--text2);
+    border-radius: 999px; padding: 4px 12px; font-size: 12px; cursor: pointer;
+    transition: all .2s; user-select: none;
+  }
+  details.think summary::-webkit-details-marker { display: none; }
+  details.think summary:hover { color: var(--accent-strong); border-color: var(--accent); }
+  details.think summary .arr { transition: rotate .25s; font-size: 10px; }
+  details.think[open] summary .arr { rotate: 90deg; }
+  details.think .think-body {
+    margin-top: 6px; padding: 8px 12px;
+    border-left: 3px solid var(--accent);
+    background: color-mix(in srgb, var(--accent-soft) 55%, transparent);
+    border-radius: 0 10px 10px 0;
+    color: var(--text2); font-size: 12.5px; line-height: 1.7;
+    max-height: 180px; overflow-y: auto;
+  }
+  .typing { display: flex; align-items: center; gap: 7px; padding: 14px 18px; }
+  .typing .paw { width: 15px; height: 15px; color: var(--accent); opacity: .35; animation: step 1.2s ease-in-out infinite; }
+  .typing .paw:nth-child(2) { animation-delay: .2s; }
+  .typing .paw:nth-child(3) { animation-delay: .4s; }
+  .typing .paw svg { width: 100%; height: 100%; }
+  @keyframes step {
+    0%, 55%, 100% { transform: translateY(0) scale(.85); opacity: .3; }
+    25% { transform: translateY(-5px) scale(1.05); opacity: 1; }
+  }
+  .composer { padding: 10px 26px 16px; }
+  .composer-inner {
+    max-width: 760px; margin: 0 auto;
+    display: flex; align-items: flex-end; gap: 10px;
+    background: var(--panel-t);
+    backdrop-filter: blur(10px);
+    border: 1.5px solid var(--border);
+    border-radius: 24px; padding: 10px 10px 10px 18px;
+    box-shadow: var(--shadow);
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .composer-inner:focus-within { border-color: var(--accent); box-shadow: 0 8px 26px rgba(119,221,119,.3); }
+  .composer textarea {
+    flex: 1; border: none; outline: none; resize: none;
+    background: transparent; color: var(--text);
+    font-size: 14.5px; font-family: inherit; line-height: 1.6;
+    max-height: 140px; padding: 6px 0;
+  }
+  .composer textarea::placeholder { color: var(--text2); }
+  .send {
+    width: 42px; height: 42px; border-radius: 50%; border: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+    color: #fff; cursor: pointer; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 14px rgba(85,180,100,.42);
+    transition: transform .2s cubic-bezier(.34,1.56,.64,1), box-shadow .2s;
+  }
+  .send svg { width: 20px; height: 20px; }
+  .send:hover { transform: scale(1.12) rotate(8deg); box-shadow: 0 6px 20px rgba(85,180,100,.52); }
+  .send:active { transform: scale(.94); }
+
+  /* ============ 通用卡片（电脑状态/定时任务都在墙上） ============ */
+  .wallboard { height: 100%; overflow-y: auto; padding: 26px 30px 34px; }
+  .board-inner { max-width: 980px; margin: 0 auto; }
+  .page-intro { text-align: center; margin-bottom: 20px; }
+  .page-intro h2 { font-size: 21px; font-weight: 700; letter-spacing: .5px; }
+  .page-intro p { margin-top: 5px; font-size: 13px; color: var(--text2); }
+  .card {
+    background: var(--panel-t);
+    backdrop-filter: blur(8px);
+    border: 1.5px solid var(--border);
+    border-radius: 18px;
+    padding: 16px 18px;
+    box-shadow: var(--shadow);
+    transition: background var(--av), border-color var(--av);
+  }
+  .card h3 { font-size: 14.5px; display: flex; align-items: center; gap: 7px; margin-bottom: 12px; }
+  .card h3 .ic { font-size: 16px; }
+  .card h3 small { font-weight: 400; font-size: 11px; color: var(--text2); margin-left: auto; }
+
+  /* ============ 页2：电脑状态 ============ */
+  .sys-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 16px; }
+  .disk-row { margin-bottom: 12px; }
+  .disk-row:last-child { margin-bottom: 0; }
+  .disk-row .d-head { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 5px; }
+  .disk-row .d-head b { font-size: 13px; }
+  .disk-row .d-head span { color: var(--text2); }
+  .bar { height: 10px; border-radius: 99px; background: var(--accent-soft); overflow: hidden; }
+  .bar > i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 72%, #ffffff), var(--accent)); }
+  .bar > i.warn { background: linear-gradient(90deg, #e0b25c, #d9952c); }
+  .bar > i.full { background: linear-gradient(90deg, #e08a8a, var(--danger)); }
+  .kv { display: flex; justify-content: space-between; font-size: 12.5px; padding: 3px 0; }
+  .kv .k { color: var(--text2); }
+  .kv .v { font-weight: 600; }
+  .plans { display: flex; gap: 8px; flex-wrap: wrap; }
+  .plan {
+    border: 1.5px solid var(--border); border-radius: 999px;
+    padding: 6px 14px; font-size: 12.5px; cursor: pointer;
+    color: var(--text2); background: var(--chip);
+    transition: all .2s; user-select: none;
+  }
+  .plan:hover { border-color: var(--accent); color: var(--accent-strong); }
+  .plan.on { background: var(--accent-soft); color: var(--accent-strong); border-color: var(--accent); font-weight: 650; }
+  .plan-hint { margin-top: 10px; font-size: 11.5px; color: var(--text2); opacity: .8; }
+  .gauge-row { display: flex; align-items: baseline; justify-content: space-between; font-size: 12.5px; margin-bottom: 4px; }
+  .gauge-row b { font-size: 15px; }
+
+  /* ============ 页3：定时任务 ============ */
+  .task-list { display: flex; flex-direction: column; gap: 12px; }
+  .task {
+    display: flex; align-items: center; gap: 14px;
+    background: var(--panel-t); backdrop-filter: blur(8px);
+    border: 1.5px solid var(--border); border-radius: 18px;
+    padding: 14px 18px; box-shadow: var(--shadow);
+    transition: background var(--av);
+  }
+  .task .t-ic {
+    width: 42px; height: 42px; flex-shrink: 0;
+    border-radius: 13px; background: var(--accent-soft);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 19px;
+  }
+  .task .t-main { flex: 1; min-width: 0; }
+  .task .t-name { font-size: 14px; font-weight: 650; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .task .t-desc { font-size: 12px; color: var(--text2); margin-top: 3px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 600;
+    background: var(--chip); border: 1px solid var(--border);
+    color: var(--text2); border-radius: 999px; padding: 2px 9px;
+  }
+  .chip.green { background: var(--accent-soft); color: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+  .task .t-side { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+  .t-status { font-size: 11.5px; color: var(--text2); text-align: right; line-height: 1.5; }
+  .t-status .ok { color: var(--accent-strong); font-weight: 650; }
+  .t-status .skip { color: #c9a54a; font-weight: 650; }
+  .sw {
+    width: 40px; height: 23px; border-radius: 99px; flex-shrink: 0;
+    background: var(--border); border: none; cursor: pointer;
+    position: relative; transition: background .2s;
+  }
+  .sw::after {
+    content: ""; position: absolute; top: 2.5px; left: 3px;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.25);
+    transition: translate .2s cubic-bezier(.34,1.56,.64,1);
+  }
+  .sw.on { background: var(--accent); }
+  .sw.on::after { translate: 16px 0; }
+  .task-foot { margin-top: 16px; text-align: center; font-size: 12px; color: var(--text2); opacity: .85; }
+
+  /* ============ 设置弹窗（含头像上传） ============ */
+  .modal-overlay {
+    position: fixed; inset: 0; z-index: 60;
+    background: rgba(20, 30, 18, .4);
+    display: none; align-items: center; justify-content: center; padding: 20px;
+  }
+  .modal-overlay.on { display: flex; }
+  .modal {
+    width: 430px; max-width: 100%; max-height: 86vh; overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 18px; box-shadow: 0 18px 50px rgba(30, 50, 28, .3);
+    padding: 18px 20px 16px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; }
+  .modal-head h3 { font-size: 16px; }
+  .modal-close { border: none; background: transparent; font-size: 16px; color: var(--text2); cursor: pointer; padding: 4px 8px; border-radius: 8px; }
+  .modal-close:hover { background: var(--accent-soft); }
+  .set-section h4 { margin: 0 0 9px; font-size: 13px; font-weight: 650; color: var(--text2); letter-spacing: .4px; }
+  .set-section h4 em { font-style: normal; color: var(--accent-strong); }
+  .swatches { display: flex; gap: 8px; }
+  .swatch { width: 32px; height: 32px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; transition: transform .12s; }
+  .swatch:hover { transform: scale(1.1); }
+  .swatch.active { border-color: var(--text); }
+  /* 头像上传位 */
+  .avatar-up { display: flex; align-items: center; gap: 16px; }
+  .avatar-ring {
+    width: 86px; height: 86px; border-radius: 50%; flex-shrink: 0;
+    padding: 4px;
+    background: conic-gradient(#5aa9e6, #f0c94a, #77dd77, #5aa9e6);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .avatar-ring .inner {
+    width: 100%; height: 100%; border-radius: 50%;
+    background: #eef7e8; border: 3px solid var(--panel);
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  .avatar-ring .inner svg { width: 86%; height: 86%; }
+  .avatar-actions { display: flex; flex-direction: column; gap: 8px; }
+  .btn-up {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+    color: #fff; border: none; border-radius: 12px;
+    padding: 9px 16px; font-size: 13px; font-weight: 650; cursor: pointer;
+    box-shadow: 0 4px 12px rgba(85,180,100,.38);
+    transition: transform .18s cubic-bezier(.34,1.56,.64,1);
+  }
+  .btn-up:hover { transform: translateY(-1px) scale(1.02); }
+  .btn-ghost2 {
+    background: none; border: 1px solid var(--border); border-radius: 12px;
+    color: var(--text2); padding: 8px 16px; font-size: 12.5px; cursor: pointer;
+    transition: border-color .2s, color .2s;
+  }
+  .btn-ghost2:hover { border-color: var(--accent); color: var(--accent-strong); }
+  .avatar-hint { font-size: 11.5px; color: var(--text2); opacity: .85; margin-top: 10px; line-height: 1.6; }
+  .mode-btns { display: flex; gap: 8px; }
+  .mode-btn {
+    flex: 1; border: 1px solid var(--border); background: var(--chip);
+    color: var(--text); border-radius: 12px; padding: 9px 0;
+    font-size: 13.5px; cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  .mode-btn:hover { border-color: var(--accent); }
+  .mode-btn.active { border-color: var(--accent); background: var(--accent-soft); font-weight: 650; }
+
+  .badge {
+    position: fixed; left: 14px; bottom: 12px; z-index: 5;
+    background: var(--chip); border: 1px solid var(--border); color: var(--text2);
+    font-size: 11.5px; padding: 4px 10px; border-radius: 999px;
+    opacity: .85; pointer-events: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  }
+</style>
+</head>
+<body>
+  <svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="avbg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#eef7e8"/><stop offset="1" stop-color="#d3ecc9"/>
+      </linearGradient>
+      <linearGradient id="avhair" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#f2e9ee"/><stop offset="1" stop-color="#d7c3cf"/>
+      </linearGradient>
+    </defs>
+    <symbol id="rana-face" viewBox="0 0 64 64">
+      <circle cx="32" cy="32" r="32" fill="url(#avbg)"/>
+      <path d="M9,34 a23,24 0 1 1 46,0 v13 a4,4 0 0 1 -4,4 h-38 a4,4 0 0 1 -4,-4 z" fill="url(#avhair)"/>
+      <ellipse cx="32" cy="37.5" rx="14.5" ry="13" fill="#fff5ef"/>
+      <path d="M17.5,33 C17.5,21.5 24,15 32,15 C40,15 46.5,21.5 46.5,33 Q44,36.2 41.5,33 Q39,36.2 36.5,33 Q34,36.2 31.5,33 Q29,36.2 26.5,33 Q24,36.2 21.5,33 Q19.4,35 17.5,33 Z" fill="#efe4ea"/>
+      <ellipse cx="25.5" cy="38.5" rx="2.6" ry="3" fill="#5aa9e6"/>
+      <ellipse cx="38.5" cy="38.5" rx="2.6" ry="3" fill="#f0c94a"/>
+      <circle cx="24.6" cy="37.4" r=".9" fill="#fff"/>
+      <circle cx="37.6" cy="37.4" r=".9" fill="#fff"/>
+      <path d="M23,36.7 q2.5,-1.4 5,0" stroke="#6b5a63" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+      <path d="M36,36.7 q2.5,-1.4 5,0" stroke="#6b5a63" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+      <ellipse cx="21.5" cy="43" rx="2.8" ry="1.6" fill="#f3c3cd" opacity=".8"/>
+      <ellipse cx="42.5" cy="43" rx="2.8" ry="1.6" fill="#f3c3cd" opacity=".8"/>
+      <path d="M29.8,44.4 q1.1,1.5 2.2,0 q1.1,1.5 2.2,0" stroke="#6b5a63" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+      <path d="M46.8,15.6 l4.6,1.1 c1,.25 1.3,1.5 .5,2.2 l-3.6,3 c-.75,.6 -1.9,.15 -2,-.8 l-.85,-4.2 c-.1,-.95 .55,-1.55 1.35,-1.3 z" fill="#77dd77"/>
+    </symbol>
+    <symbol id="rana-sleep" viewBox="0 0 64 64">
+      <circle cx="32" cy="32" r="32" fill="url(#avbg)"/>
+      <path d="M9,34 a23,24 0 1 1 46,0 v13 a4,4 0 0 1 -4,4 h-38 a4,4 0 0 1 -4,-4 z" fill="url(#avhair)"/>
+      <ellipse cx="32" cy="37.5" rx="14.5" ry="13" fill="#fff5ef"/>
+      <path d="M17.5,33 C17.5,21.5 24,15 32,15 C40,15 46.5,21.5 46.5,33 Q44,36.2 41.5,33 Q39,36.2 36.5,33 Q34,36.2 31.5,33 Q29,36.2 26.5,33 Q24,36.2 21.5,33 Q19.4,35 17.5,33 Z" fill="#efe4ea"/>
+      <path d="M22.6,38.6 q2.9,2.6 5.8,0" stroke="#6b5a63" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+      <path d="M35.6,38.6 q2.9,2.6 5.8,0" stroke="#6b5a63" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+      <ellipse cx="21.5" cy="43" rx="2.8" ry="1.6" fill="#f3c3cd" opacity=".8"/>
+      <ellipse cx="42.5" cy="43" rx="2.8" ry="1.6" fill="#f3c3cd" opacity=".8"/>
+      <path d="M29.8,44.4 q1.1,1.5 2.2,0 q1.1,1.5 2.2,0" stroke="#6b5a63" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+      <path d="M46.8,15.6 l4.6,1.1 c1,.25 1.3,1.5 .5,2.2 l-3.6,3 c-.75,.6 -1.9,.15 -2,-.8 l-.85,-4.2 c-.1,-.95 .55,-1.55 1.35,-1.3 z" fill="#77dd77"/>
+    </symbol>
+    <symbol id="bell" viewBox="0 0 24 24">
+      <rect x="10.4" y="1.6" width="3.2" height="3" rx="1.4" fill="#d9a520"/>
+      <path d="M12 3.4c4.5 0 7.2 3.3 7.2 7.8 0 2.7.6 4.2 1.5 5.3.5.6.1 1.7-.8 1.7H4.1c-.9 0-1.3-1.1-.8-1.7.9-1.1 1.5-2.6 1.5-5.3C4.8 6.7 7.5 3.4 12 3.4z" fill="#f5c84c" stroke="#d9a520" stroke-width="1.1"/>
+      <rect x="4.6" y="17.2" width="14.8" height="1.6" rx=".8" fill="#d9a520"/>
+      <circle cx="12" cy="20.6" r="1.9" fill="#e8b62e" stroke="#c99418" stroke-width=".8"/>
+    </symbol>
+    <symbol id="paw" viewBox="0 0 24 24">
+      <ellipse cx="12" cy="16" rx="5.4" ry="4.5"/>
+      <ellipse cx="5.4" cy="10.6" rx="2.1" ry="2.7" transform="rotate(-18 5.4 10.6)"/>
+      <ellipse cx="9.9" cy="7.4" rx="2.1" ry="2.8"/>
+      <ellipse cx="14.7" cy="7.6" rx="2.1" ry="2.8" transform="rotate(8 14.7 7.6)"/>
+      <ellipse cx="18.8" cy="11" rx="2" ry="2.6" transform="rotate(20 18.8 11)"/>
+    </symbol>
+    <symbol id="guitar" viewBox="0 0 60 120">
+      <rect x="27" y="2" width="6" height="52" rx="2.5" fill="#8a6b4f"/>
+      <rect x="24.5" y="0" width="11" height="13" rx="3" fill="#6e543c"/>
+      <path d="M30 52 c13 0 17 8 17 17 0 6-3 9-3 14 0 6 4 8 4 15 0 12-9 20-18 20 s-18-8-18-20 c0-7 4-9 4-15 0-5-3-8-3-14 0-9 4-17 17-17z" fill="#5faf6e"/>
+      <rect x="28.6" y="54" width="2.8" height="60" rx="1.4" fill="#f4f1e6" opacity=".85"/>
+      <circle cx="30" cy="96" r="4.5" fill="#3d8a4f"/>
+      <rect x="20" y="86" width="20" height="6" rx="3" fill="#3d8a4f" opacity=".8"/>
+    </symbol>
+    <!-- 抹茶芭菲 -->
+    <symbol id="parfait" viewBox="0 0 34 52">
+      <path d="M6 14 L28 14 L24 48 Q23.5 51 20 51 L14 51 Q10.5 51 10 48 Z" fill="#eef7f2" opacity=".92" stroke="#cfe4da" stroke-width="1"/>
+      <path d="M8 30 L26 30 L24 48 Q23.5 51 20 51 L14 51 Q10.5 51 10 48 Z" fill="#9ccc7a"/>
+      <path d="M7.5 22 Q17 26 26.5 22 L26 30 Q17 34 8 30 Z" fill="#f7f3e8"/>
+      <circle cx="17" cy="9" r="5" fill="#e86a5c"/>
+      <path d="M17 4 q1-3 3-4" stroke="#5faf6e" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+      <rect x="21" y="3" width="2.6" height="12" rx="1.3" fill="#d9b98f" rotate="14"/>
+    </symbol>
+    <!-- 毛线球 -->
+    <symbol id="yarn" viewBox="0 0 34 34">
+      <circle cx="17" cy="17" r="14" fill="#f3a0b5"/>
+      <path d="M5 13 Q17 5 29 13 M4 20 Q17 12 30 20 M7 27 Q17 19 27 27" stroke="#e97f9c" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+      <path d="M28 22 Q34 26 32 32" stroke="#e97f9c" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+    </symbol>
+  </svg>
+
+  <!-- 她的房间（背景场景） -->
+  <div class="room" aria-hidden="true">
+    <div class="wall"></div>
+    <div class="garland"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="shelf">
+      <div class="items">
+        <svg class="it-parfait"><use href="#parfait"/></svg>
+        <svg class="it-yarn"><use href="#yarn"/></svg>
+        <svg class="it-bell"><use href="#bell"/></svg>
+        <div class="it-frame"><svg><use href="#rana-sleep"/></svg></div>
+      </div>
+      <div class="plank"></div>
+      <span class="bracket"></span><span class="bracket"></span>
+    </div>
+    <div class="window">
+      <div class="win-sky">
+        <div class="stars"><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="sun"></div>
+        <div class="win-cloud"></div>
+      </div>
+    </div>
+    <svg class="guitar-corner"><use href="#guitar"/></svg>
+    <div class="wainscot"></div>
+  </div>
+
+  <!-- 顶部导航 -->
+  <header class="topnav">
+    <div class="brand"><svg><use href="#bell"/></svg>Rana<span class="twin"><i></i><i></i></span></div>
+    <button class="tab on" data-page="page-chat">💬 会话</button>
+    <button class="tab" data-page="page-sys">🖥️ 电脑状态</button>
+    <button class="tab" data-page="page-cron">⏰ 定时任务</button>
+    <button class="tab plus" title="以后再加">✚</button>
+    <div class="nav-right">
+      <span class="status-dot" title="已连接"></span>
+      <button class="nav-btn" id="settingsBtn" title="设置">🎨</button>
+      <button class="nav-btn" id="modeBtn" title="切换昼夜">🌙</button>
+    </div>
+  </header>
+
+  <div class="pages">
+
+    <!-- ===== 页1：会话 ===== -->
+    <section class="page on" id="page-chat">
+      <aside class="sidebar">
+        <button class="new-chat">＋ 新会话</button>
+        <button class="rp-btn">🐾 Rana·RP</button>
+        <div class="sec-label">会话</div>
+        <div class="sess-list">
+          <div class="sess active">
+            <div class="name"><span>📌</span>今日闲谈</div>
+            <div class="sub">嗯，泡了杯红茶… · 21:45</div>
+          </div>
+          <div class="sess">
+            <div class="name">🔒 RP 晚间剧场</div>
+            <div class="sub">昨晚 · 4.2k tokens</div>
+          </div>
+          <div class="sess">
+            <div class="name"><span>📌</span>早报 09-11</div>
+            <div class="sub">今早 07:30 · 已读</div>
+          </div>
+          <div class="sess">
+            <div class="name">周报整理<span class="unread"></span></div>
+            <div class="sub">周一 · EVA-14B</div>
+          </div>
+          <div class="sess">
+            <div class="name">模型切换调试</div>
+            <div class="sub">09-08 · 1.8k tokens</div>
+          </div>
+        </div>
+        <div class="side-foot">
+          <button class="ghost" title="云端模型">☁</button>
+          <button class="ghost" title="本地模型">🖥</button>
+          <button class="ghost" title="外观设置">🎨</button>
+        </div>
+      </aside>
+      <div class="chat-col">
+        <div class="chat" id="chat">
+          <div class="chat-inner" id="chatInner">
+            <div class="msg user">
+              <div class="av-wrap"><div class="av user-av">你</div></div>
+              <div class="stack"><div class="bubble">今天好累啊，终于回来了</div><div class="meta">21:42</div></div>
+            </div>
+            <div class="msg rana">
+              <div class="av-wrap"><svg class="av"><use href="#rana-face"/></svg><svg class="av-bell"><use href="#bell"/></svg></div>
+              <div class="stack">
+                <details class="think">
+                  <summary>……想了想 · 86 字 <span class="arr">▶</span></summary>
+                  <div class="think-body">用户说很累，先关心身体，再给一个门槛很低的建议，别问太多。</div>
+                </details>
+                <div class="bubble">……欢迎回来。辛苦了。<br>先去洗把脸，喝口温水。然后，聊天。</div>
+                <div class="meta">EVA-14B · 21:43</div>
+              </div>
+            </div>
+            <div class="msg user">
+              <div class="av-wrap"><div class="av user-av">你</div></div>
+              <div class="stack"><div class="bubble">对了，帮我看下电脑现在的状态</div><div class="meta">21:44</div></div>
+            </div>
+            <div class="msg rana">
+              <div class="av-wrap"><svg class="av"><use href="#rana-face"/></svg><svg class="av-bell"><use href="#bell"/></svg></div>
+              <div class="stack">
+                <div class="bubble">K 盘还剩 <code>412GB</code>，够用。……上面一排，开了「电脑状态」，随时能看。</div>
+                <div class="meta">EVA-14B · 21:45</div>
+              </div>
+            </div>
+            <div class="msg rana">
+              <div class="av-wrap"><svg class="av"><use href="#rana-face"/></svg><svg class="av-bell"><use href="#bell"/></svg></div>
+              <div class="stack"><div class="bubble typing"><span class="paw"><svg><use href="#paw"/></svg></span><span class="paw"><svg><use href="#paw"/></svg></span><span class="paw"><svg><use href="#paw"/></svg></span></div></div>
+            </div>
+          </div>
+        </div>
+        <footer class="composer">
+          <div class="composer-inner">
+            <textarea id="input" rows="1" placeholder="跟乐奈说点什么……"></textarea>
+            <button class="send" id="sendBtn" title="发送"><svg fill="currentColor"><use href="#paw"/></svg></button>
+          </div>
+        </footer>
+      </div>
+    </section>
+
+    <!-- ===== 页2：电脑状态 ===== -->
+    <section class="page" id="page-sys">
+      <div class="wallboard">
+        <div class="board-inner">
+          <div class="page-intro">
+            <h2>电脑状态</h2>
+            <p>家里的样子，她帮你看着。（示意数据，真实数据由网关接入）</p>
+          </div>
+          <div class="sys-grid">
+            <div class="card">
+              <h3><span class="ic">⚡</span>电源计划 <small>powercfg</small></h3>
+              <div class="plans">
+                <span class="plan">🌱 平衡</span>
+                <span class="plan on">⚡ 高性能</span>
+                <span class="plan">🌙 节能</span>
+              </div>
+              <div class="plan-hint">当前：高性能 · 以后可以在网页上直接切</div>
+            </div>
+            <div class="card">
+              <h3><span class="ic">💾</span>硬盘 <small>三个盘</small></h3>
+              <div class="disk-row">
+                <div class="d-head"><b>C: 系统</b><span>186 / 476 GB</span></div>
+                <div class="bar"><i style="width:39%"></i></div>
+              </div>
+              <div class="disk-row">
+                <div class="d-head"><b>D: 软件</b><span>690 / 931 GB</span></div>
+                <div class="bar"><i class="warn" style="width:74%"></i></div>
+              </div>
+              <div class="disk-row">
+                <div class="d-head"><b>K: OpenClaw</b><span>519 / 931 GB</span></div>
+                <div class="bar"><i style="width:56%"></i></div>
+              </div>
+            </div>
+            <div class="card">
+              <h3><span class="ic">🎮</span>显卡 <small>RTX 4070 Ti · 12GB</small></h3>
+              <div class="gauge-row"><span>显存（跑 EVA-14B 中）</span><b>9.4 / 12 GB</b></div>
+              <div class="bar"><i class="warn" style="width:78%"></i></div>
+              <div style="height:10px"></div>
+              <div class="kv"><span class="k">利用率</span><span class="v">34%</span></div>
+              <div class="kv"><span class="k">温度</span><span class="v">61°C</span></div>
+            </div>
+            <div class="card">
+              <h3><span class="ic">🧠</span>CPU / 内存</h3>
+              <div class="gauge-row"><span>CPU</span><b>18%</b></div>
+              <div class="bar"><i style="width:18%"></i></div>
+              <div style="height:10px"></div>
+              <div class="gauge-row"><span>内存</span><b>21.3 / 32 GB</b></div>
+              <div class="bar"><i style="width:67%"></i></div>
+              <div style="height:10px"></div>
+              <div class="kv"><span class="k">开机时长</span><span class="v">3 天 4 小时</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 页3：定时任务 ===== -->
+    <section class="page" id="page-cron">
+      <div class="wallboard">
+        <div class="board-inner" style="max-width:820px">
+          <div class="page-intro">
+            <h2>定时任务</h2>
+            <p>……都在按点干活。（这页的数据是刚才从 openclaw 里读出来的真实任务）</p>
+          </div>
+          <div class="task-list">
+            <div class="task">
+              <div class="t-ic">🌉</div>
+              <div class="t-main">
+                <div class="t-name">共享记忆桥 <span class="chip green">✓ ok</span></div>
+                <div class="t-desc">每 30 分钟把两边对话提炼成共享纪要 · 隔离运行 · 下次 12 分钟后</div>
+              </div>
+              <div class="t-side"><div class="t-status">上次<br><span class="ok">18 分钟前</span></div><button class="sw on"></button></div>
+            </div>
+            <div class="task">
+              <div class="t-ic">🔐</div>
+              <div class="t-main">
+                <div class="t-name">私密记忆桥 <span class="chip green">✓ ok</span></div>
+                <div class="t-desc">每小时 :07 / :37 · RP 侧本地提炼保隐私 · 隔离运行 · 下次 19 分钟后</div>
+              </div>
+              <div class="t-side"><div class="t-status">上次<br><span class="ok">11 分钟前</span></div><button class="sw on"></button></div>
+            </div>
+            <div class="task">
+              <div class="t-ic">💗</div>
+              <div class="t-main">
+                <div class="t-name">心跳 <span class="chip">⏭ 跳过</span></div>
+                <div class="t-desc">每 30 分钟 · main 会话 · 没事就不出声 · 下次 21 分钟后</div>
+              </div>
+              <div class="t-side"><div class="t-status">上次<br><span class="skip">9 分钟前</span></div><button class="sw on"></button></div>
+            </div>
+            <div class="task">
+              <div class="t-ic">💭</div>
+              <div class="t-main">
+                <div class="t-name">记忆做梦晋升 <span class="chip">· 空闲</span></div>
+                <div class="t-desc">每天 03:00 · 整理记忆 · 下次 1 小时后</div>
+              </div>
+              <div class="t-side"><div class="t-status">还没跑过</div><button class="sw on"></button></div>
+            </div>
+            <div class="task">
+              <div class="t-ic">🧰</div>
+              <div class="t-main">
+                <div class="t-name">技能收集回顾 <span class="chip">· 空闲</span></div>
+                <div class="t-desc">每 7 天 · main 会话 · 4 天后</div>
+              </div>
+              <div class="t-side"><div class="t-status">还没跑过</div><button class="sw on"></button></div>
+            </div>
+            <div class="task">
+              <div class="t-ic">🧰</div>
+              <div class="t-main">
+                <div class="t-name">技能收集回顾 <span class="chip">· 空闲</span></div>
+                <div class="t-desc">每 7 天 · rana-rp 会话 · 5 天后</div>
+              </div>
+              <div class="t-side"><div class="t-status">还没跑过</div><button class="sw on"></button></div>
+            </div>
+          </div>
+          <div class="task-foot">网页上直接新建 / 改时间 = 下一步做（现在先用 cron 命令）· 早报任务不在这个列表里，回头一起查</div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- 设置弹窗 -->
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal">
+      <div class="modal-head"><h3>设置</h3><button class="modal-close" id="settingsClose">✕</button></div>
+      <div class="set-section">
+        <h4><em>乐奈的头像</em>（你自己上传）</h4>
+        <div class="avatar-up">
+          <div class="avatar-ring"><div class="inner"><svg><use href="#rana-face"/></svg></div></div>
+          <div class="avatar-actions">
+            <button class="btn-up">📁 上传图片</button>
+            <button class="btn-ghost2">恢复默认</button>
+          </div>
+        </div>
+        <div class="avatar-hint">支持 png / jpg / webp · 图片只存在你自己电脑上，不会进公开仓库 · 聊天气泡和品牌处自动套用（示意图，暂不可点）</div>
+      </div>
+      <div class="set-section">
+        <h4>昼夜模式</h4>
+        <div class="mode-btns">
+          <button class="mode-btn active" id="lightBtn">☀️ 白天</button>
+          <button class="mode-btn" id="darkBtn">🌙 夜间</button>
+        </div>
+      </div>
+      <div class="set-section">
+        <h4>主题色</h4>
+        <div class="swatches">
+          <button class="swatch active" style="background:#77dd77" title="乐奈绿"></button>
+          <button class="swatch" style="background:#e8748f" title="爱音粉"></button>
+          <button class="swatch" style="background:#5aa9e6" title="素世蓝"></button>
+          <button class="swatch" style="background:#f0c94a" title="小猫黄"></button>
+          <button class="swatch" style="background:#9a7fd9" title="灯紫"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="badge">效果图 E · 她的房间（非真实界面）</div>
+
+<script>
+  const root = document.documentElement;
+
+  // 顶部导航切页
+  document.querySelectorAll('.tab[data-page]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('on'));
+      btn.classList.add('on');
+      document.getElementById(btn.dataset.page).classList.add('on');
+    });
+  });
+
+  // 昼夜切换
+  const modeBtn = document.getElementById('modeBtn');
+  function setMode(dark) {
+    root.dataset.mode = dark ? 'dark' : 'light';
+    modeBtn.textContent = dark ? '☀️' : '🌙';
+    document.getElementById('lightBtn').classList.toggle('active', !dark);
+    document.getElementById('darkBtn').classList.toggle('active', dark);
+  }
+  modeBtn.addEventListener('click', () => setMode(root.dataset.mode !== 'dark'));
+  document.getElementById('lightBtn').addEventListener('click', () => setMode(false));
+  document.getElementById('darkBtn').addEventListener('click', () => setMode(true));
+
+  // 设置弹窗
+  const modal = document.getElementById('settingsModal');
+  document.getElementById('settingsBtn').addEventListener('click', () => modal.classList.add('on'));
+  document.getElementById('settingsClose').addEventListener('click', () => modal.classList.remove('on'));
+  modal.addEventListener('click', e => { if (e.target === modal) modal.classList.remove('on'); });
+
+  // 定时任务开关（视觉演示）
+  document.querySelectorAll('.sw').forEach(sw => sw.addEventListener('click', () => sw.classList.toggle('on')));
+
+  // 电源计划切换（视觉演示）
+  document.querySelectorAll('.plan').forEach(p => p.addEventListener('click', () => {
+    document.querySelectorAll('.plan').forEach(x => x.classList.remove('on'));
+    p.classList.add('on');
+  }));
+
+  // 会话假发送
+  const chat = document.getElementById('chat');
+  const chatInner = document.getElementById('chatInner');
+  const input = document.getElementById('input');
+  const replies = ['……嗯。知道了。', '有趣的女孩子。', '芭菲。……想吃抹茶芭菲了。'];
+  let ri = 0;
+  function send() {
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    const um = document.createElement('div');
+    um.className = 'msg user';
+    um.innerHTML = '<div class="av-wrap"><div class="av user-av">你</div></div><div class="stack"><div class="bubble"></div></div>';
+    um.querySelector('.bubble').textContent = text;
+    chatInner.appendChild(um);
+    chat.scrollTop = chat.scrollHeight;
+    setTimeout(() => {
+      const rm = document.createElement('div');
+      rm.className = 'msg rana';
+      rm.innerHTML = '<div class="av-wrap"><svg class="av"><use href="#rana-face"/></svg><svg class="av-bell"><use href="#bell"/></svg></div>' +
+        '<div class="stack"><div class="bubble"></div></div>';
+      rm.querySelector('.bubble').textContent = replies[ri++ % replies.length];
+      chatInner.appendChild(rm);
+      chat.scrollTop = chat.scrollHeight;
+    }, 900);
+  }
+  document.getElementById('sendBtn').addEventListener('click', send);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+</script>
+</body>
+</html>

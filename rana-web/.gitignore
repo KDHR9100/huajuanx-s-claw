@@ -25,3 +25,7 @@ ui-feature-check.png
 
 # ===== 本地素材目录（不上传）=====
 .eva-parts/
+# Git 活动统计的仓库清单（暴露本地目录结构，公开仓库禁入）
+git-activity.repos.json
+# 乐奈自定义头像（用户上传图片，不入公开仓库）
+.avatars/

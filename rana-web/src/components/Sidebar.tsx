@@ -130,7 +130,6 @@ export default function Sidebar() {
 
   return (
     <aside className="sidebar">
-      <div className="brand">Rana ✿</div>
       <div className="new-session-row">
         <button className="btn" onClick={() => newSession()} disabled={creating || sessions.some((s) => s.key === currentKey && s.hasActiveRun)}>
           {creating ? "创建中…" : "＋ 新会话"}

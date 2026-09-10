@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-mode="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rana · 风格 D 软萌乐奈 Pro（效果图）</title>
+<style>
+  /* ============================================================
+   * 风格 D：在 A（软萌陪伴感）基础上做「浓角色」升级
+   *  - 薄荷绿 #77DD77 当绝对主色，抹茶奶油打底
+   *  - 异色瞳蓝#5aa9e6 / 黄#f0c94a 做双色点缀
+   *  - 猫爪、铃铛、猫嘴ω、毛线、吉他、抹茶芭菲全画出来
+   *  - 空状态 = 她在长凳上睡午觉的场景
+   *  - 界面文案学她说话（功能按钮保持清楚）
+   * ============================================================ */
+  :root { --av: .45s; }
+  :root[data-mode="light"] {
+    --bg: #f6faf1;
+    --panel: #fdfffb;
+    --sidebar: #ecf5e6;
+    --border: #dcead6;
+    --text: #38462f;
+    --text2: #74876a;
+    --accent: #77dd77;
+    --accent-strong: #45b45c;
+    --accent-soft: #e2f5dd;
+    --chip: #eff8ea;
+    --user-bubble: linear-gradient(135deg, #ffb3c8, #ff97b4);
+    --user-text: #5a2030;
+    --user-shadow: rgba(255, 109, 147, .28);
+    --rana-bubble: #fdfffb;
+    --rana-border: #dcead6;
+    --shadow: 0 10px 30px rgba(90, 190, 110, .16);
+    --glow1: rgba(119, 221, 119, .16);
+    --glow2: rgba(255, 170, 195, .13);
+    --petal: #ffb1c4;
+    --sky-top: #d8efff;
+    --sky-bottom: #f8fbee;
+    --hill: #bfe6ae;
+    --hill2: #ace09e;
+    --star: rgba(255,255,255,0);
+  }
+  :root[data-mode="dark"] {
+    --bg: #151d16;
+    --panel: #1f2b1f;
+    --sidebar: #1a261a;
+    --border: #33472f;
+    --text: #ecf5e6;
+    --text2: #9db595;
+    --accent: #8ae08a;
+    --accent-strong: #6bcf78;
+    --accent-soft: #2b3f28;
+    --chip: #263626;
+    --user-bubble: linear-gradient(135deg, #c2567b, #a63a60);
+    --user-text: #ffeaf1;
+    --user-shadow: rgba(0, 0, 0, .3);
+    --rana-bubble: #273527;
+    --rana-border: #3b5137;
+    --shadow: 0 10px 30px rgba(0, 0, 0, .4);
+    --glow1: rgba(119, 221, 119, .08);
+    --glow2: rgba(90, 169, 230, .07);
+    --petal: #4e7f5c;
+    --sky-top: #17233a;
+    --sky-bottom: #1d2b1f;
+    --hill: #2b4430;
+    --hill2: #243a29;
+    --star: rgba(255,255,255,.9);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    transition: background var(--av), color var(--av);
+  }
+  /* 氛围光：亮=左上抹茶绿+右下樱粉；暗=左绿右蓝黄（异色瞳的夜） */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(closest-corner at 16% 10%, var(--glow1), transparent 62%),
+      radial-gradient(closest-corner at 86% 92%, var(--glow2), transparent 58%);
+  }
+  ::selection { background: rgba(119, 221, 119, .35); }
+
+  /* 滚动条：小圆绿条 */
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--accent) 45%, transparent);
+    border-radius: 99px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--accent) 75%, transparent); background-clip: padding-box; }
+
+  /* ============ 飘落花瓣（暗夜变成低饱和绿叶） ============ */
+  .petal {
+    position: fixed;
+    top: -24px;
+    width: 14px; height: 14px;
+    background: var(--petal);
+    border-radius: 150% 0 150% 0;
+    opacity: .32;
+    pointer-events: none;
+    z-index: 0;
+    animation: fall linear infinite;
+    transition: background var(--av);
+  }
+  .petal:nth-of-type(1) { left: 8%;  animation-duration: 11s; transform: rotate(20deg); }
+  .petal:nth-of-type(2) { left: 26%; animation-duration: 14s; animation-delay: 3s;   width: 10px; height: 10px; }
+  .petal:nth-of-type(3) { left: 45%; animation-duration: 12s; animation-delay: 6s;   transform: rotate(70deg); }
+  .petal:nth-of-type(4) { left: 63%; animation-duration: 15s; animation-delay: 1.5s; width: 8px;  height: 8px; }
+  .petal:nth-of-type(5) { left: 80%; animation-duration: 13s; animation-delay: 4.5s; transform: rotate(45deg); }
+  .petal:nth-of-type(6) { left: 93%; animation-duration: 16s; animation-delay: 8s;   width: 11px; height: 11px; }
+  @keyframes fall {
+    0%   { translate: 0 0; rotate: 0deg; opacity: 0; }
+    8%   { opacity: .32; }
+    90%  { opacity: .28; }
+    100% { translate: -60px 105vh; rotate: 300deg; opacity: 0; }
+  }
+
+  /* ============ 布局 ============ */
+  .app {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: 264px 1fr;
+    height: 100vh;
+  }
+
+  /* ============ 侧栏 ============ */
+  .sidebar {
+    background: var(--sidebar);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 16px 12px 12px;
+    transition: background var(--av), border-color var(--av);
+  }
+  .brand {
+    font-size: 21px;
+    font-weight: 700;
+    letter-spacing: .5px;
+    padding: 2px 8px 14px;
+    display: flex; align-items: center; gap: 9px;
+    color: var(--accent-strong);
+  }
+  .brand .brand-bell { width: 26px; height: 26px; animation: ring 4.5s ease-in-out infinite; transform-origin: 50% 8%; }
+  /* 铃铛偶尔晃一下 */
+  @keyframes ring {
+    0%, 84%, 100% { transform: rotate(0); }
+    87% { transform: rotate(14deg); }
+    90% { transform: rotate(-11deg); }
+    93% { transform: rotate(6deg); }
+    96% { transform: rotate(0); }
+  }
+  /* 异色瞳双色小点：品牌名后面的小彩蛋 */
+  .twin { display: inline-flex; gap: 3px; margin-left: 2px; }
+  .twin i { width: 5px; height: 5px; border-radius: 50%; }
+  .twin i:nth-child(1) { background: #5aa9e6; }
+  .twin i:nth-child(2) { background: #f0c94a; }
+
+  .new-chat {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+    color: #fff;
+    border: none;
+    border-radius: 14px;
+    padding: 10px;
+    font-size: 14px;
+    font-weight: 650;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(85, 180, 100, .38);
+    transition: transform .18s cubic-bezier(.34,1.56,.64,1), box-shadow .18s;
+  }
+  .new-chat:hover { transform: translateY(-2px) scale(1.02); box-shadow: 0 7px 18px rgba(85,180,100,.46); }
+  .new-chat:active { transform: scale(.97); }
+
+  .rp-btn {
+    margin-top: 8px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    background: var(--chip);
+    color: var(--accent-strong);
+    border: 1.5px dashed var(--accent);
+    border-radius: 14px;
+    padding: 8px;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .18s, transform .18s cubic-bezier(.34,1.56,.64,1);
+  }
+  .rp-btn:hover { transform: scale(1.02); background: var(--accent-soft); }
+
+  /* 分区标题带个小猫嘴 ω */
+  .sec-label {
+    font-size: 11.5px; color: var(--text2);
+    padding: 16px 8px 6px;
+    display: flex; align-items: baseline; gap: 5px;
+  }
+  .sec-label::after { content: "ω"; color: var(--accent); opacity: .8; font-size: 12px; }
+
+  .sess-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+  .sess {
+    padding: 9px 10px;
+    border-radius: 13px;
+    cursor: pointer;
+    transition: background .18s, transform .18s;
+    position: relative;
+  }
+  .sess:hover { background: var(--accent-soft); transform: translateX(3px); }
+  .sess.active {
+    background: var(--panel);
+    box-shadow: 0 3px 12px rgba(119,221,119,.22);
+    border: 1px solid var(--rana-border);
+  }
+  .sess .name { font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 5px; }
+  .sess .name .pin { font-size: 11px; }
+  .sess .sub { font-size: 11.5px; color: var(--text2); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sess .unread {
+    position: absolute; top: 10px; right: 10px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent-strong);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+
+  .side-foot { display: flex; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .ghost {
+    flex: 1;
+    background: none; border: none;
+    color: var(--text2);
+    font-size: 16px;
+    padding: 8px 0;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background .18s, transform .18s cubic-bezier(.34,1.56,.64,1);
+  }
+  .ghost:hover { background: var(--accent-soft); transform: translateY(-2px) scale(1.08); }
+
+  /* ============ 主区 ============ */
+  main { display: flex; flex-direction: column; min-width: 0; }
+
+  .topbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--panel) 80%, transparent);
+    backdrop-filter: blur(8px);
+    transition: border-color var(--av), background var(--av);
+  }
+  .status-dot { width: 9px; height: 9px; border-radius: 50%; background: #5cad8a; box-shadow: 0 0 0 3px rgba(92,173,138,.2); }
+  .top-title { font-size: 15px; font-weight: 700; flex: 1; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: var(--chip);
+    color: var(--text2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 5px 12px;
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: all .2s;
+    user-select: none;
+  }
+  .pill:hover { border-color: var(--accent); color: var(--accent-strong); transform: translateY(-1px); }
+  .pill.on { background: var(--accent-soft); color: var(--accent-strong); border-color: var(--accent); }
+  .pill .ic { font-size: 13px; }
+
+  /* ============ 聊天流 ============ */
+  .chat { flex: 1; overflow-y: auto; padding: 24px 26px 12px; }
+  .chat-inner { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+
+  .msg { display: flex; gap: 10px; animation: pop .5s cubic-bezier(.34,1.56,.64,1) both; }
+  .msg.user { flex-direction: row-reverse; }
+  @keyframes pop {
+    0% { opacity: 0; transform: translateY(14px) scale(.92); }
+    60% { transform: translateY(-3px) scale(1.02); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .msg:nth-child(1) { animation-delay: .05s; }
+  .msg:nth-child(2) { animation-delay: .18s; }
+  .msg:nth-child(3) { animation-delay: .31s; }
+  .msg:nth-child(4) { animation-delay: .44s; }
+  .msg:nth-child(5) { animation-delay: .57s; }
+
+  .av-wrap { position: relative; flex-shrink: 0; }
+  .av {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    border: 2.5px solid #fff;
+    box-shadow: 0 3px 10px rgba(119,221,119,.38);
+    transition: transform .25s cubic-bezier(.34,1.56,.64,1);
+    background: #eef7e8;
+  }
+  :root[data-mode="dark"] .av { border-color: var(--panel); }
+  .msg.rana:hover .av { transform: scale(1.1) rotate(-6deg); }
+  .av.user-av {
+    background: linear-gradient(135deg, #b8c6d9, #93a5bf);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 15px; font-weight: 700;
+    box-shadow: 0 3px 8px rgba(147,165,191,.4);
+  }
+  /* 头像旁的小铃铛：乐奈在线的标志（右上角小徽章位） */
+  .av-bell {
+    position: absolute; right: -5px; top: -4px;
+    width: 15px; height: 15px;
+    filter: drop-shadow(0 1px 2px rgba(160,110,0,.35));
+  }
+
+  .stack { max-width: 78%; display: flex; flex-direction: column; }
+  .msg.user .stack { align-items: flex-end; }
+
+  .bubble {
+    position: relative;
+    padding: 11px 15px;
+    font-size: 14.5px;
+    line-height: 1.75;
+    border-radius: 20px;
+    word-break: break-word;
+  }
+  .msg.rana .bubble {
+    background: var(--rana-bubble);
+    border: 1.5px solid var(--rana-border);
+    border-bottom-left-radius: 6px;
+    box-shadow: 0 3px 12px rgba(119,221,119,.14);
+    transition: box-shadow .2s;
+  }
+  .msg.rana:hover .bubble { box-shadow: 0 5px 18px rgba(119,221,119,.3); }
+  .msg.user .bubble {
+    background: var(--user-bubble);
+    color: var(--user-text);
+    border-bottom-right-radius: 6px;
+    box-shadow: 0 4px 14px var(--user-shadow);
+  }
+
+  /* 气泡里的代码样式（对应真实 UI 的 Markdown 渲染） */
+  .bubble pre {
+    background: #24301f; color: #eaf5e2;
+    border-radius: 12px; padding: 10px 13px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12.5px; margin: .5em 0; overflow-x: auto;
+    line-height: 1.6;
+  }
+  .bubble .code-kw { color: #9be89b; }
+  .bubble .code-str { color: #ffd9a0; }
+  .bubble :not(pre) > code {
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    color: var(--accent-strong);
+    border-radius: 5px; padding: 1px 5px;
+    font-family: Consolas, monospace; font-size: .9em;
+  }
+
+  .meta { font-size: 11.5px; color: var(--text2); margin: 5px 6px 0; opacity: .85; }
+
+  /* 思考折叠块：学她说话 →「……想了想」 */
+  details.think { margin-bottom: 6px; }
+  details.think summary {
+    list-style: none;
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--chip);
+    border: 1px solid var(--border);
+    color: var(--text2);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all .2s;
+    user-select: none;
+  }
+  details.think summary::-webkit-details-marker { display: none; }
+  details.think summary:hover { color: var(--accent-strong); border-color: var(--accent); }
+  details.think summary .arr { transition: rotate .25s; font-size: 10px; }
+  details.think[open] summary .arr { rotate: 90deg; }
+  details.think .think-body {
+    margin-top: 6px;
+    padding: 8px 12px;
+    border-left: 3px solid var(--accent);
+    background: color-mix(in srgb, var(--accent-soft) 55%, transparent);
+    border-radius: 0 10px 10px 0;
+    color: var(--text2);
+    font-size: 12.5px;
+    line-height: 1.7;
+    max-height: 180px;
+    overflow-y: auto;
+    animation: fadein .3s ease;
+  }
+  @keyframes fadein { from { opacity: 0; translate: 0 -4px; } to { opacity: 1; translate: 0 0; } }
+
+  /* 正在输入：猫爪印一个一个冒出来 */
+  .typing { display: flex; align-items: center; gap: 7px; padding: 14px 18px; }
+  .typing .paw {
+    width: 15px; height: 15px;
+    color: var(--accent);
+    opacity: .35;
+    animation: step 1.2s ease-in-out infinite;
+  }
+  .typing .paw:nth-child(2) { animation-delay: .2s; }
+  .typing .paw:nth-child(3) { animation-delay: .4s; }
+  .typing .paw svg { width: 100%; height: 100%; }
+  @keyframes step {
+    0%, 55%, 100% { transform: translateY(0) scale(.85); opacity: .3; }
+    25% { transform: translateY(-5px) scale(1.05); opacity: 1; }
+  }
+
+  /* ============ 空状态：她在睡午觉 ============ */
+  .scene-wrap { display: none; }
+  .app.empty .chat-view { display: none; }
+  .app.empty .scene-wrap { display: block; }
+  .scene {
+    height: 100%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 22px;
+    padding: 20px;
+  }
+  .scene-card {
+    position: relative;
+    width: min(500px, 92%);
+    height: 270px;
+    border-radius: 30px;
+    overflow: hidden;
+    background: linear-gradient(180deg, var(--sky-top), var(--sky-bottom) 78%);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    transition: background var(--av);
+  }
+  .sun {
+    position: absolute; top: 24px; right: 34px;
+    width: 52px; height: 52px; border-radius: 50%;
+    background: #ffd76e;
+    box-shadow: 0 0 34px rgba(255, 215, 110, .85);
+    transition: opacity var(--av), background var(--av);
+  }
+  :root[data-mode="dark"] .sun {
+    background: #f2f6d8;
+    box-shadow: 0 0 30px rgba(220, 240, 180, .35);
+  }
+  /* 星星只在夜里亮 */
+  .stars { position: absolute; inset: 0; opacity: 0; transition: opacity var(--av); }
+  :root[data-mode="dark"] .stars { opacity: 1; }
+  .stars i {
+    position: absolute; width: 3px; height: 3px; border-radius: 50%;
+    background: #fff; opacity: var(--star);
+    animation: twinkle 2.6s ease-in-out infinite;
+  }
+  .stars i:nth-child(1) { left: 12%; top: 18%; }
+  .stars i:nth-child(2) { left: 30%; top: 10%; animation-delay: .7s; }
+  .stars i:nth-child(3) { left: 48%; top: 22%; animation-delay: 1.3s; }
+  .stars i:nth-child(4) { left: 64%; top: 12%; animation-delay: .4s; }
+  .stars i:nth-child(5) { left: 82%; top: 26%; animation-delay: 1.8s; }
+  .stars i:nth-child(6) { left: 22%; top: 34%; animation-delay: 2.1s; width: 2px; height: 2px; }
+  @keyframes twinkle { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+
+  .cloud {
+    position: absolute;
+    background: #fff; border-radius: 99px;
+    opacity: .85;
+    animation: drift 9s ease-in-out infinite alternate;
+  }
+  .cloud::before, .cloud::after { content: ""; position: absolute; background: #fff; border-radius: 50%; }
+  .cloud.c1 { width: 74px; height: 22px; left: 12%; top: 26%; }
+  .cloud.c1::before { width: 30px; height: 30px; top: -14px; left: 12px; }
+  .cloud.c1::after  { width: 22px; height: 22px; top: -9px;  left: 40px; }
+  .cloud.c2 { width: 52px; height: 17px; left: 46%; top: 14%; animation-delay: 2.5s; opacity: .7; }
+  .cloud.c2::before { width: 22px; height: 22px; top: -10px; left: 9px; }
+  .cloud.c2::after  { width: 16px; height: 16px; top: -7px; left: 28px; }
+  :root[data-mode="dark"] .cloud { background: #31453a; opacity: .5; }
+  :root[data-mode="dark"] .cloud::before, :root[data-mode="dark"] .cloud::after { background: #31453a; }
+  @keyframes drift { from { translate: 0 0; } to { translate: 26px 4px; } }
+
+  .hill, .hill2 {
+    position: absolute; border-radius: 50% 50% 0 0;
+    transition: background var(--av);
+  }
+  .hill  { bottom: -46px; left: -14%; width: 128%; height: 130px; background: var(--hill); }
+  .hill2 { bottom: -58px; left: -24%; width: 150%; height: 130px; background: var(--hill2); }
+
+  .guitar {
+    position: absolute; right: 34px; bottom: 46px;
+    width: 52px; rotate: 10deg;
+    filter: drop-shadow(0 3px 5px rgba(40, 80, 40, .25));
+  }
+  /* 睡午觉：枕头 + 睡着的乐奈 */
+  .nap { position: absolute; left: 50%; bottom: 30px; translate: -50%; }
+  .pillow {
+    position: absolute; left: 50%; bottom: -6px; translate: -50%;
+    width: 150px; height: 34px;
+    background: #fff;
+    border-radius: 18px;
+    box-shadow: 0 4px 10px rgba(60, 110, 60, .18);
+  }
+  :root[data-mode="dark"] .pillow { background: #3a4d38; }
+  .nap .face { position: relative; width: 84px; height: 84px; display: block; margin-bottom: 16px; }
+  /* Zzz 一个一个往上飘 */
+  .zzz { position: absolute; right: -26px; top: -6px; font-weight: 700; color: var(--accent-strong); }
+  .zzz span { position: absolute; right: 0; opacity: 0; animation: zfloat 3.2s ease-out infinite; }
+  .zzz span:nth-child(1) { font-size: 13px; animation-delay: 0s; }
+  .zzz span:nth-child(2) { font-size: 17px; animation-delay: 1.05s; }
+  .zzz span:nth-child(3) { font-size: 21px; animation-delay: 2.1s; }
+  @keyframes zfloat {
+    0%   { translate: 0 0; opacity: 0; }
+    15%  { opacity: .95; }
+    70%  { opacity: .5; }
+    100% { translate: 14px -34px; rotate: 14deg; opacity: 0; }
+  }
+  /* 音符飘 */
+  .note {
+    position: absolute; bottom: 90px;
+    color: var(--accent-strong);
+    opacity: 0;
+    animation: notefloat 5s ease-in-out infinite;
+  }
+  .note.n1 { left: 18%; }
+  .note.n2 { left: 74%; animation-delay: 2.4s; font-size: 18px; }
+  @keyframes notefloat {
+    0%   { translate: 0 0; opacity: 0; }
+    20%  { opacity: .8; }
+    80%  { opacity: .3; }
+    100% { translate: 10px -42px; opacity: 0; }
+  }
+
+  .scene-text { text-align: center; }
+  .scene-text h2 { font-size: 25px; font-weight: 700; color: var(--text); letter-spacing: 1px; }
+  .scene-text p { margin-top: 7px; font-size: 13.5px; color: var(--text2); }
+  .scene-text .new-chat { margin-top: 16px; padding: 10px 26px; }
+
+  /* ============ 输入区 ============ */
+  .composer { padding: 12px 26px 18px; }
+  .composer-inner {
+    max-width: 760px; margin: 0 auto;
+    display: flex; align-items: flex-end; gap: 10px;
+    background: var(--panel);
+    border: 1.5px solid var(--rana-border);
+    border-radius: 24px;
+    padding: 10px 10px 10px 18px;
+    box-shadow: var(--shadow);
+    transition: border-color .2s, box-shadow .2s, background var(--av);
+  }
+  .composer-inner:focus-within { border-color: var(--accent); box-shadow: 0 8px 26px rgba(119,221,119,.3); }
+  .composer textarea {
+    flex: 1;
+    border: none; outline: none; resize: none;
+    background: transparent;
+    color: var(--text);
+    font-size: 14.5px;
+    font-family: inherit;
+    line-height: 1.6;
+    max-height: 140px;
+    padding: 6px 0;
+  }
+  .composer textarea::placeholder { color: var(--text2); }
+  /* 发送键 = 猫爪 */
+  .send {
+    width: 42px; height: 42px;
+    border-radius: 50%;
+    border: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+    color: #fff;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 14px rgba(85,180,100,.42);
+    transition: transform .2s cubic-bezier(.34,1.56,.64,1), box-shadow .2s;
+  }
+  .send svg { width: 20px; height: 20px; }
+  .send:hover { transform: scale(1.12) rotate(8deg); box-shadow: 0 6px 20px rgba(85,180,100,.52); }
+  .send:active { transform: scale(.94); }
+  .composer-hint {
+    max-width: 760px; margin: 7px auto 0;
+    text-align: center; font-size: 11px; color: var(--text2); opacity: .7;
+  }
+
+  /* ============ 角标 ============ */
+  .badge {
+    position: fixed; left: 14px; bottom: 12px;
+    z-index: 5;
+    background: var(--chip);
+    border: 1px solid var(--border);
+    color: var(--text2);
+    font-size: 11.5px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    opacity: .85;
+    pointer-events: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  }
+</style>
+</head>
+<body>
+  <!-- 共用 SVG 素材：乐奈脸（醒/睡）、铃铛、猫爪、吉他 -->
+  <svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="avbg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#eef7e8"/><stop offset="1" stop-color="#d3ecc9"/>
+      </linearGradient>
+      <linearGradient id="avhair" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#f2e9ee"/><stop offset="1" stop-color="#d7c3cf"/>
+      </linearGradient>
+    </defs>
+    <!-- 乐奈的脸（醒）：银发齐刘海 + 异色瞳（左蓝右黄）+ 猫嘴ω + 绿发夹 -->
+    <symbol id="rana-face" viewBox="0 0 64 64">
+      <circle cx="32" cy="32" r="32" fill="url(#avbg)"/>
+      <path d="M9,34 a23,24 0 1 1 46,0 v13 a4,4 0 0 1 -4,4 h-38 a4,4 0 0 1 -4,-4 z" fill="url(#avhair)"/>
+      <ellipse cx="32" cy="37.5" rx="14.5" ry="13" fill="#fff5ef"/>
+      <path d="M17.5,33 C17.5,21.5 24,15 32,15 C40,15 46.5,21.5 46.5,33 Q44,36.2 41.5,33 Q39,36.2 36.5,33 Q34,36.2 31.5,33 Q29,36.2 26.5,33 Q24,36.2 21.5,33 Q19.4,35 17.5,33 Z" fill="#efe4ea"/>
+      <ellipse cx="25.5" cy="38.5" rx="2.6" ry="3" fill="#5aa9e6"/>
+      <ellipse cx="38.5" cy="38.5" rx="2.6" ry="3" fill="#f0c94a"/>
+      <circle cx="24.6" cy="37.4" r=".9" fill="#fff"/>
+      <circle cx="37.6" cy="37.4" r=".9" fill="#fff"/>
+      <path d="M23,36.7 q2.5,-1.4 5,0" stroke="#6b5a63" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+      <path d="M36,36.7 q2.5,-1.4 5,0" stroke="#6b5a63" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+      <ellipse cx="21.5" cy="43" rx="2.8" ry="1.6" fill="#f3c3cd" opacity=".8"/>
+      <ellipse cx="42.5" cy="43" rx="2.8" ry="1.6" fill="#f3c3cd" opacity=".8"/>
+      <path d="M29.8,44.4 q1.1,1.5 2.2,0 q1.1,1.5 2.2,0" stroke="#6b5a63" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+      <path d="M46.8,15.6 l4.6,1.1 c1,.25 1.3,1.5 .5,2.2 l-3.6,3 c-.75,.6 -1.9,.15 -2,-.8 l-.85,-4.2 c-.1,-.95 .55,-1.55 1.35,-1.3 z" fill="#77dd77"/>
+    </symbol>
+    <!-- 乐奈的脸（睡着）：眼睛弯成 ˘ ˘ -->
+    <symbol id="rana-sleep" viewBox="0 0 64 64">
+      <circle cx="32" cy="32" r="32" fill="url(#avbg)"/>
+      <path d="M9,34 a23,24 0 1 1 46,0 v13 a4,4 0 0 1 -4,4 h-38 a4,4 0 0 1 -4,-4 z" fill="url(#avhair)"/>
+      <ellipse cx="32" cy="37.5" rx="14.5" ry="13" fill="#fff5ef"/>
+      <path d="M17.5,33 C17.5,21.5 24,15 32,15 C40,15 46.5,21.5 46.5,33 Q44,36.2 41.5,33 Q39,36.2 36.5,33 Q34,36.2 31.5,33 Q29,36.2 26.5,33 Q24,36.2 21.5,33 Q19.4,35 17.5,33 Z" fill="#efe4ea"/>
+      <path d="M22.6,38.6 q2.9,2.6 5.8,0" stroke="#6b5a63" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+      <path d="M35.6,38.6 q2.9,2.6 5.8,0" stroke="#6b5a63" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+      <ellipse cx="21.5" cy="43" rx="2.8" ry="1.6" fill="#f3c3cd" opacity=".8"/>
+      <ellipse cx="42.5" cy="43" rx="2.8" ry="1.6" fill="#f3c3cd" opacity=".8"/>
+      <path d="M29.8,44.4 q1.1,1.5 2.2,0 q1.1,1.5 2.2,0" stroke="#6b5a63" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+      <path d="M46.8,15.6 l4.6,1.1 c1,.25 1.3,1.5 .5,2.2 l-3.6,3 c-.75,.6 -1.9,.15 -2,-.8 l-.85,-4.2 c-.1,-.95 .55,-1.55 1.35,-1.3 z" fill="#77dd77"/>
+    </symbol>
+    <!-- 铃铛 -->
+    <symbol id="bell" viewBox="0 0 24 24">
+      <rect x="10.4" y="1.6" width="3.2" height="3" rx="1.4" fill="#d9a520"/>
+      <path d="M12 3.4c4.5 0 7.2 3.3 7.2 7.8 0 2.7.6 4.2 1.5 5.3.5.6.1 1.7-.8 1.7H4.1c-.9 0-1.3-1.1-.8-1.7.9-1.1 1.5-2.6 1.5-5.3C4.8 6.7 7.5 3.4 12 3.4z" fill="#f5c84c" stroke="#d9a520" stroke-width="1.1"/>
+      <rect x="4.6" y="17.2" width="14.8" height="1.6" rx=".8" fill="#d9a520"/>
+      <circle cx="12" cy="20.6" r="1.9" fill="#e8b62e" stroke="#c99418" stroke-width=".8"/>
+    </symbol>
+    <!-- 猫爪 -->
+    <symbol id="paw" viewBox="0 0 24 24">
+      <ellipse cx="12" cy="16" rx="5.4" ry="4.5"/>
+      <ellipse cx="5.4" cy="10.6" rx="2.1" ry="2.7" transform="rotate(-18 5.4 10.6)"/>
+      <ellipse cx="9.9" cy="7.4" rx="2.1" ry="2.8"/>
+      <ellipse cx="14.7" cy="7.6" rx="2.1" ry="2.8" transform="rotate(8 14.7 7.6)"/>
+      <ellipse cx="18.8" cy="11" rx="2" ry="2.6" transform="rotate(20 18.8 11)"/>
+    </symbol>
+    <!-- 吉他（电吉他剪影，她的 ESP POTBELLY） -->
+    <symbol id="guitar" viewBox="0 0 60 120">
+      <rect x="27" y="2" width="6" height="52" rx="2.5" fill="#8a6b4f"/>
+      <rect x="24.5" y="0" width="11" height="13" rx="3" fill="#6e543c"/>
+      <path d="M30 52 c13 0 17 8 17 17 0 6-3 9-3 14 0 6 4 8 4 15 0 12-9 20-18 20 s-18-8-18-20 c0-7 4-9 4-15 0-5-3-8-3-14 0-9 4-17 17-17z" fill="#5faf6e"/>
+      <rect x="28.6" y="54" width="2.8" height="60" rx="1.4" fill="#f4f1e6" opacity=".85"/>
+      <circle cx="30" cy="96" r="4.5" fill="#3d8a4f"/>
+      <rect x="20" y="86" width="20" height="6" rx="3" fill="#3d8a4f" opacity=".8"/>
+    </symbol>
+  </svg>
+
+  <div class="petal"></div><div class="petal"></div><div class="petal"></div>
+  <div class="petal"></div><div class="petal"></div><div class="petal"></div>
+
+  <div class="app" id="app">
+    <!-- 侧栏 -->
+    <aside class="sidebar">
+      <div class="brand">
+        <svg class="brand-bell"><use href="#bell"/></svg>
+        Rana<span class="twin"><i></i><i></i></span>
+      </div>
+      <button class="new-chat">＋ 新会话</button>
+      <button class="rp-btn">🐾 Rana·RP</button>
+      <div class="sec-label">会话</div>
+      <div class="sess-list">
+        <div class="sess active">
+          <div class="name"><span class="pin">📌</span>今日闲谈</div>
+          <div class="sub">嗯，泡了杯红茶… · 21:45</div>
+        </div>
+        <div class="sess">
+          <div class="name">🔒 RP 晚间剧场</div>
+          <div class="sub">昨晚 · 4.2k tokens</div>
+        </div>
+        <div class="sess">
+          <div class="name"><span class="pin">📌</span>早报 09-11</div>
+          <div class="sub">今早 07:30 · 已读</div>
+        </div>
+        <div class="sess">
+          <div class="name">周报整理<span class="unread"></span></div>
+          <div class="sub">周一 · EVA-14B</div>
+        </div>
+        <div class="sess">
+          <div class="name">模型切换调试</div>
+          <div class="sub">09-08 · 1.8k tokens</div>
+        </div>
+      </div>
+      <div class="side-foot">
+        <button class="ghost" title="云端模型">☁</button>
+        <button class="ghost" title="本地模型">🖥</button>
+        <button class="ghost" title="外观设置">🎨</button>
+      </div>
+    </aside>
+
+    <!-- 主区 -->
+    <main>
+      <header class="topbar">
+        <span class="status-dot"></span>
+        <div class="top-title">今日闲谈</div>
+        <span class="pill on"><span class="ic">💭</span>深度思考</span>
+        <span class="pill"><span class="ic">⚡</span>EVA-14B ▾</span>
+        <span class="pill" id="viewPill"><span class="ic">🛋</span><span id="viewTx">空状态</span></span>
+        <span class="pill" id="modePill"><span class="ic" id="modeIc">🌙</span><span id="modeTx">夜间</span></span>
+        <span class="pill" id="replayPill"><span class="ic">↻</span>动画</span>
+      </header>
+
+      <!-- 聊天视图 -->
+      <section class="chat chat-view" id="chat">
+        <div class="chat-inner" id="chatInner">
+
+          <div class="msg user">
+            <div class="av-wrap"><div class="av user-av">你</div></div>
+            <div class="stack">
+              <div class="bubble">今天好累啊，终于回来了</div>
+              <div class="meta">21:42</div>
+            </div>
+          </div>
+
+          <div class="msg rana">
+            <div class="av-wrap">
+              <svg class="av"><use href="#rana-face"/></svg>
+              <svg class="av-bell"><use href="#bell"/></svg>
+            </div>
+            <div class="stack">
+              <details class="think">
+                <summary>……想了想 · 86 字 <span class="arr">▶</span></summary>
+                <div class="think-body">用户说很累，现在需要的是安抚和陪伴，不是解决方案。语气要短一点，像她平时的样子，先关心身体，再给一个门槛很低的建议。</div>
+              </details>
+              <div class="bubble">……欢迎回来。辛苦了。<br>先去洗把脸，喝口温水。然后，聊天。</div>
+              <div class="meta">EVA-14B · 21:43</div>
+            </div>
+          </div>
+
+          <div class="msg user">
+            <div class="av-wrap"><div class="av user-av">你</div></div>
+            <div class="stack">
+              <div class="bubble">嗯，泡了杯红茶。对了明天周六，有什么安排建议吗</div>
+              <div class="meta">21:44</div>
+            </div>
+          </div>
+
+          <div class="msg rana">
+            <div class="av-wrap">
+              <svg class="av"><use href="#rana-face"/></svg>
+              <svg class="av-bell"><use href="#bell"/></svg>
+            </div>
+            <div class="stack">
+              <div class="bubble">晴天。……上午，出门。晒太阳。<br>下午在家。看片子。……把想法列成清单也行。</div>
+              <div class="meta">EVA-14B · 21:45</div>
+            </div>
+          </div>
+
+          <div class="msg user">
+            <div class="av-wrap"><div class="av user-av">你</div></div>
+            <div class="stack">
+              <div class="bubble">好，那你帮我把早报脚本里的抓取时间改成早上七点半？</div>
+              <div class="meta">21:46</div>
+            </div>
+          </div>
+
+          <div class="msg rana">
+            <div class="av-wrap">
+              <svg class="av"><use href="#rana-face"/></svg>
+              <svg class="av-bell"><use href="#bell"/></svg>
+            </div>
+            <div class="stack">
+              <div class="bubble">……改好了。<code>cron</code> 那行是这样：<pre><span class="code-kw">const</span> cron = <span class="code-str">"30 7 * * *"</span>;  <span class="code-kw">// 每天早上 7:30</span></pre>明早，准时。</div>
+              <div class="meta">EVA-14B · 21:46</div>
+            </div>
+          </div>
+
+          <div class="msg rana" id="typingMsg" style="display:none">
+            <div class="av-wrap">
+              <svg class="av"><use href="#rana-face"/></svg>
+              <svg class="av-bell"><use href="#bell"/></svg>
+            </div>
+            <div class="stack">
+              <div class="bubble typing">
+                <span class="paw"><svg><use href="#paw"/></svg></span><span class="paw"><svg><use href="#paw"/></svg></span><span class="paw"><svg><use href="#paw"/></svg></span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- 空状态：睡午觉场景 -->
+      <section class="chat scene-wrap">
+        <div class="scene">
+          <div class="scene-card">
+            <div class="stars"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="sun"></div>
+            <div class="cloud c1"></div>
+            <div class="cloud c2"></div>
+            <div class="hill"></div>
+            <div class="hill2"></div>
+            <svg class="guitar"><use href="#guitar"/></svg>
+            <span class="note n1">♪</span>
+            <span class="note n2">♫</span>
+            <div class="nap">
+              <div class="pillow"></div>
+              <svg class="face"><use href="#rana-sleep"/></svg>
+              <div class="zzz"><span>z</span><span>z</span><span>Z</span></div>
+            </div>
+          </div>
+          <div class="scene-text">
+            <h2>……困了。</h2>
+            <p>要聊天的话，叫我。</p>
+            <button class="new-chat">＋ 新会话</button>
+          </div>
+        </div>
+      </section>
+
+      <footer class="composer">
+        <div class="composer-inner">
+          <textarea id="input" rows="1" placeholder="跟乐奈说点什么……"></textarea>
+          <button class="send" id="sendBtn" title="发送"><svg fill="currentColor"><use href="#paw"/></svg></button>
+        </div>
+        <div class="composer-hint">Enter 发送 · Shift+Enter 换行（这是效果图，随便玩）</div>
+      </footer>
+    </main>
+  </div>
+
+  <div class="badge">效果图 D · 软萌乐奈 Pro（非真实界面）</div>
+
+<script>
+  const root = document.documentElement;
+  const app = document.getElementById('app');
+  const chat = document.getElementById('chat');
+  const chatInner = document.getElementById('chatInner');
+  const input = document.getElementById('input');
+  const sendBtn = document.getElementById('sendBtn');
+  const typingMsg = document.getElementById('typingMsg');
+
+  // 明暗切换
+  document.getElementById('modePill').addEventListener('click', () => {
+    const dark = root.dataset.mode === 'dark';
+    root.dataset.mode = dark ? 'light' : 'dark';
+    document.getElementById('modeIc').textContent = dark ? '🌙' : '☀️';
+    document.getElementById('modeTx').textContent = dark ? '夜间' : '白天';
+  });
+
+  // 聊天 / 空状态场景切换（预览用）
+  document.getElementById('viewPill').addEventListener('click', () => {
+    const toEmpty = !app.classList.contains('empty');
+    app.classList.toggle('empty', toEmpty);
+    document.getElementById('viewTx').textContent = toEmpty ? '聊天' : '空状态';
+  });
+
+  // 重播入场动画
+  document.getElementById('replayPill').addEventListener('click', () => {
+    document.querySelectorAll('.msg').forEach(el => {
+      el.style.animation = 'none';
+      void el.offsetWidth;
+      el.style.animation = '';
+    });
+  });
+
+  // 假发送：展示猫爪打字 + 短句回复
+  const replies = [
+    '……嗯。知道了。',
+    '无聊。……再聊会儿也行。',
+    '有趣的女孩子。',
+    '芭菲。……想吃抹茶芭菲了。',
+    '吉他。……弹会儿。'
+  ];
+  let ri = 0;
+  let time = 21.75;
+
+  function nextTime() {
+    time += (Math.round(Math.random() * 2) + 1) / 60;
+    const h = Math.floor(time), m = Math.round((time - h) * 60);
+    return String(h).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+  }
+  function scrollBottom() { chat.scrollTop = chat.scrollHeight; }
+
+  function send() {
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+
+    const um = document.createElement('div');
+    um.className = 'msg user';
+    um.innerHTML = '<div class="av-wrap"><div class="av user-av">你</div></div>' +
+      '<div class="stack"><div class="bubble"></div><div class="meta">' + nextTime() + '</div></div>';
+    um.querySelector('.bubble').textContent = text;
+    chatInner.insertBefore(um, typingMsg);
+    scrollBottom();
+
+    setTimeout(() => {
+      typingMsg.style.display = '';
+      scrollBottom();
+      setTimeout(() => {
+        const rm = document.createElement('div');
+        rm.className = 'msg rana';
+        rm.innerHTML = '<div class="av-wrap"><svg class="av"><use href="#rana-face"/></svg>' +
+          '<svg class="av-bell"><use href="#bell"/></svg></div>' +
+          '<div class="stack"><div class="bubble"></div><div class="meta">EVA-14B · ' + nextTime() + '</div></div>';
+        rm.querySelector('.bubble').textContent = replies[ri++ % replies.length];
+        chatInner.insertBefore(rm, typingMsg);
+        typingMsg.style.display = 'none';
+        scrollBottom();
+      }, 1400);
+    }, 300);
+  }
+
+  sendBtn.addEventListener('click', send);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+</script>
+</body>
+</html>
