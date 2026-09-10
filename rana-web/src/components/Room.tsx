@@ -43,20 +43,7 @@ export default function Room() {
             />
             <circle cx="12" cy="20.6" r="1.9" fill="#e8b62e" stroke="#c99418" strokeWidth=".8" />
           </svg>
-          {/* 相框（睡着的她） */}
-          <div className="it-frame">
-            <svg viewBox="0 0 64 64">
-              <circle cx="32" cy="32" r="30" fill="#eef7e8" />
-              <ellipse cx="32" cy="40" rx="15" ry="12" fill="#fff5ef" />
-              <path
-                d="M17.5,35 C17.5,24 24,18 32,18 C40,18 46.5,24 46.5,35 Q44,38 41.5,35 Q39,38 36.5,35 Q34,38 31.5,35 Q29,38 26.5,35 Q24,38 21.5,35 Q19.4,37 17.5,35 Z"
-                fill="#efe4ea"
-              />
-              <path d="M23,40 q2.9,2.4 5.8,0" stroke="#6b5a63" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-              <path d="M35.6,40 q2.9,2.4 5.8,0" stroke="#6b5a63" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-              <path d="M30,45.5 q1.1,1.5 2.2,0 q1.1,1.5 2.2,0" stroke="#6b5a63" strokeWidth="1.3" fill="none" strokeLinecap="round" />
-            </svg>
-          </div>
+          {/* 相框（用户反馈：手绘脸发色与墙色太近且小，先不显示；上传头像功能在设置里） */}
         </div>
         <div className="plank" />
         <span className="bracket" />

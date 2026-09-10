@@ -39,6 +39,9 @@
   /* 背景图层（有自定义背景时由 JS 覆盖） */
   --user-bg-image: none;
   --user-bg-opacity: 0.35;
+  /* 字体（本机字库）：正文 MiSans（圆润现代），标题用思源宋特粗（书卷气），回退微软雅黑 */
+  --font-body: "MiSans", "MiSans-Regular", "Noto Sans SC", "Source Han Sans SC", "Segoe UI", "Microsoft YaHei", sans-serif;
+  --font-title: "Source Han Serif SC Heavy", "Noto Serif SC", "SimSun", serif;
 }
 
 /* 夜间模式：她的房间熄了灯，绿在暗处更亮 */
@@ -76,7 +79,7 @@
 html, body, #root {
   height: 100%;
   margin: 0;
-  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: var(--font-body);
   color: var(--text);
   background: var(--bg);
 }
@@ -120,11 +123,63 @@ body.has-bg .session-item:hover { background: color-mix(in srgb, var(--bg-hover)
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 262px 1fr;
+  grid-template-columns: 262px 1fr 268px;
   /* 行高锁定：防止聊天历史按内容撑高，把输入框/侧栏按钮推出视口 */
   grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
+.app.panel-closed { grid-template-columns: 262px 1fr 0; }
+.app.panel-closed .usage-panel { display: none; }
+.up-toggle {
+  position: fixed;
+  right: 14px;
+  top: 66px;
+  z-index: 40;
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--panel-t);
+  backdrop-filter: blur(8px);
+  color: var(--text-dim);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+/* ---------- 会话页右侧用量面板 ---------- */
+.usage-panel {
+  background: var(--panel-t);
+  backdrop-filter: blur(10px);
+  border-left: 1px solid var(--border);
+  padding: 16px 14px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.up-head { display: flex; align-items: center; justify-content: space-between; }
+.up-head h3 { margin: 0; font-size: 14px; }
+.up-collapse {
+  border: none; background: transparent; cursor: pointer;
+  color: var(--text-dim); font-size: 15px; padding: 2px 6px; border-radius: 6px;
+}
+.up-collapse:hover { background: var(--bg-hover); }
+.up-card {
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.up-card .k { font-size: 11px; color: var(--text-dim); letter-spacing: 0.4px; }
+.up-card .v { font-size: 19px; font-weight: 700; }
+.up-card .v small { font-size: 11px; font-weight: 400; color: var(--text-dim); }
+.up-row { display: flex; justify-content: space-between; font-size: 12.5px; }
+.up-row .label { color: var(--text-dim); }
+.ctx-bar { height: 8px; border-radius: 999px; background: var(--bg-hover); overflow: hidden; }
+.ctx-bar > div { height: 100%; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 72%, #ffffff), var(--accent)); border-radius: 999px; }
 
 /* ---------- sidebar ---------- */
 .sidebar {
@@ -1198,3 +1253,90 @@ body.has-bg .room { display: none; }
 .summary-card .side-av { display: inline-flex; border-radius: 50%; overflow: hidden; border: 2px solid var(--accent-soft); }
 .summary-card .summary-text { font-size: 13.5px; line-height: 1.85; color: var(--text); margin: 0; white-space: pre-wrap; }
 .summary-card .side-foot { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); font-size: 11px; color: var(--text-dim); opacity: .85; line-height: 1.6; }
+
+/* ========== 字体应用：标题用思源宋特粗 ========== */
+.brand, .page-intro h2, .ng-title, .empty-state h1, .topnav .tab, .summary-card h3, .tg-label, .modal-head h3, .card h3 {
+  font-family: var(--font-title);
+  letter-spacing: 0.5px;
+}
+
+/* ========== 早报搜索组：双列卡片网格 ========== */
+.nc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 700px) { .nc-grid { grid-template-columns: 1fr; } }
+.news-card {
+  display: flex; flex-direction: column; gap: 5px;
+  background: var(--panel-t); backdrop-filter: blur(8px);
+  border: 1.5px solid var(--border); border-radius: 16px;
+  padding: 12px 14px;
+  text-decoration: none; color: var(--text);
+  box-shadow: var(--shadow);
+  position: relative; overflow: hidden;
+  transition: border-color 0.2s, transform 0.18s cubic-bezier(.34,1.56,.64,1), box-shadow 0.2s;
+}
+.news-card::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3.5px;
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 40%, transparent));
+  opacity: 0; transition: opacity 0.2s;
+}
+.news-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 10px 26px rgba(90, 190, 110, 0.22); }
+.news-card:hover::before { opacity: 1; }
+.news-card .nc-src {
+  align-self: flex-start;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.3px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-radius: 999px; padding: 2px 9px;
+}
+.news-card .n-title { font-size: 13.8px; font-weight: 650; line-height: 1.5; }
+.news-card .n-sum {
+  font-size: 12px; color: var(--text-dim); line-height: 1.6;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+/* ========== 乐奈总结卡（右侧小窗，无头像） ========== */
+.summary-card {
+  position: relative;
+  border-radius: 20px;
+  padding: 1.5px; /* 外层渐变描边 */
+  background: linear-gradient(135deg, #5aa9e6, var(--accent) 45%, #f0c94a);
+  box-shadow: var(--shadow);
+}
+.summary-card > *:not(.sc-head) { margin-left: 16px; margin-right: 14px; }
+.summary-card .sc-head {
+  margin: 0; padding: 13px 14px 4px 16px;
+  display: flex; align-items: baseline; gap: 2px;
+}
+.summary-card .sc-head h3 { font-size: 15.5px; color: var(--text); }
+.summary-card .sc-quote {
+  font-family: var(--font-title);
+  font-size: 30px; line-height: 0.6;
+  color: var(--accent-strong); opacity: 0.85;
+  margin-right: 2px;
+}
+.summary-card::after {
+  content: "」"; position: absolute; right: 14px; bottom: 40px;
+  font-family: var(--font-title);
+  font-size: 30px; line-height: 0.6;
+  color: var(--accent-strong); opacity: 0.35;
+  pointer-events: none;
+}
+.summary-card .summary-text, .summary-card .pending-text {
+  position: relative; z-index: 1;
+  display: block;
+  background: var(--bg-panel);
+  border-radius: 0 0 18px 18px;
+  margin: 4px 1.5px 1.5px;
+  padding: 10px 14px 14px;
+  font-size: 13.5px; line-height: 1.9; color: var(--text);
+  white-space: pre-wrap;
+}
+.summary-card .side-foot {
+  position: relative; z-index: 1;
+  background: var(--bg-panel);
+  border-radius: 0 0 18px 18px;
+  margin-top: 1.5px;
+  padding: 0 14px 12px;
+  font-size: 11px; color: var(--text-dim); opacity: 0.85; line-height: 1.6;
+  border-top: 1px dashed var(--border);
+  padding-top: 9px;
+}

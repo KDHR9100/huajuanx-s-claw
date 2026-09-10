@@ -31,6 +31,8 @@ interface AppState {
 
   /** 当前页面视图（会话 / 电脑状态 / 定时任务） */
   view: AppView;
+  /** 会话页右侧用量面板开关 */
+  panelOpen: boolean;
   /** 显示模型思考过程（<think> 折叠块）；关闭时完全不渲染 */
   showReasoning: boolean;
 
@@ -55,6 +57,7 @@ interface AppState {
   setRun: (key: string, run: StreamingRun | undefined) => void;
   markUnread: (key: string) => void;
   setView: (view: AppView) => void;
+  togglePanel: () => void;
   setShowReasoning: (v: boolean) => void;
   updateSettings: (patch: Partial<ThemeSettings>) => void;
   resetSettings: () => void;
@@ -89,6 +92,7 @@ export const useAppStore = create<AppState>((set) => ({
   models: [],
   runs: {},
   view: "chat",
+  panelOpen: true,
   showReasoning: loadShowReasoning(),
 
   settings: loadSettings(),
@@ -131,6 +135,7 @@ export const useAppStore = create<AppState>((set) => ({
   setRun: (key, run) => set((s) => ({ runs: { ...s.runs, [key]: run } })),
   markUnread: (key) => set((s) => ({ unread: { ...s.unread, [key]: Date.now() } })),
   setView: (view) => set({ view }),
+  togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
   setShowReasoning: (showReasoning) => {
     localStorage.setItem(REASONING_KEY, showReasoning ? "1" : "0");
     set({ showReasoning });
