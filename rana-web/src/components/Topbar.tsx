@@ -84,17 +84,15 @@ export default function Topbar() {
   const conn = useAppStore((s) => s.conn);
   const sessions = useAppStore((s) => s.sessions);
   const currentKey = useAppStore((s) => s.currentKey);
-  const togglePanel = useAppStore((s) => s.togglePanel);
-  const panelOpen = useAppStore((s) => s.panelOpen);
+  const setView = useAppStore((s) => s.setView);
   const showReasoning = useAppStore((s) => s.showReasoning);
   const setShowReasoning = useAppStore((s) => s.setShowReasoning);
 
   const title = sessions.find((s) => s.key === currentKey)?.title ?? "Rana";
-  const dot = conn === "connected" ? "ok" : conn === "connecting" ? "wait" : "err";
 
   return (
     <header className="topbar">
-      <span className={`conn-dot ${dot}`} title={conn} />
+      <span className={`conn-dot ${dot(conn)}`} title={conn} />
       <span className="title">{title}</span>
       <button
         className={`btn ghost reason-toggle${showReasoning ? "" : " off"}`}
@@ -104,11 +102,13 @@ export default function Topbar() {
         💭 思考{showReasoning ? "" : "（关）"}
       </button>
       <ModelPicker />
-      {!panelOpen && (
-        <button className="btn ghost" onClick={togglePanel}>
-          用量
-        </button>
-      )}
+      <button className="btn ghost" onClick={() => setView("sys")} title="Token 用量在「电脑状态」页">
+        🧮 用量
+      </button>
     </header>
   );
+}
+
+function dot(conn: string) {
+  return conn === "connected" ? "ok" : conn === "connecting" ? "wait" : "err";
 }

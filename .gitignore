@@ -29,3 +29,8 @@ rana-web/private-memory-bridge.mjs
 # LM Studio 控制台（本地模型加载管理，node_modules 不入库）
 node_modules/
 lmctl/
+
+# Mimosa 安全扫描本地产物（含本地路径与扫描历史，不入公开仓库）
+.mimosa/
+# 记忆桥本地兜底过滤表（私人词表，不入公开仓库）
+rana-web/memory-bridge.privacy-patterns.json

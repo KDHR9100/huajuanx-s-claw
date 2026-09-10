@@ -198,7 +198,7 @@ class GatewayConnection {
         clientId: client.id,
         clientMode: client.mode,
         role: "operator",
-        scopes: ["operator.read", "operator.write"],
+        scopes: ["operator.read", "operator.write", "operator.admin"],
         signedAtMs: signedAt,
         token: this.token,
         nonce,
@@ -219,7 +219,7 @@ class GatewayConnection {
         maxProtocol: 4,
         client,
         role: "operator",
-        scopes: ["operator.read", "operator.write"],
+        scopes: ["operator.read", "operator.write", "operator.admin"],
         ...(device ? { device } : {}),
         auth: { token: this.token },
         locale: "zh-CN",
@@ -319,9 +319,27 @@ class GatewayConnection {
       this.scheduleRefreshSessions();
       return;
     }
+    if (event === "cron") {
+      // 定时任务有变动（run/job 变更）→ 通知订阅者（CronPage 自动刷新）
+      for (const cb of this.cronEventListeners) {
+        try {
+          cb(payload);
+        } catch {
+          /* 订阅者自己兜错 */
+        }
+      }
+      return;
+    }
     if (event === "shutdown") {
       store().setConn("closed", "gateway 正在重启");
     }
+  }
+
+  private cronEventListeners = new Set<(payload: unknown) => void>();
+  /** 订阅网关 cron 事件（任务运行/变更时触发）；返回取消订阅函数 */
+  onCronEvent(cb: (payload: unknown) => void): () => void {
+    this.cronEventListeners.add(cb);
+    return () => this.cronEventListeners.delete(cb);
   }
 
   private onChatEvent(p: ChatEventPayload) {
@@ -404,9 +422,9 @@ class GatewayConnection {
     const text = extractText(msg);
     if (!text) return;
     const list = s.messages[key] ?? [];
-    const last = list[list.length - 1];
-    // 本地乐观追加/流式渲染过的消息会再收到一份落库事件，按内容去重
-    if (last && last.role === role && last.text === text) return;
+    // 本地乐观追加/流式渲染过的消息会再收到一份落库事件，按内容去重。
+    // compaction 会让 user 落库事件晚于 assistant 回复到达，只比对最后一条会漏 → 扫最近几条
+    if (list.slice(-8).some((m) => m.role === role && m.text === text)) return;
     s.appendMessage(key, {
       id: String(p.messageId ?? `sm-${p.messageSeq ?? Date.now()}`),
       role: role as "user" | "assistant",

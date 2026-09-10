@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ChatMessage, ConnState, ModelInfo, SessionRow, ThemeSettings } from "../lib/types";
+import type { AppView, ChatMessage, ConnState, ModelInfo, SessionRow, ThemeSettings } from "../lib/types";
 import { applySettings, loadSettings, saveSettings, DEFAULT_SETTINGS } from "../lib/theme";
 
 interface StreamingRun {
@@ -29,7 +29,8 @@ interface AppState {
   /** 每个会话正在进行的 run（v1：每会话同时最多一个） */
   runs: Record<string, StreamingRun | undefined>;
 
-  panelOpen: boolean;
+  /** 当前页面视图（会话 / 电脑状态 / 定时任务） */
+  view: AppView;
   /** 显示模型思考过程（<think> 折叠块）；关闭时完全不渲染 */
   showReasoning: boolean;
 
@@ -53,7 +54,7 @@ interface AppState {
   patchMessage: (key: string, msgId: string, patch: Partial<ChatMessage>) => void;
   setRun: (key: string, run: StreamingRun | undefined) => void;
   markUnread: (key: string) => void;
-  togglePanel: () => void;
+  setView: (view: AppView) => void;
   setShowReasoning: (v: boolean) => void;
   updateSettings: (patch: Partial<ThemeSettings>) => void;
   resetSettings: () => void;
@@ -87,7 +88,7 @@ export const useAppStore = create<AppState>((set) => ({
   unread: {},
   models: [],
   runs: {},
-  panelOpen: true,
+  view: "chat",
   showReasoning: loadShowReasoning(),
 
   settings: loadSettings(),
@@ -129,7 +130,7 @@ export const useAppStore = create<AppState>((set) => ({
     }),
   setRun: (key, run) => set((s) => ({ runs: { ...s.runs, [key]: run } })),
   markUnread: (key) => set((s) => ({ unread: { ...s.unread, [key]: Date.now() } })),
-  togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
+  setView: (view) => set({ view }),
   setShowReasoning: (showReasoning) => {
     localStorage.setItem(REASONING_KEY, showReasoning ? "1" : "0");
     set({ showReasoning });

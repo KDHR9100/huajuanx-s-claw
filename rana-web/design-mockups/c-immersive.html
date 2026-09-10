@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-mode="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rana · 风格 C 沉浸氛围感（效果图）</title>
+<style>
+  /* ============ 变量 ============ */
+  :root { --tr: .5s ease; }
+  :root[data-mode="dark"] {
+    --bg: #100e1c;
+    --glass: rgba(255, 255, 255, .055);
+    --glass-strong: rgba(255, 255, 255, .09);
+    --glass-border: rgba(255, 255, 255, .1);
+    --text: #efeaf7;
+    --text2: #a89fc0;
+    --text3: #6f688c;
+    --accent: #f09fb8;
+    --accent-strong: #ffb9cc;
+    --accent-glow: rgba(240, 159, 184, .35);
+    --user-bubble: linear-gradient(135deg, rgba(240, 159, 184, .26), rgba(196, 130, 255, .2));
+    --user-border: rgba(240, 159, 184, .32);
+    --rana-bubble: rgba(255, 255, 255, .06);
+    --rana-border: rgba(255, 255, 255, .12);
+    --orb1: rgba(240, 130, 170, .5);
+    --orb2: rgba(96, 140, 255, .38);
+    --orb3: rgba(255, 170, 130, .25);
+    --rana-glow: rgba(119, 221, 119, .4);
+  }
+  :root[data-mode="light"] {
+    --bg: #fdeef2;
+    --glass: rgba(255, 255, 255, .55);
+    --glass-strong: rgba(255, 255, 255, .72);
+    --glass-border: rgba(255, 255, 255, .8);
+    --text: #463642;
+    --text2: #8a7a8f;
+    --text3: #b5a8bb;
+    --accent: #e8748f;
+    --accent-strong: #d95c7c;
+    --accent-glow: rgba(232, 116, 143, .3);
+    --user-bubble: linear-gradient(135deg, rgba(255, 170, 195, .75), rgba(255, 200, 170, .6));
+    --user-border: rgba(255, 255, 255, .7);
+    --rana-bubble: rgba(255, 255, 255, .65);
+    --rana-border: rgba(255, 255, 255, .85);
+    --orb1: rgba(255, 160, 190, .55);
+    --orb2: rgba(150, 175, 255, .5);
+    --orb3: rgba(255, 210, 160, .5);
+    --rana-glow: rgba(119, 221, 119, .35);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    transition: background var(--tr), color var(--tr);
+  }
+
+  /* ============ 氛围背景 ============ */
+  .scene { position: fixed; inset: 0; z-index: 0; overflow: hidden; }
+  .scene::after {
+    /* 暗角 */
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 50% 40%, transparent 55%, rgba(0, 0, 0, .28) 100%);
+    pointer-events: none;
+  }
+  :root[data-mode="light"] .scene::after { background: radial-gradient(ellipse at 50% 40%, transparent 60%, rgba(200, 150, 170, .18) 100%); }
+  .orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(70px);
+    will-change: transform;
+  }
+  .orb1 { width: 46vw; height: 46vw; left: -8vw; top: -12vw; background: var(--orb1); animation: drift1 22s ease-in-out infinite alternate; }
+  .orb2 { width: 40vw; height: 40vw; right: -6vw; top: 22vh; background: var(--orb2); animation: drift2 26s ease-in-out infinite alternate; }
+  .orb3 { width: 32vw; height: 32vw; left: 28vw; bottom: -14vw; background: var(--orb3); animation: drift3 19s ease-in-out infinite alternate; }
+  @keyframes drift1 { to { transform: translate(9vw, 7vh) scale(1.15); } }
+  @keyframes drift2 { to { transform: translate(-7vw, -9vh) scale(.9); } }
+  @keyframes drift3 { to { transform: translate(6vw, -6vh) scale(1.12); } }
+
+  /* 星点（夜间） */
+  .star {
+    position: absolute;
+    width: 2px; height: 2px;
+    border-radius: 50%;
+    background: #fff;
+    opacity: .5;
+    animation: twinkle 4s ease-in-out infinite;
+  }
+  :root[data-mode="light"] .star { display: none; }
+  .star:nth-child(4) { left: 12%; top: 20%; animation-delay: 0s; }
+  .star:nth-child(5) { left: 30%; top: 8%;  animation-delay: 1.2s; }
+  .star:nth-child(6) { left: 55%; top: 14%; animation-delay: 2.1s; }
+  .star:nth-child(7) { left: 76%; top: 6%;  animation-delay: .6s; }
+  .star:nth-child(8) { left: 88%; top: 26%; animation-delay: 1.8s; }
+  .star:nth-child(9) { left: 42%; top: 30%; animation-delay: 2.8s; }
+  @keyframes twinkle { 0%, 100% { opacity: .15; } 50% { opacity: .7; } }
+
+  /* ============ 布局：悬浮玻璃 ============ */
+  .app {
+    position: relative; z-index: 1;
+    display: grid;
+    grid-template-columns: 250px 1fr;
+    gap: 14px;
+    height: 100vh;
+    padding: 14px;
+  }
+
+  .sidebar {
+    background: var(--glass);
+    backdrop-filter: blur(22px) saturate(1.4);
+    -webkit-backdrop-filter: blur(22px) saturate(1.4);
+    border: 1px solid var(--glass-border);
+    border-radius: 20px;
+    display: flex; flex-direction: column;
+    padding: 18px 12px 12px;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, .25);
+    transition: background var(--tr), border-color var(--tr);
+  }
+  :root[data-mode="light"] .sidebar { box-shadow: 0 8px 32px rgba(180, 120, 150, .18); }
+
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    padding: 2px 8px 16px;
+  }
+  .brand-av {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    box-shadow: 0 0 0 2px var(--glass-border), 0 0 18px var(--rana-glow);
+    animation: float-av 4.5s ease-in-out infinite;
+  }
+  @keyframes float-av { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+  .brand-txt .t1 { font-size: 17px; font-weight: 700; letter-spacing: .5px; }
+  .brand-txt .t2 { font-size: 11px; color: var(--text2); margin-top: 1px; }
+
+  .new-chat {
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    background: var(--glass-strong);
+    color: var(--text);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    padding: 10px;
+    font-size: 13.5px;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    transition: all .25s ease;
+  }
+  .new-chat:hover { border-color: var(--accent); box-shadow: 0 0 16px var(--accent-glow); transform: translateY(-1px); }
+
+  .rp-btn {
+    margin-top: 7px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    background: none;
+    color: var(--text2);
+    border: 1px solid transparent;
+    border-radius: 12px;
+    padding: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all .25s ease;
+  }
+  .rp-btn:hover { color: var(--accent-strong); border-color: var(--glass-border); }
+
+  .sec-label { font-size: 11px; color: var(--text3); letter-spacing: 1.5px; padding: 16px 8px 8px; }
+
+  .sess-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; }
+  .sess {
+    padding: 9px 11px;
+    border-radius: 12px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all .22s ease;
+  }
+  .sess:hover { background: var(--glass-strong); }
+  .sess.active {
+    background: var(--glass-strong);
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+    box-shadow: 0 0 20px color-mix(in srgb, var(--accent-glow) 60%, transparent);
+  }
+  .sess .name { font-size: 13.5px; display: flex; align-items: center; gap: 6px; }
+  .sess .sub { font-size: 11.5px; color: var(--text3); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sess .pin { font-size: 11px; }
+
+  .side-foot { display: flex; gap: 6px; padding-top: 10px; }
+  .ghost {
+    flex: 1;
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    color: var(--text2);
+    font-size: 14px;
+    padding: 8px 0;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all .22s ease;
+  }
+  .ghost:hover { color: var(--accent-strong); border-color: var(--accent); box-shadow: 0 0 12px var(--accent-glow); }
+
+  /* ============ 主区（整块玻璃） ============ */
+  main {
+    background: var(--glass);
+    backdrop-filter: blur(22px) saturate(1.4);
+    -webkit-backdrop-filter: blur(22px) saturate(1.4);
+    border: 1px solid var(--glass-border);
+    border-radius: 20px;
+    display: flex; flex-direction: column;
+    min-width: 0;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, .25);
+    overflow: hidden;
+    transition: background var(--tr), border-color var(--tr);
+  }
+  :root[data-mode="light"] main { box-shadow: 0 8px 32px rgba(180, 120, 150, .18); }
+
+  .topbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 15px 22px;
+    border-bottom: 1px solid var(--glass-border);
+  }
+  .presence { position: relative; width: 34px; height: 34px; }
+  .presence svg { width: 34px; height: 34px; border-radius: 50%; }
+  .presence .pdot {
+    position: absolute; right: -1px; bottom: -1px;
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: #7ee2a8;
+    box-shadow: 0 0 8px rgba(126, 226, 168, .8);
+    animation: pdot 2.4s ease-in-out infinite;
+  }
+  @keyframes pdot { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+  .top-txt { flex: 1; min-width: 0; }
+  .top-txt .t1 {
+    font-size: 15px; font-weight: 700;
+    background: linear-gradient(90deg, var(--text), var(--accent-strong));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .top-txt .t2 { font-size: 11.5px; color: var(--text3); margin-top: 1px; }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--glass-strong);
+    border: 1px solid var(--glass-border);
+    color: var(--text2);
+    border-radius: 999px;
+    padding: 6px 13px;
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: all .25s ease;
+    user-select: none;
+  }
+  .chip:hover { border-color: var(--accent); color: var(--accent-strong); box-shadow: 0 0 14px var(--accent-glow); }
+  .chip.on {
+    color: var(--accent-strong);
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+    box-shadow: 0 0 14px var(--accent-glow);
+  }
+
+  /* ============ 聊天流 ============ */
+  .chat { flex: 1; overflow-y: auto; padding: 26px 30px 10px; }
+  .chat-inner { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+
+  .msg { display: flex; gap: 12px; animation: emerge .55s cubic-bezier(.22, .8, .36, 1) both; }
+  .msg.user { flex-direction: row-reverse; }
+  @keyframes emerge {
+    from { opacity: 0; transform: translateY(16px) scale(.97); filter: blur(4px); }
+    to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+  }
+  .msg:nth-child(1) { animation-delay: .06s; }
+  .msg:nth-child(2) { animation-delay: .2s; }
+  .msg:nth-child(3) { animation-delay: .34s; }
+  .msg:nth-child(4) { animation-delay: .48s; }
+  .msg:nth-child(5) { animation-delay: .62s; }
+
+  .av {
+    width: 42px; height: 42px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    box-shadow: 0 0 0 2px var(--glass-border), 0 0 22px var(--rana-glow);
+    animation: float-av 5s ease-in-out infinite;
+  }
+  .msg.user .av {
+    background: linear-gradient(135deg, #8fa3c8, #6b7fa8);
+    box-shadow: 0 0 0 2px var(--glass-border), 0 0 16px rgba(143, 163, 200, .4);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 15px; font-weight: 700;
+    animation: none;
+  }
+
+  .stack { max-width: 78%; display: flex; flex-direction: column; }
+  .msg.user .stack { align-items: flex-end; }
+
+  .bubble {
+    padding: 12px 17px;
+    font-size: 14.5px;
+    line-height: 1.8;
+    border-radius: 18px;
+    word-break: break-word;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  .msg.rana .bubble {
+    background: var(--rana-bubble);
+    border: 1px solid var(--rana-border);
+    border-top-left-radius: 6px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, .12);
+    transition: all .3s ease;
+  }
+  :root[data-mode="light"] .msg.rana .bubble { box-shadow: 0 4px 16px rgba(180, 120, 150, .12); }
+  .msg.rana:hover .bubble {
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    box-shadow: 0 6px 26px var(--accent-glow);
+  }
+  .msg.user .bubble {
+    background: var(--user-bubble);
+    border: 1px solid var(--user-border);
+    color: var(--text);
+    border-top-right-radius: 6px;
+    box-shadow: 0 4px 20px var(--accent-glow);
+  }
+
+  .meta { font-size: 11.5px; color: var(--text3); margin: 6px 8px 0; }
+
+  /* 思考折叠块 */
+  details.think { margin-bottom: 7px; }
+  details.think summary {
+    list-style: none;
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--glass-strong);
+    border: 1px solid var(--glass-border);
+    color: var(--text2);
+    border-radius: 999px;
+    padding: 4px 13px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all .25s ease;
+    user-select: none;
+  }
+  details.think summary::-webkit-details-marker { display: none; }
+  details.think summary:hover { color: var(--accent-strong); border-color: var(--accent); box-shadow: 0 0 12px var(--accent-glow); }
+  details.think summary .arr { transition: transform .3s; font-size: 10px; }
+  details.think[open] summary .arr { transform: rotate(90deg); }
+  details.think .think-body {
+    margin-top: 7px;
+    padding: 10px 14px;
+    border-left: 2px solid var(--accent);
+    background: var(--glass);
+    border-radius: 0 12px 12px 0;
+    color: var(--text2);
+    font-size: 12.5px;
+    line-height: 1.7;
+    max-height: 180px;
+    overflow-y: auto;
+    animation: unfold .35s ease;
+  }
+  @keyframes unfold { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
+
+  /* 正在输入 */
+  .typing { display: flex; align-items: center; gap: 5px; padding: 15px 18px; }
+  .typing i {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent-glow);
+    animation: glow-hop 1.3s ease-in-out infinite;
+  }
+  .typing i:nth-child(2) { animation-delay: .16s; }
+  .typing i:nth-child(3) { animation-delay: .32s; }
+  @keyframes glow-hop {
+    0%, 60%, 100% { transform: translateY(0); opacity: .35; box-shadow: 0 0 0 transparent; }
+    30% { transform: translateY(-6px); opacity: 1; box-shadow: 0 0 12px var(--accent-glow); }
+  }
+
+  /* ============ 输入区 ============ */
+  .composer { padding: 12px 30px 22px; }
+  .composer-inner {
+    max-width: 760px; margin: 0 auto;
+    display: flex; align-items: flex-end; gap: 10px;
+    background: var(--glass-strong);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid var(--glass-border);
+    border-radius: 20px;
+    padding: 12px 12px 12px 20px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, .15);
+    transition: all .3s ease;
+  }
+  .composer-inner:focus-within {
+    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+    box-shadow: 0 0 24px var(--accent-glow);
+  }
+  .composer textarea {
+    flex: 1;
+    border: none; outline: none; resize: none;
+    background: transparent;
+    color: var(--text);
+    font-size: 14.5px; font-family: inherit;
+    line-height: 1.65;
+    max-height: 140px;
+    padding: 7px 0;
+  }
+  .composer textarea::placeholder { color: var(--text3); }
+  .send {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    border: 1px solid var(--glass-border);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 85%, transparent), color-mix(in srgb, var(--accent-strong) 85%, transparent));
+    color: #fff;
+    font-size: 17px;
+    cursor: pointer;
+    flex-shrink: 0;
+    box-shadow: 0 0 18px var(--accent-glow);
+    transition: all .28s ease;
+  }
+  .send:hover { transform: scale(1.1); box-shadow: 0 0 28px var(--accent-glow); }
+  .send:active { transform: scale(.95); }
+
+  /* ============ 角标 ============ */
+  .badge {
+    position: fixed; left: 14px; bottom: 12px;
+    z-index: 5;
+    background: var(--glass-strong);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--glass-border);
+    color: var(--text3);
+    font-size: 11.5px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    pointer-events: none;
+  }
+
+  ::-webkit-scrollbar { width: 7px; }
+  ::-webkit-scrollbar-thumb { background: var(--glass-strong); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  }
+</style>
+</head>
+<body>
+  <svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="avbg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#eef7e8"/><stop offset="1" stop-color="#d3ecc9"/>
+      </linearGradient>
+      <linearGradient id="avhair" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#f2e9ee"/><stop offset="1" stop-color="#d7c3cf"/>
+      </linearGradient>
+    </defs>
+    <symbol id="rana-face" viewBox="0 0 64 64">
+      <circle cx="32" cy="32" r="32" fill="url(#avbg)"/>
+      <path d="M9,34 a23,24 0 1 1 46,0 v13 a4,4 0 0 1 -4,4 h-38 a4,4 0 0 1 -4,-4 z" fill="url(#avhair)"/>
+      <ellipse cx="32" cy="37.5" rx="14.5" ry="13" fill="#fff5ef"/>
+      <path d="M17.5,33 C17.5,21.5 24,15 32,15 C40,15 46.5,21.5 46.5,33 Q44,36.2 41.5,33 Q39,36.2 36.5,33 Q34,36.2 31.5,33 Q29,36.2 26.5,33 Q24,36.2 21.5,33 Q19.4,35 17.5,33 Z" fill="#efe4ea"/>
+      <ellipse cx="25.5" cy="38.5" rx="2.6" ry="3" fill="#f0c94a"/>
+      <ellipse cx="38.5" cy="38.5" rx="2.6" ry="3" fill="#5aa9e6"/>
+      <circle cx="24.6" cy="37.4" r=".9" fill="#fff"/>
+      <circle cx="37.6" cy="37.4" r=".9" fill="#fff"/>
+      <path d="M23,36.7 q2.5,-1.4 5,0" stroke="#6b5a63" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+      <path d="M36,36.7 q2.5,-1.4 5,0" stroke="#6b5a63" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+      <ellipse cx="21.5" cy="43" rx="2.8" ry="1.6" fill="#f3c3cd" opacity=".8"/>
+      <ellipse cx="42.5" cy="43" rx="2.8" ry="1.6" fill="#f3c3cd" opacity=".8"/>
+      <path d="M29.8,44.4 q1.1,1.5 2.2,0 q1.1,1.5 2.2,0" stroke="#6b5a63" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+      <path d="M46.8,15.6 l4.6,1.1 c1,.25 1.3,1.5 .5,2.2 l-3.6,3 c-.75,.6 -1.9,.15 -2,-.8 l-.85,-4.2 c-.1,-.95 .55,-1.55 1.35,-1.3 z" fill="#77dd77"/>
+    </symbol>
+  </svg>
+
+  <!-- 氛围背景 -->
+  <div class="scene">
+    <div class="orb orb1"></div>
+    <div class="orb orb2"></div>
+    <div class="orb orb3"></div>
+    <div class="star"></div><div class="star"></div><div class="star"></div>
+    <div class="star"></div><div class="star"></div><div class="star"></div>
+  </div>
+
+  <div class="app">
+    <!-- 侧栏 -->
+    <aside class="sidebar">
+      <div class="brand">
+        <svg class="brand-av"><use href="#rana-face"/></svg>
+        <div class="brand-txt">
+          <div class="t1">Rana</div>
+          <div class="t2">像猫一样，神出鬼没。</div>
+        </div>
+      </div>
+      <button class="new-chat">＋ 新会话</button>
+      <button class="rp-btn">✦ Rana·RP</button>
+      <div class="sec-label">会 话</div>
+      <div class="sess-list">
+        <div class="sess active">
+          <div class="name"><span class="pin">✦</span>今日闲谈</div>
+          <div class="sub">嗯，泡了杯红茶… · 21:45</div>
+        </div>
+        <div class="sess">
+          <div class="name">✧ RP 晚间剧场</div>
+          <div class="sub">昨晚 · 4.2k tokens</div>
+        </div>
+        <div class="sess">
+          <div class="name"><span class="pin">✦</span>早报 09-10</div>
+          <div class="sub">今早 07:30 · 已读</div>
+        </div>
+        <div class="sess">
+          <div class="name">周报整理</div>
+          <div class="sub">周一 · EVA-14B</div>
+        </div>
+        <div class="sess">
+          <div class="name">模型切换调试</div>
+          <div class="sub">09-08 · 1.8k tokens</div>
+        </div>
+      </div>
+      <div class="side-foot">
+        <button class="ghost" title="云端模型">☁</button>
+        <button class="ghost" title="本地模型">▣</button>
+        <button class="ghost" title="外观设置">✧</button>
+      </div>
+    </aside>
+
+    <!-- 主区 -->
+    <main>
+      <header class="topbar">
+        <div class="presence">
+          <svg><use href="#rana-face"/></svg>
+          <span class="pdot"></span>
+        </div>
+        <div class="top-txt">
+          <div class="t1">今日闲谈</div>
+          <div class="t2">……有趣的女孩子。</div>
+        </div>
+        <span class="chip on" id="thinkChip">✦ 深度思考</span>
+        <span class="chip">◈ EVA-14B</span>
+        <span class="chip" id="modeChip"><span id="modeIc">☀</span> <span id="modeTx">晨光</span></span>
+        <span class="chip" id="replayChip">↻ 动画</span>
+      </header>
+
+      <section class="chat" id="chat">
+        <div class="chat-inner" id="chatInner">
+
+          <div class="msg user">
+            <div class="av">你</div>
+            <div class="stack">
+              <div class="bubble">今天好累啊，终于回来了</div>
+              <div class="meta">21:42</div>
+            </div>
+          </div>
+
+          <div class="msg rana">
+            <svg class="av"><use href="#rana-face"/></svg>
+            <div class="stack">
+              <details class="think">
+                <summary>✦ 已深度思考 · 86 字 <span class="arr">▶</span></summary>
+                <div class="think-body">用户说很累，现在需要的是安抚和陪伴，不是解决方案。语气要软一点，先关心身体状态，再给一个门槛很低的建议，别一次问太多问题。</div>
+              </details>
+              <div class="bubble">欢迎回来～辛苦啦。先别急着干别的，去洗把脸喝口温水，然后我们聊会儿天放松一下，好不好？</div>
+              <div class="meta">EVA-14B · 21:43</div>
+            </div>
+          </div>
+
+          <div class="msg user">
+            <div class="av">你</div>
+            <div class="stack">
+              <div class="bubble">嗯，泡了杯红茶。对了明天周六，有什么安排建议吗</div>
+              <div class="meta">21:44</div>
+            </div>
+          </div>
+
+          <div class="msg rana">
+            <svg class="av"><use href="#rana-face"/></svg>
+            <div class="stack">
+              <div class="bubble">红茶配傍晚最合适了。明天是晴天，上午适合出门走走晒晒太阳，下午可以窝在家里看部片子——要不要我帮你把想法列成小清单？</div>
+              <div class="meta">EVA-14B · 21:45</div>
+            </div>
+          </div>
+
+          <div class="msg rana" id="typingMsg">
+            <svg class="av"><use href="#rana-face"/></svg>
+            <div class="stack">
+              <div class="bubble typing"><i></i><i></i><i></i></div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <footer class="composer">
+        <div class="composer-inner">
+          <textarea id="input" rows="1" placeholder="在这个只属于你和乐奈的房间里说点什么…（效果图，随便玩）"></textarea>
+          <button class="send" id="sendBtn" title="发送">➤</button>
+        </div>
+      </footer>
+    </main>
+  </div>
+
+  <div class="badge">效果图 C · 沉浸氛围感（非真实界面）</div>
+
+<script>
+  const root = document.documentElement;
+  const chat = document.getElementById('chat');
+  const chatInner = document.getElementById('chatInner');
+  const input = document.getElementById('input');
+  const sendBtn = document.getElementById('sendBtn');
+  const typingMsg = document.getElementById('typingMsg');
+
+  // 明暗切换
+  document.getElementById('modeChip').addEventListener('click', () => {
+    const dark = root.dataset.mode === 'dark';
+    root.dataset.mode = dark ? 'light' : 'dark';
+    document.getElementById('modeIc').textContent = dark ? '☾' : '☀';
+    document.getElementById('modeTx').textContent = dark ? '夜幕' : '晨光';
+  });
+
+  // 重播入场动画
+  document.getElementById('replayChip').addEventListener('click', () => {
+    document.querySelectorAll('.msg').forEach(el => {
+      el.style.animation = 'none';
+      void el.offsetWidth;
+      el.style.animation = '';
+    });
+  });
+
+  // 深度思考开关（纯展示）
+  document.getElementById('thinkChip').addEventListener('click', function () {
+    this.classList.toggle('on');
+  });
+
+  // 假发送：展示动画效果
+  const replies = [
+    '……嗯。知道了。',
+    '无聊。……再聊会儿也行。',
+    '有趣的女孩子。',
+    '芭菲。……想吃抹茶芭菲了。'
+  ];
+  let ri = 0;
+  let time = 21.75;
+
+  function nextTime() {
+    time += (Math.round(Math.random() * 2) + 1) / 60;
+    const h = Math.floor(time), m = Math.round((time - h) * 60);
+    return String(h).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+  }
+
+  function scrollBottom() { chat.scrollTop = chat.scrollHeight; }
+
+  function send() {
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+
+    const um = document.createElement('div');
+    um.className = 'msg user';
+    um.innerHTML = '<div class="av">你</div><div class="stack"><div class="bubble"></div><div class="meta">' + nextTime() + '</div></div>';
+    um.querySelector('.bubble').textContent = text;
+    chatInner.insertBefore(um, typingMsg);
+    scrollBottom();
+
+    setTimeout(() => {
+      typingMsg.style.display = '';
+      scrollBottom();
+      setTimeout(() => {
+        const rm = document.createElement('div');
+        rm.className = 'msg rana';
+        rm.innerHTML = '<svg class="av"><use href="#rana-face"/></svg><div class="stack"><div class="bubble"></div><div class="meta">EVA-14B · ' + nextTime() + '</div></div>';
+        rm.querySelector('.bubble').textContent = replies[ri++ % replies.length];
+        chatInner.insertBefore(rm, typingMsg);
+        typingMsg.style.display = 'none';
+        scrollBottom();
+      }, 1400);
+    }, 300);
+  }
+
+  sendBtn.addEventListener('click', send);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+</script>
+</body>
+</html>

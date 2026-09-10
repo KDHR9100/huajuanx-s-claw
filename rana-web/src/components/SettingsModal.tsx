@@ -1,7 +1,8 @@
-// 外观设置弹窗：主题色自定义（含历史）+ 夜间模式 + 背景图（上传/URL）+ 不透明度。
+// 外观设置弹窗：乐奈头像 + 主题色自定义（含历史）+ 夜间模式 + 背景图（上传/URL）+ 不透明度。
 import { useRef, useState } from "react";
 import { useAppStore } from "../store/useAppStore";
 import { PRESET_ACCENTS, pushAccentHistory } from "../lib/theme";
+import { RanaAvatar } from "./RanaArt";
 
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // dataURL 存 localStorage，控制在 4MB 内
 
@@ -12,14 +13,56 @@ export default function SettingsModal() {
   const reset = useAppStore((s) => s.resetSettings);
   const setOpen = useAppStore((s) => s.setSettingsOpen);
   const fileRef = useRef<HTMLInputElement>(null);
+  const avatarRef = useRef<HTMLInputElement>(null);
   const [urlValue, setUrlValue] = useState("");
   const [error, setError] = useState("");
+  const [avatarBusy, setAvatarBusy] = useState(false);
 
   if (!open) return null;
 
   const close = () => {
     setError("");
     setOpen(false);
+  };
+
+  /** 上传自定义头像（存本地 .avatars/，不进 localStorage/git） */
+  const uploadAvatar = async (file: File | undefined) => {
+    if (!file || avatarBusy) return;
+    setError("");
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      setError("头像只支持 PNG / JPG / WebP");
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setError(`头像太大（${(file.size / 1024 / 1024).toFixed(1)}MB），限 4MB`);
+      return;
+    }
+    setAvatarBusy(true);
+    try {
+      const r = await fetch("/__rana/avatar", {
+        method: "POST",
+        headers: { "content-type": file.type },
+        body: await file.arrayBuffer(),
+      });
+      const j = (await r.json()) as { ok?: boolean; url?: string; error?: string };
+      if (!r.ok || !j.ok || !j.url) throw new Error(j.error ?? `HTTP ${r.status}`);
+      update({ avatarUrl: j.url });
+    } catch (e) {
+      setError(`头像上传失败：${(e as Error).message}`);
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
+  const clearAvatar = async () => {
+    if (avatarBusy) return;
+    setAvatarBusy(true);
+    try {
+      await fetch("/__rana/avatar", { method: "DELETE" });
+      update({ avatarUrl: "" });
+    } finally {
+      setAvatarBusy(false);
+    }
   };
 
   const pickFile = (file: File | undefined) => {
@@ -66,6 +109,38 @@ export default function SettingsModal() {
             ✕
           </button>
         </div>
+
+        <section className="set-section">
+          <h4>
+            <em>乐奈的头像</em>（你自己上传）
+          </h4>
+          <div className="avatar-up">
+            <div className="avatar-ring">
+              <div className="inner">
+                <RanaAvatar size={74} />
+              </div>
+            </div>
+            <div className="avatar-actions">
+              <button className="btn" onClick={() => avatarRef.current?.click()} disabled={avatarBusy}>
+                {avatarBusy ? "上传中…" : "📁 上传图片"}
+              </button>
+              <button className="btn ghost" onClick={() => void clearAvatar()} disabled={avatarBusy || !settings.avatarUrl}>
+                恢复默认脸
+              </button>
+            </div>
+            <input
+              ref={avatarRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                void uploadAvatar(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+          </div>
+          <div className="set-hint">图片只存在你自己电脑上（rana-web/.avatars/，不入公开仓库），聊天气泡和空状态自动套用</div>
+        </section>
 
         <section className="set-section">
           <h4>主题颜色</h4>

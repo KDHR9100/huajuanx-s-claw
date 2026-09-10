@@ -46,9 +46,12 @@ export interface ModelInfo {
 
 export type ConnState = "connecting" | "connected" | "error" | "closed";
 
+/** 顶部导航的页面视图 */
+export type AppView = "chat" | "sys" | "cron";
+
 /** 外观设置（持久化在 localStorage） */
 export interface ThemeSettings {
-  /** 主题强调色（粉/蓝/绿…），驱动按钮、气泡、进度条等 */
+  /** 主题强调色（绿/粉/蓝…），驱动按钮、气泡、进度条等 */
   accent: string;
   /** 背景图片（dataURL 或 URL），空串表示未启用 */
   bgImage: string;
@@ -58,6 +61,8 @@ export interface ThemeSettings {
   mode: "light" | "dark";
   /** 最近使用的自定义颜色（非预设），最新在前，最多 8 个 */
   accentHistory: string[];
+  /** 乐奈头像 URL（/__rana/avatar?…，空串=手绘默认脸）；带时间戳参数防缓存 */
+  avatarUrl?: string;
 }
 
 /** 模型 id 归一化：去掉 provider 前缀（aliyun-maas/qwen3.8-flash → qwen3.8-flash） */

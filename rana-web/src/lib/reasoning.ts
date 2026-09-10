@@ -88,3 +88,41 @@ export function splitReasoning(raw: string): SplitReasoning {
   const reasoning = thinks.map((s) => s.trim()).filter(Boolean).join("\n\n");
   return { reasoning, thinking, text };
 }
+
+// OpenClaw 运行时封套回显剥离：模型偶尔会把注入的 <!-- openclaw:attempt:... --> 指令块
+// 原样吐进正文（压缩前记忆冲刷回合最易触发）。剥掉封套块；整条只剩封套 → echo=true，
+// 前端折叠成占位行。封套出现在正文中间/前后有真实内容时只剥不折叠。
+const ENVELOPE_OPEN_RE = /<!--\s*openclaw:attempt[^>]*-->/i;
+
+export interface StripEnvelope {
+  /** true = 整条消息只是封套回显，没有真实回复 */
+  echo: boolean;
+  /** 剥离封套后的正文（可能为空） */
+  text: string;
+}
+
+export function stripOpenclawEnvelope(raw: string): StripEnvelope {
+  if (!raw) return { echo: false, text: raw };
+  let out = raw;
+  for (let guard = 0; guard < 8; guard++) {
+    const m = ENVELOPE_OPEN_RE.exec(out);
+    if (!m) break;
+    const start = m.index;
+    const closeIdx = out.toLowerCase().indexOf("<!-- /openclaw:attempt", start + m[0].length);
+    if (closeIdx === -1) {
+      // 未闭合（流式中）：从开标签起整段按封套处理
+      out = out.slice(0, start);
+      break;
+    }
+    const closeEnd = out.indexOf("-->", closeIdx);
+    out = out.slice(0, start) + (closeEnd === -1 ? "" : out.slice(closeEnd + 3));
+  }
+  // 每回合注入的内部上下文块（<<<BEGIN/END_OPENCLAW_INTERNAL_CONTEXT>>>）偶尔被模型抄进回复
+  out = out.replace(/<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>[\s\S]*?<<<END_OPENCLAW_INTERNAL_CONTEXT>>>/g, "");
+  // RP 模型偶发的元块模仿：```代码块里装 "## Chat history"/"## Memory" 等档案结构
+  out = out.replace(/```[a-z]*\n## (?:Chat history|Memory|Private|Runtime)[\s\S]*?```/gi, "");
+  // 回复开头的日期/时间标题头（"## Fri 2026-09-10 …" / "## [23:04 RP]"）
+  out = out.replace(/^(?:#{1,3} \[?\d{1,2}:\d{2}[^\n]*|#{1,3} (?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[^\n]*)\n+/gim, "");
+  const text = out.replace(/<!--\s*\/?\s*openclaw:attempt[^>]*-->/gi, "").replace(/^\s+|\s+$/g, "");
+  return { echo: !text, text };
+}

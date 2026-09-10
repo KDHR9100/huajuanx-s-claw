@@ -7,22 +7,23 @@ import type { ThemeSettings } from "./types";
 const KEY = "rana-web.theme";
 
 export const DEFAULT_SETTINGS: ThemeSettings = {
-  accent: "#e8748f",
+  accent: "#77dd77",
   bgImage: "",
   bgOpacity: 0.35,
   mode: "light",
   accentHistory: [],
+  avatarUrl: "",
 };
 
-/** 预设主题色（含默认粉在内的常见色系） */
+/** 预设主题色（乐奈绿为默认主色，用户气泡固定粉不随之变化） */
 export const PRESET_ACCENTS = [
-  "#e8748f", // 樱花粉（默认）
+  "#77dd77", // 乐奈绿（默认）
+  "#e8748f", // 爱音粉
+  "#5aa9e6", // 素世蓝
+  "#f0c94a", // 小猫黄
   "#e86a5c", // 珊瑚橙
-  "#e09b3c", // 暖杏黄
   "#5cad8a", // 青黛绿
-  "#5c8fd9", // 雾霾蓝
   "#8a6fd9", // 藤萝紫
-  "#d95c9e", // 玫红
   "#6b7280", // 石墨灰
 ];
 
@@ -47,6 +48,7 @@ export function loadSettings(): ThemeSettings {
       bgOpacity: typeof parsed.bgOpacity === "number" ? Math.min(1, Math.max(0, parsed.bgOpacity)) : DEFAULT_SETTINGS.bgOpacity,
       mode: parsed.mode === "dark" ? "dark" : "light",
       accentHistory: Array.isArray(parsed.accentHistory) ? parsed.accentHistory.filter(isHexColor).slice(0, MAX_HISTORY) : [],
+      avatarUrl: typeof parsed.avatarUrl === "string" ? parsed.avatarUrl : "",
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
