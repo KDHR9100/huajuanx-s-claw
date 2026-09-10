@@ -84,7 +84,8 @@ export default function Topbar() {
   const conn = useAppStore((s) => s.conn);
   const sessions = useAppStore((s) => s.sessions);
   const currentKey = useAppStore((s) => s.currentKey);
-  const setView = useAppStore((s) => s.setView);
+  const panelOpen = useAppStore((s) => s.panelOpen);
+  const togglePanel = useAppStore((s) => s.togglePanel);
   const showReasoning = useAppStore((s) => s.showReasoning);
   const setShowReasoning = useAppStore((s) => s.setShowReasoning);
 
@@ -102,9 +103,11 @@ export default function Topbar() {
         💭 思考{showReasoning ? "" : "（关）"}
       </button>
       <ModelPicker />
-      <button className="btn ghost" onClick={() => setView("sys")} title="Token 用量在「电脑状态」页">
-        🧮 用量
-      </button>
+      {!panelOpen && (
+        <button className="btn ghost" onClick={togglePanel} title="展开用量面板">
+          🧮 用量
+        </button>
+      )}
     </header>
   );
 }

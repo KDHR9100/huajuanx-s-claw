@@ -8,6 +8,7 @@ import Sidebar from "./components/Sidebar";
 import Topbar from "./components/Topbar";
 import ChatStream from "./components/ChatStream";
 import Composer from "./components/Composer";
+import UsagePanel from "./components/UsagePanel";
 import SysPage from "./components/SysPage";
 import CronPage from "./components/CronPage";
 import NewsPage from "./components/NewsPage";
@@ -18,6 +19,8 @@ import CloudConfigModal from "./components/CloudConfigModal";
 export default function App() {
   const connError = useAppStore((s) => s.connError);
   const view = useAppStore((s) => s.view);
+  const panelOpen = useAppStore((s) => s.panelOpen);
+  const togglePanel = useAppStore((s) => s.togglePanel);
 
   useEffect(() => {
     applySettings(useAppStore.getState().settings);
@@ -34,7 +37,7 @@ export default function App() {
         <TopNav />
         <div className="pages">
           {view === "chat" && (
-            <div className="app">
+            <div className={`app${panelOpen ? "" : " panel-closed"}`}>
               <Sidebar />
               <main className="main">
                 <Topbar />
@@ -42,6 +45,13 @@ export default function App() {
                 <ChatStream />
                 <Composer />
               </main>
+              {panelOpen ? (
+                <UsagePanel />
+              ) : (
+                <button className="up-toggle" title="展开用量面板" onClick={togglePanel}>
+                  🧮
+                </button>
+              )}
             </div>
           )}
           {view === "sys" && (

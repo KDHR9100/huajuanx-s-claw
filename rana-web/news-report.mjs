@@ -59,8 +59,29 @@ const SECTIONS = [
   { id: "world", name: "国际视野", query: "国际 重大新闻", count: 5 },
 ];
 
+/** 低质结果过滤：疑似推广位/纯链接/无正文的结果不要（用户实测遇到过"整条只有一个链接"的广告位） */
+function isJunkItem(p) {
+  const t = (p.name ?? "").trim();
+  const url = p.url ?? "";
+  const sum = (p.summary ?? p.snippet ?? "").trim();
+  if (!t || t.length < 6) return true; // 标题太短/空
+  if (/^https?:\/\/|\.(com|cn|net|org|top|vip|xyz)(\/|$)/i.test(t)) return true; // 标题本身是网址
+  if (!sum && t.length < 14) return true; // 没摘要且标题凑不成新闻
+  if (/^(广告|推广|sponsor|ad)\b|【广告】/i.test(t)) return true; // 明示广告
+  if (/\.pdf$|\.doc/i.test(url)) return true; // 文档链接不是新闻
+  return false;
+}
+
+/** 标题清洗：去掉 "_央视网(cctv.com)" 之类的网站栏目尾巴 */
+function cleanTitle(t) {
+  return t
+    .replace(/[\s_]*[(（][a-z0-9.-]+\.(com|cn|net|org|cc)[）)]\s*$/i, "")
+    .replace(/[_\s]+$/,"")
+    .trim();
+}
+
 async function bochaSearch(section) {
-  const body = { query: section.query, freshness: "oneDay", summary: true, count: section.count };
+  const body = { query: section.query, freshness: "oneDay", summary: true, count: section.count + 2 };
   const res = await fetch(BOCHA_API, {
     method: "POST",
     headers: { Authorization: `Bearer ${BOCHA_KEY}`, "Content-Type": "application/json" },
@@ -76,12 +97,15 @@ async function bochaSearch(section) {
   }
   if (!res.ok || (json.code && json.code !== 200)) throw new Error(json?.message ?? `Bocha code ${json.code}`);
   const pages = json?.data?.webPages ?? {};
-  const items = (pages.value ?? []).map((p) => ({
-    title: (p.name ?? "").trim(),
-    summary: (p.summary ?? p.snippet ?? "").trim().slice(0, 200),
-    source: p.siteName ?? (p.url ? new URL(p.url).hostname : ""),
-    url: p.url ?? "",
-  }));
+  const items = (pages.value ?? [])
+    .filter((p) => !isJunkItem(p))
+    .slice(0, section.count)
+    .map((p) => ({
+      title: cleanTitle((p.name ?? "").trim()),
+      summary: (p.summary ?? p.snippet ?? "").trim().slice(0, 200),
+      source: p.siteName ?? (p.url ? new URL(p.url).hostname : ""),
+      url: p.url ?? "",
+    }));
   return items;
 }
 

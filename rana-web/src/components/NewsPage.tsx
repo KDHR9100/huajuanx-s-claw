@@ -1,7 +1,6 @@
 // 早报页：独立大页展示每日资讯（新闻联播条目 + 分类搜索结果 + 右侧乐奈总结）。
 // 省额度：只有今天打开了这个页面才会触发生成（POST /__rana/news），cron 不自动跑。
 import { useCallback, useEffect, useState } from "react";
-import { RanaAvatar } from "./RanaArt";
 
 interface NewsItem {
   title: string;
@@ -36,12 +35,12 @@ function fmtTime(ts: number) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-function ItemRow({ item }: { item: NewsItem }) {
+function ItemCard({ item }: { item: NewsItem }) {
   return (
-    <a className="news-item" href={item.url} target="_blank" rel="noreferrer">
+    <a className="news-card" href={item.url} target="_blank" rel="noreferrer">
+      {item.source && <span className="nc-src">{item.source}</span>}
       <span className="n-title">{item.title}</span>
       {item.summary && <span className="n-sum">{item.summary}</span>}
-      {item.source && <span className="n-src">{item.source}</span>}
     </a>
   );
 }
@@ -137,18 +136,21 @@ export default function NewsPage() {
                     {s.id === "ai" ? "🤖" : s.id === "tech" ? "🔧" : s.id === "china" ? "🇨🇳" : "🌍"} {s.name}
                   </h3>
                   {s.error && <p className="pending-text">这组没搜到：{s.error}</p>}
-                  {s.items.map((it, i) => (
-                    <ItemRow key={`${s.id}-${i}`} item={it} />
-                  ))}
+                  <div className="nc-grid">
+                    {s.items.map((it, i) => (
+                      <ItemCard key={`${s.id}-${i}`} item={it} />
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
 
             <aside className="news-side">
-              <div className="card summary-card">
-                <h3>
-                  <span className="side-av"><RanaAvatar size={34} /></span>乐奈的总结
-                </h3>
+              <div className="summary-card">
+                <div className="sc-head">
+                  <span className="sc-quote">「</span>
+                  <h3>乐奈的总结</h3>
+                </div>
                 {data.summary ? (
                   <p className="summary-text">{data.summary}</p>
                 ) : (
