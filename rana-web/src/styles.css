@@ -1188,3 +1188,13 @@ body.has-bg .room { display: none; }
   font-size: 11px; color: var(--text-dim); background: var(--accent-soft);
   border-radius: 999px; padding: 1px 8px;
 }
+
+/* ========== 早报页两栏 + 侧栏 ========== */
+.news-layout { display: grid; grid-template-columns: 1fr 264px; gap: 18px; align-items: start; }
+@media (max-width: 900px) { .news-layout { grid-template-columns: 1fr; } }
+.news-main { min-width: 0; }
+.news-side { position: sticky; top: 0; }
+.summary-card h3 { align-items: center; }
+.summary-card .side-av { display: inline-flex; border-radius: 50%; overflow: hidden; border: 2px solid var(--accent-soft); }
+.summary-card .summary-text { font-size: 13.5px; line-height: 1.85; color: var(--text); margin: 0; white-space: pre-wrap; }
+.summary-card .side-foot { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); font-size: 11px; color: var(--text-dim); opacity: .85; line-height: 1.6; }

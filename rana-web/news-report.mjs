@@ -100,17 +100,57 @@ async function fetchSections() {
   return out;
 }
 
+// ---------- 3. 乐奈的总结（qwen3.8-flash，只看标题就能总结今天发生了什么） ----------
+async function ranaSummary(xwlb, sections) {
+  try {
+    const p = CFG?.models?.providers?.["aliyun-maas"];
+    if (!p?.baseUrl || !p?.apiKey) throw new Error("aliyun-maas provider 未配置");
+    const titles = [
+      ...xwlb.items.slice(0, 15).map((x) => `- ${x.title}`),
+      ...sections.flatMap((s) => s.items.slice(0, 4).map((i) => `- ${i.title}`)),
+    ].join("\n");
+    const sys = "你是 Rana，猫系少女，话少、句子短、不用感叹号堆砌。根据新闻标题列表，用你自己的口吻总结今天世界上主要发生了什么：先一句话总起，再挑最重要的 3-5 件事各一句说明白（谁/哪里/发生了什么/意味着什么的程度），结尾一句短评。全文 180 字以内，口语自然，不列标题不复述清单。";
+    const res = await fetch(p.baseUrl.replace(/\/+$/, "") + "/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${p.apiKey}` },
+      body: JSON.stringify({
+        model: "qwen3.8-flash",
+        messages: [
+          { role: "system", content: sys },
+          { role: "user", content: `以下是今天的新闻标题列表：\n${titles}\n\n总结一下。` },
+        ],
+        max_tokens: 500,
+        temperature: 0.5,
+      }),
+      signal: AbortSignal.timeout(45000),
+    });
+    const j = await res.json();
+    const text = j?.choices?.[0]?.message?.content?.trim();
+    if (!text) throw new Error(`flash 返回空（HTTP ${res.status}）`);
+    return text;
+  } catch (e) {
+    log(`乐奈总结失败（跳过）：${e.message}`);
+    return "";
+  }
+}
+
 // ---------- 主流程 ----------
 const xwlb = await fetchXwlb();
 log(`新闻联播 ${xwlb.day}：${xwlb.items.length} 条`);
 const sections = await fetchSections();
+const summary = await ranaSummary(xwlb, sections);
+// 本地时区日期（toISOString 是 UTC，凌晨跑会差一天）
+const now = new Date();
+const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
 const report = {
-  date: new Date().toISOString().slice(0, 10),
+  date: today,
   generatedAt: Date.now(),
   xwlbDay: xwlb.day,
   xwlb: xwlb.items,
   sections,
+  summary,
+  queries: SECTIONS.length, // 本次博查搜索调用次数（额度意识）
 };
 fs.mkdirSync(OUT_DIR, { recursive: true });
 fs.writeFileSync(OUT_FILE, JSON.stringify(report, null, 1), "utf8");
