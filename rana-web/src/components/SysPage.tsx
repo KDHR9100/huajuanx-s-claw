@@ -26,10 +26,16 @@ interface PowerInfo {
   plans: Array<{ guid: string; name: string }>;
   activeGuid: string;
 }
+interface VirtInfo {
+  hypervisorPresent: boolean;
+  vbsStatus: number;
+  hvciRunning: boolean;
+}
 interface StatusPayload {
   sys?: SysInfo;
   gpu?: GpuInfo | null;
   power?: PowerInfo | null;
+  virt?: VirtInfo | null;
 }
 
 const POLL_MS = 5000;
@@ -60,6 +66,8 @@ export default function SysPage() {
   const [error, setError] = useState("");
   const [switching, setSwitching] = useState(""); // 正在切换的 guid
   const [switchErr, setSwitchErr] = useState("");
+  const [virtSwitching, setVirtSwitching] = useState(""); // 正在切换的虚拟化模式
+  const [virtMsg, setVirtMsg] = useState("");
   const timerRef = useRef<number | null>(null);
 
   const load = useCallback(async () => {
@@ -103,6 +111,37 @@ export default function SysPage() {
     }
   };
 
+  const switchVirt = async (mode: "off" | "auto") => {
+    if (virtSwitching) return;
+    const warn =
+      mode === "off"
+        ? "关闭虚拟化后 WSL 将无法使用（重启电脑后生效）。确定切换到游戏模式吗？"
+        : "开启虚拟化后部分游戏反作弊可能报错（重启电脑后生效）。确定切换到 WSL 模式吗？";
+    if (!window.confirm(warn)) return;
+    setVirtSwitching(mode);
+    setVirtMsg("");
+    try {
+      const r = await fetch("/__rana/sys/virt", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode }),
+      });
+      const j = (await r.json()) as { ok?: boolean; cancelled?: boolean; error?: string };
+      if (j.cancelled) {
+        setVirtMsg("你在 UAC 弹窗点了取消，没有执行。");
+      } else if (!r.ok || !j.ok) {
+        throw new Error(j.error ?? `HTTP ${r.status}`);
+      } else {
+        setVirtMsg("命令已执行完毕。重启电脑后生效，重启前状态显示不变。");
+        setTimeout(() => void load(), 4000);
+      }
+    } catch (e) {
+      setVirtMsg(`切换失败：${(e as Error).message}`);
+    } finally {
+      setVirtSwitching("");
+    }
+  };
+
   const sys = data?.sys;
   const gpu = data?.gpu;
   const power = data?.power;
@@ -113,6 +152,8 @@ export default function SysPage() {
       ? `${Math.floor(sys.uptimeHours / 24)} 天 ${Math.round(sys.uptimeHours % 24)} 小时`
       : `${sys.uptimeHours.toFixed(1)} 小时`
     : "—";
+  const virt = data?.virt ?? null;
+  const virtActive = Boolean(virt?.hypervisorPresent);
 
   return (
     <div className="wallboard">
@@ -122,6 +163,43 @@ export default function SysPage() {
           <p>家里的样子，她帮你看着。{error && <span className="sys-err">（{error}）</span>}</p>
         </div>
         <div className="sys-grid">
+          {/* 虚拟化模式：游戏 / WSL 切换（弹 UAC 提权，重启生效） */}
+          <div className="card">
+            <h3>
+              <span className="ic">🖥️</span>虚拟化模式 <small>重启后生效</small>
+            </h3>
+            {virt ? (
+              <>
+                <div className="virt-now">
+                  当前：{virtActive ? "🐧 WSL 模式（虚拟化运行中）" : "🎮 游戏模式（虚拟化已关闭）"}
+                  {virt.hvciRunning ? " · HVCI 开" : ""}
+                </div>
+                <div className="plans">
+                  <button
+                    className={`plan${virtActive ? "" : " on"}`}
+                    disabled={virtSwitching !== "" || !virtActive}
+                    title={virtActive ? "切到游戏模式（关闭虚拟化）" : "已是游戏模式"}
+                    onClick={() => void switchVirt("off")}
+                  >
+                    {virtSwitching === "off" ? "…" : "🎮 游戏模式（关）"}
+                  </button>
+                  <button
+                    className={`plan${virtActive ? " on" : ""}`}
+                    disabled={virtSwitching !== "" || virtActive}
+                    title={virtActive ? "已是 WSL 模式" : "切到 WSL 模式（开启虚拟化）"}
+                    onClick={() => void switchVirt("auto")}
+                  >
+                    {virtSwitching === "auto" ? "…" : "🐧 WSL 模式（开）"}
+                  </button>
+                </div>
+                {virtSwitching && <div className="plan-hint">屏幕上会弹 UAC 提权窗口，请点「是」……</div>}
+                {virtMsg && <div className="plan-hint">{virtMsg}</div>}
+              </>
+            ) : (
+              <p className="pending-text">……看不见了。</p>
+            )}
+          </div>
+
           {/* 电源计划：可点切换 */}
           <div className="card">
             <h3>

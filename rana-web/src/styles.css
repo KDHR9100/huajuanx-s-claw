@@ -1354,3 +1354,6 @@ body.has-bg .room { display: none; }
 .tune-hint.err { color: var(--danger); }
 .quick-card .quick-row { display: flex; gap: 8px; }
 .quick-card .quick-btn { flex: 1; font-size: 12.5px; padding: 7px 4px; border-radius: 10px; }
+
+/* 虚拟化模式卡当前状态行 */
+.virt-now { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
