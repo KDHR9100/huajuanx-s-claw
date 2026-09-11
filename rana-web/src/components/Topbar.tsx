@@ -103,11 +103,9 @@ export default function Topbar() {
         💭 思考{showReasoning ? "" : "（关）"}
       </button>
       <ModelPicker />
-      {!panelOpen && (
-        <button className="btn ghost" onClick={togglePanel} title="展开用量面板">
-          🧮 用量
-        </button>
-      )}
+      <button className="btn ghost" onClick={togglePanel} title={panelOpen ? "收起用量面板" : "展开用量面板"}>
+        🧮 用量{panelOpen ? "（收）" : ""}
+      </button>
     </header>
   );
 }

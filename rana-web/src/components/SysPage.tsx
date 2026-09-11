@@ -1,7 +1,6 @@
 // 电脑状态页：钉在墙上的仪表卡（真数据，来自 /__rana/sys/status 中间件）。
 // 页面挂载时才轮询（切页即卸载停止）；单项失败显示「……看不见了」不拖垮整页。
 import { useCallback, useEffect, useRef, useState } from "react";
-import UsageCards from "./UsageCards";
 
 interface DiskRow {
   drive: string;
@@ -225,8 +224,6 @@ export default function SysPage() {
               <p className="pending-text">……看不见了。</p>
             )}
           </div>
-
-          <UsageCards />
         </div>
       </div>
     </div>
