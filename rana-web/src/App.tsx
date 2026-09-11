@@ -20,7 +20,6 @@ export default function App() {
   const connError = useAppStore((s) => s.connError);
   const view = useAppStore((s) => s.view);
   const panelOpen = useAppStore((s) => s.panelOpen);
-  const togglePanel = useAppStore((s) => s.togglePanel);
 
   useEffect(() => {
     applySettings(useAppStore.getState().settings);
@@ -45,13 +44,7 @@ export default function App() {
                 <ChatStream />
                 <Composer />
               </main>
-              {panelOpen ? (
-                <UsagePanel />
-              ) : (
-                <button className="up-toggle" title="展开用量面板" onClick={togglePanel}>
-                  🧮
-                </button>
-              )}
+              {panelOpen && <UsagePanel />}
             </div>
           )}
           {view === "sys" && (

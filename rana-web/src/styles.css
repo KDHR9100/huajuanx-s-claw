@@ -130,20 +130,6 @@ body.has-bg .session-item:hover { background: color-mix(in srgb, var(--bg-hover)
 }
 .app.panel-closed { grid-template-columns: 262px 1fr 0; }
 .app.panel-closed .usage-panel { display: none; }
-.up-toggle {
-  position: fixed;
-  right: 14px;
-  top: 66px;
-  z-index: 40;
-  width: 34px; height: 34px;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  background: var(--panel-t);
-  backdrop-filter: blur(8px);
-  color: var(--text-dim);
-  font-size: 15px;
-  cursor: pointer;
-}
 
 /* ---------- 会话页右侧用量面板 ---------- */
 .usage-panel {
