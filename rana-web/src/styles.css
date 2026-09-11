@@ -1326,3 +1326,31 @@ body.has-bg .room { display: none; }
   border-top: 1px dashed var(--border);
   padding-top: 9px;
 }
+
+/* ========== 超参数调节 + 快捷命令（右侧面板） ========== */
+.tuning-card .tune-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 3px 0;
+}
+.tuning-card .tune-val { font-weight: 650; color: var(--text); font-variant-numeric: tabular-nums; }
+.tuning-card input[type="range"] {
+  grid-column: 1 / -1;
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.tuning-card .tune-save {
+  margin-top: 8px;
+  padding: 7px 0;
+  font-size: 12.5px;
+  border-radius: 10px;
+}
+.tune-hint { font-size: 11px; line-height: 1.55; margin-top: 6px; color: var(--text-dim); }
+.tune-hint.ok { color: var(--accent-strong); }
+.tune-hint.err { color: var(--danger); }
+.quick-card .quick-row { display: flex; gap: 8px; }
+.quick-card .quick-btn { flex: 1; font-size: 12.5px; padding: 7px 4px; border-radius: 10px; }
