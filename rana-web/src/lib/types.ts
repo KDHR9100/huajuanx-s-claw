@@ -47,7 +47,7 @@ export interface ModelInfo {
 export type ConnState = "connecting" | "connected" | "error" | "closed";
 
 /** 顶部导航的页面视图 */
-export type AppView = "chat" | "sys" | "cron" | "news";
+export type AppView = "chat" | "sys" | "cron" | "news" | "study";
 
 /** 外观设置（持久化在 localStorage） */
 export interface ThemeSettings {

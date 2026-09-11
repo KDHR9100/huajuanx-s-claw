@@ -21,6 +21,20 @@
 
 ## 登记区
 
+## [已解决] QQ 机器人接入三连环坑：私聊默认全拦 / 多 agent 必须显式绑定 / 通道会话混入主窗口（2026-09-12）
+
+- 症状：`openclaw channels add --channel qqbot` 成功、日志 `gateway READY`，但 QQ 私聊无回复。日志三种形态依次出现：`[access] blocked c2c from <openid>: not in allowFrom`（权限拦）→ 修权限后 `dispatch error: AgentSelectionRequiredError: ... no explicit owner`（路由缺）→ 修路由后消息落入 `agent:main:main` 主会话（与微信/网页三个入口混一个上下文）。
+- 根因：①channels add 生成的默认 allowFrom 不放行任何真实用户，dmPolicy=open 下所有私聊被静默丢弃；②本项目 `agents.ownership=explicit` 且多 agent（main/rana-rp），每个通道必须在顶层 `bindings` 有显式 owner；③通道级绑定默认把消息路由进 agent 主会话，多通道共享聊天上下文。
+- 解决方案：①`allowFrom` 填对方 openid（QQ 开放平台匿名 ID，从被拦日志直接抓，**不是 QQ 号**）并 `dmPolicy=allowlist`（白名单制）；②`bindings` 加 `{"type":"route","agentId":X,"match":{"channel":"qqbot","accountId":"default"}}`；③窗口要分开就绑**不同 agent**（各 agent 独立 sqlite，天然隔离）。终态布局（2026-09-12 用户两次调整后定稿）：**QQ→main（云端 flash，QQ 客户端功能多）、微信→rana-rp（本地 14B，RP 乐奈）**。**⚠️ 第四坑（同晚实证）：bindings 改 agentId 对"已活跃会话"热重载不生效**——运行中网关的会话路由粘在旧 agent 上（QQ 新会话能生效、微信老会话不跟），CLI `agents bindings` 读到的配置是对的但网关行为不对，表现为"改完绑定微信还是走云端"。解法：重启网关（清掉全部路由缓存），别信热重载。QQ 开发者控制台"未连接"指示灯不可信——WebSocket 实连且收发正常，以实测聊天为准。
+- 状态：已解决（2026-09-12 全链路验证：收消息→本地 14B 生成→回复送达，约 48s/条）。
+
+## [行为说明] `openclaw gateway restart` 在本项目永远报错——非默认 state dir 不走服务管理（2026-09-12）
+
+- 症状：`openclaw gateway restart` 报 `service management skipped: non-default state dir or config path. Rerun with HOME set...`；新加 channel（如 qqbot）后想重启网关生效时必撞上。
+- 根因：该命令走「服务注册」式管理，要求 OpenClaw 装在默认位置（C 盘用户目录）；本项目网关由 `rana-web\start-gateway.cmd` 手动拉起（脚本内 `set OPENCLAW_STATE_DIR=K:\openclaw\.openclaw\.openclaw`，无服务注册），CLI 检测到非默认路径直接拒绝——是保护行为，不是故障。
+- 解决方案：项目标准流程——用 PowerShell `Get-CimInstance Win32_Process` 找 `openclaw.mjs gateway` 的 node PID → `taskkill /PID <pid> /F` → 分离重跑 `start-gateway.cmd`（`Start-Process cmd -ArgumentList '/c','K:\OpenClaw\rana-web\start-gateway.cmd' -WindowStyle Minimized`）。验证：`%TEMP%\openclaw\openclaw-当日.log` 搜对应 channel 的 `gateway READY` / `Gateway ready`。另：裸跑 `openclaw channels add` 能写对 K 盘配置位置（CLI 自行定位），无需手动带 `OPENCLAW_STATE_DIR`。
+- 状态：已解决（2026-09-12 qqbot 实证：token 获取、WebSocket 连上 sgroup.qq.com、gateway READY 均正常，微信通道同步恢复）。
+
 ## [已解决] embedding 模型双实例（qwen3-embedding-0.6b + :2）（2026-09-11）
 
 - 症状：LM Studio 里 `text-embedding-qwen3-embedding-0.6b` 与 `text-embedding-qwen3-embedding-0.6b:2` 同时驻留（各 ~0.6GB 显存）；OpenClaw memory 子系统偶发 "memory embeddings retryable error" 重试。
@@ -30,7 +44,7 @@
   - 卸载单实例：`POST /api/v1/models/unload {"instance_id":"<实例id>"}`——v1 卸载接口只收 instance_id；实例 id 与 config 从 `GET /api/v1/models` 的 `loaded_instances` 数组看（/api/v0/models 不显示 instance_id）。
   - `lms unload <key>` 会卸该模型全部实例；`lms load --context-length` 在本机对该模型报 Unknown error，改用 REST。
   - 与 09-10 的 rana-rp-14b:2 双实例同机制（当时显式加载 49152/parallel2 治好）。
-- 状态：已解决（驻留 1 份 ctx 32768，复用与调用均验证）。
+- 状态：已解决（驻留 1 份 ctx 32768，复用与调用均验证）。**2026-09-12 复发**：又见 8192 实例（常驻丢失后 OpenClaw JIT 以低 ctx 先行加载），同方治理一次成功（unload → 32768 常驻重载，/v1/embeddings 实测 1024 维）。防复发要点：重启 LM Studio 或改模型配置后必查 `/api/v1/models` 各实例 ctx 与 OpenClaw JIT 请求是否一致；同窗口常驻 LLM（如 rana-rp-14b ctx 16384）同理。
 
 ## [已解决·会复发] Clash 7897 被 Windows 动态端口保留段圈占 → 代理失效 → git 推送 GitHub 挂死（2026-09-11）
 
@@ -150,3 +164,15 @@
 
 - 根因：`--command` 形式会包成 `sh -lc`，Windows 网关下无 sh 可用。
 - 解决方案：一律用 `--command-argv` JSON 数组形式，路径用正斜杠。
+
+## [已解决] 学习计划月历列宽被课程条撑爆（2026-09-12）
+
+- 症状：月历 7 列宽窄悬殊（最窄 25px），周末列被挤没，日期数字挤成一团。
+- 根因：`grid-template-columns: repeat(7, 1fr)` 的 `1fr` 最小尺寸默认是 `auto`，格子里 `.cal-course` 设了 `white-space: nowrap`，长标题把轨道顶宽。
+- 解决方案：改 `repeat(7, minmax(0, 1fr))`，超长课程条走省略号 + `title` 悬停提示。修在 `src/styles.css` 的 `.cal-grid/.cal-week`。
+
+## [行为说明] IAB 自动化点击在本机 DPI 下静默失准（2026-09-12 复现）
+
+- 症状：Playwright locator `click()`、`dom_cua.click()`、`locator.press("Enter")` 都"成功返回"但页面毫无反应（不是超时就是无效）；元素明明可点（elementFromPoint 命中自身）。
+- 根因：IAB 输入注入层坐标与本机显示缩放（≈1.61）不匹配，注入点落到元素之外。
+- 解决方案：用 `evaluate` 读 `getBoundingClientRect()` 拿 CSS 坐标，**中心点 ×1.61 后用 `tab.cua.click({x,y})`**；DOM 断言与文件实况双重验证点击是否真的生效。截图管线也会偶发 30s 超时，重开标签页或稍等可恢复。
