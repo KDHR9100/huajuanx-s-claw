@@ -21,6 +21,17 @@
 
 ## 登记区
 
+## [已解决] embedding 模型双实例（qwen3-embedding-0.6b + :2）（2026-09-11）
+
+- 症状：LM Studio 里 `text-embedding-qwen3-embedding-0.6b` 与 `text-embedding-qwen3-embedding-0.6b:2` 同时驻留（各 ~0.6GB 显存）；OpenClaw memory 子系统偶发 "memory embeddings retryable error" 重试。
+- 调用方：OpenClaw **记忆子系统**（语义记忆索引）——main 与 rana-rp 两个 agent 各有一套索引，对话压缩/记忆落库后各自触发 embedding；openclaw.json 无任何 embedding 配置，属自动探测 LM Studio 模型后的 JIT 加载。
+- 根因：LM Studio JIT 按「模型+配置」区分实例——**同模型不同 context_length = 两个实例**（实测一份 8192 一份 32768）；且模型卸载后的空窗期里两个调用方竞争加载也会裂开。
+- 解决方案：全卸后用与 OpenClaw JIT 请求**完全一致**的参数显式加载一份常驻（无 TTL）：`POST /api/v1/models/load {"model":"text-embedding-qwen3-embedding-0.6b","context_length":32768}`；同参请求会复用不再裂开（同参复打验证仍 1 份，embeddings 调用返回 1024 维正常）。运维要点：
+  - 卸载单实例：`POST /api/v1/models/unload {"instance_id":"<实例id>"}`——v1 卸载接口只收 instance_id；实例 id 与 config 从 `GET /api/v1/models` 的 `loaded_instances` 数组看（/api/v0/models 不显示 instance_id）。
+  - `lms unload <key>` 会卸该模型全部实例；`lms load --context-length` 在本机对该模型报 Unknown error，改用 REST。
+  - 与 09-10 的 rana-rp-14b:2 双实例同机制（当时显式加载 49152/parallel2 治好）。
+- 状态：已解决（驻留 1 份 ctx 32768，复用与调用均验证）。
+
 ## [已解决·会复发] Clash 7897 被 Windows 动态端口保留段圈占 → 代理失效 → git 推送 GitHub 挂死（2026-09-11）
 
 - 症状：`git push` 报 `Failed to connect to github.com port 443 via 127.0.0.1`（直连被墙必须走代理）；Clash Verge 界面看似正常、clash-verge.exe / verge-mihomo.exe 进程都在，但 `netstat` 查 7897 无监听，mihomo 只开着 DNS:53。**注意与"Clash 内核半死"区分：重启 Verge 进程无效**，sidecar 日志（`%APPDATA%\io.github.clash-verge-rev.clash-verge-rev\logs\sidecar\`）里能看到真凶：`Start Mixed(http+socks) server error: listen tcp :7897: bind: An attempt was made to access a socket in a way forbidden by its access permissions.`
