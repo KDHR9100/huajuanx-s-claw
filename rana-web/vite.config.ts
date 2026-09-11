@@ -324,9 +324,28 @@ function ranaSysStatusMiddleware(): Plugin {
     return { plans, activeGuid };
   };
 
+  /** 虚拟化状态检测（免管理员）：hypervisor 是否在跑 + VBS/HVCI 状态 */
+  const queryVirt = async () => {
+    const ps = [
+      "$cs = Get-CimInstance Win32_ComputerSystem",
+      "$dg = $null",
+      "try { $dg = Get-CimInstance -Namespace root\\Microsoft\\Windows\\DeviceGuard -ClassName Win32_DeviceGuard -ErrorAction Stop } catch {}",
+      "[pscustomobject]@{ hypervisorPresent = [bool]$cs.HypervisorPresent; vbsStatus = if ($dg) { [int]$dg.VirtualizationBasedSecurityStatus } else { -1 }; hvciRunning = if ($dg) { [bool]($dg.SecurityServicesRunning -contains 2) } else { $false } } | ConvertTo-Json -Compress",
+    ].join("; ");
+    const { stdout } = await execFileP("powershell", ["-NoProfile", "-NonInteractive", "-Command", ps], {
+      encoding: "utf8", timeout: 15000, windowsHide: true,
+    });
+    return JSON.parse(stdout) as { hypervisorPresent: boolean; vbsStatus: number; hvciRunning: boolean };
+  };
+
   const buildStatus = async () => {
-    const [sys, gpu, power] = await Promise.all([querySystem(), queryGpu().catch(() => null), queryPower().catch(() => null)]);
-    return { sys, gpu, power, ts: Date.now() };
+    const [sys, gpu, power, virt] = await Promise.all([
+      querySystem(),
+      queryGpu().catch(() => null),
+      queryPower().catch(() => null),
+      queryVirt().catch(() => null),
+    ]);
+    return { sys, gpu, power, virt, ts: Date.now() };
   };
 
   const isLoopback = (req: { socket?: { remoteAddress?: string }; headers?: Record<string, unknown> }) => {
@@ -388,15 +407,78 @@ function ranaSysStatusMiddleware(): Plugin {
     json(res, 405, { error: "method not allowed" });
   };
 
+  /** 虚拟化模式切换：弹 UAC 提权跑 bcdedit/reg 命令（等价于用户桌面那个 HTA）。off=游戏模式，auto=WSL 模式；重启后生效 */
+  const switchVirt = async (mode: string) => {
+    const inner =
+      mode === "off"
+        ? "bcdedit /set hypervisorlaunchtype off; " +
+          "reg add 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\DeviceGuard' /v EnableVirtualizationBasedSecurity /t REG_DWORD /d 0 /f; " +
+          "reg add 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\DeviceGuard\\Scenarios\\HypervisorEnforcedCodeIntegrity' /v Enabled /t REG_DWORD /d 0 /f; " +
+          "reg add 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa' /v LsaCfgFlags /t REG_DWORD /d 0 /f; " +
+          "Write-Host '== 虚拟化已全部关闭，重启后进入游戏模式 =='"
+        : "bcdedit /set hypervisorlaunchtype auto; " +
+          "Write-Host '== 已切回 WSL 模式，重启后生效 =='";
+    // 内层命令走 -EncodedCommand（UTF-16LE base64），避免多层引号转义
+    const b64 = Buffer.from(inner, "utf16le").toString("base64");
+    // Start-Process -Verb RunAs 弹 UAC；-Wait 等执行完；用户点取消则外层 exit 1
+    const outer =
+      "try { Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile','-EncodedCommand','" +
+      b64 +
+      "' -ErrorAction Stop; exit 0 } catch { exit 1 }";
+    await execFileP("powershell", ["-NoProfile", "-NonInteractive", "-Command", outer], {
+      encoding: "utf8", timeout: 120000, windowsHide: true,
+    });
+  };
+
+  const virtHandler = (
+    req: { method?: string; socket?: { remoteAddress?: string }; headers?: Record<string, unknown>; on: (ev: string, cb: (c?: string) => void) => void },
+    res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void },
+  ) => {
+    if (req.method !== "POST") {
+      json(res, 405, { error: "method not allowed" });
+      return;
+    }
+    const ra = req.socket?.remoteAddress ?? "";
+    const loopback = ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(ra);
+    const origin = String(req.headers?.origin ?? "");
+    if (!loopback || (origin && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin))) {
+      json(res, 403, { error: "仅本机可操作" });
+      return;
+    }
+    let body = "";
+    req.on("data", (c?: string) => { body += c ?? ""; });
+    req.on("end", () => {
+      let mode = "";
+      try {
+        mode = String((JSON.parse(body) as { mode?: string }).mode ?? "");
+      } catch { /* 忽略坏 body */ }
+      if (mode !== "off" && mode !== "auto") {
+        json(res, 400, { error: "mode 只能是 off（游戏）或 auto（WSL）" });
+        return;
+      }
+      switchVirt(mode)
+        .then(() => {
+          cache = null; // 状态即将变化（重启后），让下次查询拿新的
+          json(res, 200, { ok: true, mode });
+        })
+        .catch(() => {
+          // 用户在 UAC 弹窗点了「否」时 Start-Process 会失败
+          json(res, 200, { ok: false, cancelled: true, error: "UAC 被取消或提权失败" });
+        });
+    });
+  };
+
   return {
     name: "rana-sys-status",
     configureServer(server) {
       server.middlewares.use("/__rana/sys/status", handler as Parameters<typeof server.middlewares.use>[1]);
       server.middlewares.use("/__rana/sys/power", handler as Parameters<typeof server.middlewares.use>[1]);
+      server.middlewares.use("/__rana/sys/virt", virtHandler as Parameters<typeof server.middlewares.use>[1]);
     },
     configurePreviewServer(server) {
       server.middlewares.use("/__rana/sys/status", handler as Parameters<typeof server.middlewares.use>[1]);
       server.middlewares.use("/__rana/sys/power", handler as Parameters<typeof server.middlewares.use>[1]);
+      server.middlewares.use("/__rana/sys/virt", virtHandler as Parameters<typeof server.middlewares.use>[1]);
     },
   };
 }
