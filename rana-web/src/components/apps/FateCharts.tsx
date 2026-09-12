@@ -3,7 +3,8 @@
 // 大运竖排在右侧并高亮当前一步+今年流年；紫微盘悬停宫位画三方四正（连线+三角）。
 // 所有术语走本地注释库（Term 组件悬停出大白话）。
 import { useEffect, useMemo, useRef, useState } from "react";
-import { bazi, GAN_WX, hourToTimeIndex, sanFangSiZheng, ziwei, ZHI_WX } from "../../lib/fateCore";
+import type { ReactNode } from "react";
+import { bazi, GAN_WX, gzPillarInfo, hourToTimeIndex, liuNianOfRange, sanFangSiZheng, yearGanZhi, ziwei, ZHI_WX } from "../../lib/fateCore";
 import type { ZiweiResult } from "../../lib/fateCore";
 import type { FateProfile } from "./FateProfile";
 import Term from "./Term";
@@ -14,15 +15,21 @@ const gzWxClass = (ch: string) => {
   return wx ? WX_CLASS[wx] : "";
 };
 
-/** 紫微盘的三方四正连线层 */
-function ZwLines({ zw }: { zw: ZiweiResult }) {
+type ZwMode = "natal" | "decadal" | "yearly";
+
+/** 紫微盘渲染：本命/大运/流年三种模式 + 三方四正（悬停预览、点按常驻） */
+function ZwLines({ zw, mode }: { zw: ZiweiResult; mode: ZwMode }) {
   const boardRef = useRef<HTMLDivElement | null>(null);
   const cellRefs = useRef(new Map<string, HTMLDivElement | null>());
-  const [hover, setHover] = useState<{ zhi: string; lines: Array<[number, number, number, number]>; tri: string } | null>(null);
+  const [hoverView, setHoverView] = useState<{ zhi: string; lines: Array<[number, number, number, number]>; tri: string } | null>(null);
+  const [pin, setPin] = useState<string | null>(null);
+  const [pinView, setPinView] = useState<{ zhi: string; lines: Array<[number, number, number, number]>; tri: string } | null>(null);
 
-  const enter = (zhi: string) => {
+  const scope = mode === "natal" ? null : zw.yun[mode];
+
+  const compute = (zhi: string) => {
     const board = boardRef.current;
-    if (!board) return;
+    if (!board) return null;
     const br = board.getBoundingClientRect();
     const center = (z: string) => {
       const el = cellRefs.current.get(z);
@@ -31,95 +38,175 @@ function ZwLines({ zw }: { zw: ZiweiResult }) {
       return { x: r.left + r.width / 2 - br.left, y: r.top + r.height / 2 - br.top };
     };
     const from = center(zhi);
-    if (!from) return;
+    if (!from) return null;
     const { dui, san1, san2 } = sanFangSiZheng(zhi);
     const cDui = center(dui);
     const c1 = center(san1);
     const c2 = center(san2);
-    if (!cDui || !c1 || !c2) return;
-    setHover({
+    if (!cDui || !c1 || !c2) return null;
+    return {
       zhi,
       lines: [
         [from.x, from.y, cDui.x, cDui.y],
         [from.x, from.y, c1.x, c1.y],
         [from.x, from.y, c2.x, c2.y],
-      ],
+      ] as Array<[number, number, number, number]>,
       tri: `${from.x},${from.y} ${c1.x},${c1.y} ${c2.x},${c2.y}`,
-    });
+    };
   };
 
+  const view = pinView ?? hoverView;
+
   return (
-    <div className="zw-board" ref={boardRef} onMouseLeave={() => setHover(null)}>
-      {hover && (
+    <div className="zw-board" ref={boardRef} onMouseLeave={() => setHoverView(null)}>
+      {view && (
         <svg className="zw-lines" aria-hidden>
-          <polygon points={hover.tri} className="zw-tri" />
-          {hover.lines.map((l, i) => (
+          <polygon points={view.tri} className="zw-tri" />
+          {view.lines.map((l, i) => (
             <line key={i} x1={l[0]} y1={l[1]} x2={l[2]} y2={l[3]} className={i === 0 ? "zw-line-dui" : "zw-line-san"} />
           ))}
         </svg>
       )}
-      {zw.palaces.map((p) => (
-        <div
-          key={p.zhi}
-          ref={(el) => {
-            cellRefs.current.set(p.zhi, el);
-          }}
-          className={`zw-cell${p.isSoul ? " soul" : ""}${hover?.zhi === p.zhi ? " hot" : ""}`}
-          style={{ gridRow: p.row + 1, gridColumn: p.col + 1 }}
-          onMouseEnter={() => enter(p.zhi)}
-        >
-          <div className="zw-head">
-            <span className="zw-name">
-              {p.name === "命宫" ? <Term k="命宫">命宫</Term> : p.name}
-              {p.isBody && (
-                <i className="zw-body" title="身宫">
-                  身
-                </i>
+      {zw.palaces.map((p) => {
+        const isYunSoul = Boolean(scope && p.zhi === scope.zhi);
+        const badgeOf = (star: string) => scope?.mutagenAt.find((m) => m.star === star && m.zhi === p.zhi);
+        return (
+          <div
+            key={p.zhi}
+            ref={(el) => {
+              cellRefs.current.set(p.zhi, el);
+            }}
+            className={[
+              "zw-cell",
+              mode === "natal" && p.isSoul ? "soul" : "",
+              isYunSoul ? (mode === "decadal" ? "yun-soul" : "nian-soul") : "",
+              view?.zhi === p.zhi ? "hot" : "",
+              pin === p.zhi ? "pinned" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            style={{ gridRow: p.row + 1, gridColumn: p.col + 1 }}
+            onMouseEnter={() => {
+              if (!pin) setHoverView(compute(p.zhi));
+            }}
+            onClick={() => {
+              if (pin === p.zhi) {
+                setPin(null);
+                setPinView(null);
+              } else {
+                setPin(p.zhi);
+                setPinView(compute(p.zhi));
+              }
+            }}
+            title="点一下固定三方四正连线，再点取消"
+          >
+            <div className="zw-head">
+              <span className="zw-name">
+                {p.name === "命宫" ? <Term k="命宫">命宫</Term> : p.name}
+                {p.isBody && (
+                  <i className="zw-body" title="身宫">
+                    身
+                  </i>
+                )}
+                {p.isSoul && <i className="zw-yun-tag natal">本命命宫</i>}
+                {isYunSoul && (
+                  <i className={`zw-yun-tag ${mode === "decadal" ? "dy" : "ln"}`}>{mode === "decadal" ? "大限命宫" : "流年命宫"}</i>
+                )}
+              </span>
+              <span className="zw-gz">
+                {p.gan}
+                {p.zhi}
+              </span>
+            </div>
+            <div className="zw-stars">
+              {p.majorList.length ? (
+                p.majorList.map((s) => {
+                  const badge = badgeOf(s.name);
+                  return (
+                    <span key={s.name}>
+                      <Term k={`星·${s.name}`}>{s.name}</Term>
+                      {s.mutagen && (
+                        <Term k={`化${s.mutagen}`}>
+                          <sup>[{s.mutagen}]</sup>
+                        </Term>
+                      )}
+                      {badge && (
+                        <Term k={`化${badge.tag}`}>
+                          <sup className={`mut-badge ${mode}`}>{(mode === "decadal" ? "运" : "流") + badge.tag}</sup>
+                        </Term>
+                      )}{" "}
+                    </span>
+                  );
+                })
+              ) : (
+                <Term k="空宫">空宫</Term>
               )}
-            </span>
-            <span className="zw-gz">
-              {p.gan}
-              {p.zhi}
-            </span>
-          </div>
-          <div className="zw-stars">
-            {p.majorList.length ? (
-              p.majorList.map((s) => (
-                <span key={s.name}>
-                  <Term k={`星·${s.name}`}>{s.name}</Term>
-                  {s.mutagen && <Term k={`化${s.mutagen}`}><sup>[{s.mutagen}]</sup></Term>}{" "}
-                </span>
-              ))
-            ) : (
-              <Term k="空宫">空宫</Term>
+            </div>
+            <div className="zw-minors">
+              {p.minorList.map((n, i) => {
+                const badge = badgeOf(n);
+                return (
+                  <span key={n + i}>
+                    {i > 0 && " "}
+                    <Term k={`星·${n}`}>{n}</Term>
+                    {badge && (
+                      <Term k={`化${badge.tag}`}>
+                        <sup className={`mut-badge ${mode}`}>{(mode === "decadal" ? "运" : "流") + badge.tag}</sup>
+                      </Term>
+                    )}
+                  </span>
+                );
+              })}
+            </div>
+            {scope?.flowStars[p.zhi]?.length ? (
+              <div className="zw-flow">
+                <Term k="流曜">{scope.flowStars[p.zhi].join(" ")}</Term>
+              </div>
+            ) : null}
+            {p.decadal && (
+              <span className="zw-decadal">
+                <Term k="大限">{p.decadal}</Term>
+              </span>
             )}
           </div>
-          <div className="zw-minors">
-            {p.minorList.map((n, i) => (
-              <span key={n + i}>
-                {i > 0 && " "}
-                <Term k={`星·${n}`}>{n}</Term>
-              </span>
-            ))}
-          </div>
-          {p.decadal && (
-            <span className="zw-decadal">
-              <Term k="大限">{p.decadal}</Term>
-            </span>
-          )}
-        </div>
-      ))}
+        );
+      })}
       <div className="zw-center" style={{ gridRow: "2 / 4", gridColumn: "2 / 4" }}>
-        <b>
-          <Term k="五行局">{zw.fiveElements}</Term>
-        </b>
-        <span>
-          命宫在{zw.soulZhi} · 身宫在{zw.bodyZhi}
-        </span>
-        <span>
-          <Term k="三方四正">悬停任一宫看三方四正</Term>（对宫一线 + 三合三角）
-        </span>
-        <span className="zw-gz">{zw.chineseDate}</span>
+        {mode === "natal" ? (
+          <>
+            <b>
+              <Term k="五行局">{zw.fiveElements}</Term>
+            </b>
+            <span>
+              命宫在{zw.soulZhi} · 身宫在{zw.bodyZhi}
+            </span>
+            <span>
+              <Term k="三方四正">悬停或点按任一宫看三方四正</Term>（点按常驻，再点取消）
+            </span>
+            <span className="zw-gz">{zw.chineseDate}</span>
+          </>
+        ) : scope ? (
+          <>
+            <b>
+              {scope.label} {scope.gz}
+            </b>
+            <span>
+              <Term k={mode === "decadal" ? "大运命盘" : "流年命盘"}>
+                {scope.label}命宫在{scope.zhi}
+              </Term>
+              {scope.nominalAge ? ` · 小限${scope.nominalAge}虚岁` : ""}
+            </span>
+            <span className="zw-yun-mut">
+              {scope.label}四化：
+              {scope.mutagenAt.map((m) => `${m.star}[${m.tag}]→${m.zhi}宫`).join("、")}
+            </span>
+            <span>
+              <Term k="流曜">{scope.label}盘新增流曜已标在各宫</Term>
+            </span>
+          </>
+        ) : (
+          <span>运限数据没取到</span>
+        )}
       </div>
     </div>
   );
@@ -165,6 +252,29 @@ export default function FateCharts({ profile }: { profile: FateProfile | null })
 
   const maxWx = Math.max(1, ...(bz?.wuxing.map((w) => w.count) ?? [1]));
   const curDy = bz?.daYun.find((d) => d.current) ?? null;
+  // 十年流年条跟随所选大运（默认当前步）；换了盘自动回落到当前步
+  const [dyKey, setDyKey] = useState<number | null>(null);
+  useEffect(() => setDyKey(null), [bz]);
+  const selDy = bz?.daYun.find((d) => d.startYear === dyKey) ?? curDy;
+  const liuNian = useMemo(
+    () => (bz && selDy ? liuNianOfRange(selDy.startYear, selDy.endYear, bz.dayMaster) : []),
+    [bz, selDy],
+  );
+  // 表头「流年」列跟着流年条点击走（默认今年）；换了盘回落到今年
+  const [lnYear, setLnYear] = useState<number | null>(null);
+  useEffect(() => setLnYear(null), [bz]);
+  const lnSel = { year: lnYear ?? bz?.liuNian.year ?? 0, gz: yearGanZhi(lnYear ?? bz?.liuNian.year ?? 2000) };
+  const lnCol = useMemo(
+    () => (bz ? { gz: lnSel.gz, info: gzPillarInfo(lnSel.gz, bz.dayMaster) } : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bz, lnSel.gz, lnSel.year],
+  );
+  const dyCol = useMemo(
+    () => (bz && selDy ? { gz: selDy.gz, info: gzPillarInfo(selDy.gz, bz.dayMaster) } : null),
+    [bz, selDy],
+  );
+  // 紫微盘模式：本命 / 大运 / 流年
+  const [zwMode, setZwMode] = useState<ZwMode>("natal");
 
   return (
     <div>
@@ -203,11 +313,13 @@ export default function FateCharts({ profile }: { profile: FateProfile | null })
                 <thead>
                   <tr>
                     <th />
-                    <th className="col-cur">
+                    <th className="col-cur" title="点下方流年条可换年份">
                       <Term k="流年">流年</Term>
+                      <small className="col-sub">{lnCol?.gz}</small>
                     </th>
-                    <th className={curDy ? "col-cur" : ""}>
+                    <th className={dyCol ? "col-cur" : ""}>
                       <Term k="大运">大运</Term>
+                      <small className="col-sub">{dyCol?.gz}</small>
                     </th>
                     {bz.pillars.map((p) => (
                       <th key={p.label}>{p.label}</th>
@@ -217,8 +329,8 @@ export default function FateCharts({ profile }: { profile: FateProfile | null })
                 <tbody>
                   <tr>
                     <th>主星</th>
-                    <td className="col-cur">{bz.liuNian.shiShen}</td>
-                    <td className={curDy ? "col-cur" : ""}>{curDy?.shiShen ?? "—"}</td>
+                    <td className="col-cur">{lnCol && <Term k={lnCol.info.shiShenGan}>{lnCol.info.shiShenGan}</Term>}</td>
+                    <td className={dyCol ? "col-cur" : ""}>{dyCol && <Term k={dyCol.info.shiShenGan}>{dyCol.info.shiShenGan}</Term>}</td>
                     {bz.pillars.map((p) => (
                       <td key={p.label}>
                         <Term k={p.shiShenGan}>{p.shiShenGan}</Term>
@@ -227,8 +339,8 @@ export default function FateCharts({ profile }: { profile: FateProfile | null })
                   </tr>
                   <tr className="row-gz">
                     <th>天干</th>
-                    <td className={`col-cur ${gzWxClass(bz.liuNian.gz[0])}`}>{bz.liuNian.gz[0]}</td>
-                    <td className={curDy ? `col-cur ${gzWxClass(curDy.gz[0])}` : ""}>{curDy?.gz[0] ?? "—"}</td>
+                    <td className={`col-cur ${gzWxClass(lnCol?.gz[0] ?? "")}`}>{lnCol?.gz[0]}</td>
+                    <td className={dyCol ? `col-cur ${gzWxClass(dyCol.gz[0])}` : ""}>{dyCol?.gz[0]}</td>
                     {bz.pillars.map((p) => (
                       <td key={p.label} className={gzWxClass(p.gz[0])}>
                         {p.gz[0]}
@@ -237,85 +349,44 @@ export default function FateCharts({ profile }: { profile: FateProfile | null })
                   </tr>
                   <tr className="row-gz">
                     <th>地支</th>
-                    <td className={`col-cur ${gzWxClass(bz.liuNian.gz[1])}`}>{bz.liuNian.gz[1]}</td>
-                    <td className={curDy ? `col-cur ${gzWxClass(curDy.gz[1])}` : ""}>{curDy?.gz[1] ?? "—"}</td>
+                    <td className={`col-cur ${gzWxClass(lnCol?.gz[1] ?? "")}`}>{lnCol?.gz[1]}</td>
+                    <td className={dyCol ? `col-cur ${gzWxClass(dyCol.gz[1])}` : ""}>{dyCol?.gz[1]}</td>
                     {bz.pillars.map((p) => (
                       <td key={p.label} className={gzWxClass(p.gz[1])}>
                         {p.gz[1]}
                       </td>
                     ))}
                   </tr>
-                  <tr>
-                    <th>
-                      <Term k="藏干">藏干</Term>
-                    </th>
-                    <td className="col-cur dim">—</td>
-                    <td className="dim">—</td>
-                    {bz.pillars.map((p) => (
-                      <td key={p.label}>
-                        {p.hideGan.map((hg, i) => (
-                          <span key={hg + i} className="hidegan">
-                            <b className={gzWxClass(hg)}>{hg}</b>
-                            <Term k={p.hideShiShen[i] ?? ""}>{p.hideShiShen[i]}</Term>
-                          </span>
-                        ))}
-                      </td>
-                    ))}
-                  </tr>
-                  <tr>
-                    <th>
-                      <Term k="星运">星运</Term>
-                    </th>
-                    <td className="col-cur dim">—</td>
-                    <td className="dim">—</td>
-                    {bz.pillars.map((p) => (
-                      <td key={p.label}>
-                        <Term k={p.xingYun}>{p.xingYun}</Term>
-                      </td>
-                    ))}
-                  </tr>
-                  <tr>
-                    <th>
-                      <Term k="自坐">自坐</Term>
-                    </th>
-                    <td className="col-cur dim">—</td>
-                    <td className="dim">—</td>
-                    {bz.pillars.map((p) => (
-                      <td key={p.label}>
-                        <Term k={p.ziZuo}>{p.ziZuo}</Term>
-                      </td>
-                    ))}
-                  </tr>
-                  <tr>
-                    <th>
-                      <Term k="空亡">空亡</Term>
-                    </th>
-                    <td className="col-cur dim">—</td>
-                    <td className="dim">—</td>
-                    {bz.pillars.map((p) => (
-                      <td key={p.label}>{p.xunKong}</td>
-                    ))}
-                  </tr>
-                  <tr>
-                    <th>
-                      <Term k="旬首">旬首</Term>
-                    </th>
-                    <td className="col-cur dim">—</td>
-                    <td className="dim">—</td>
-                    {bz.pillars.map((p) => (
-                      <td key={p.label}>{p.xunShou}</td>
-                    ))}
-                  </tr>
-                  <tr>
-                    <th>
-                      <Term k="纳音">纳音</Term>
-                    </th>
-                    <td className="col-cur dim">—</td>
-                    <td className="dim">—</td>
-                    {bz.pillars.map((p) => (
-                      <td key={p.label}>{p.naYin}</td>
-                    ))}
-                  </tr>
+                  {(
+                    [
+                      [
+                        "藏干",
+                        (i: { hideGan: string[]; hideShiShen: string[] }) =>
+                          i.hideGan.map((hg, k) => (
+                            <span key={hg + k} className="hidegan">
+                              <b className={gzWxClass(hg)}>{hg}</b>
+                              <Term k={i.hideShiShen[k] ?? ""}>{i.hideShiShen[k]}</Term>
+                            </span>
+                          )),
+                      ],
+                      ["星运", (i: { xingYun: string }) => <Term k={i.xingYun}>{i.xingYun}</Term>],
+                      ["自坐", (i: { ziZuo: string }) => <Term k={i.ziZuo}>{i.ziZuo}</Term>],
+                      ["空亡", (i: { xunKong: string }) => i.xunKong],
+                      ["旬首", (i: { xunShou: string }) => i.xunShou],
+                      ["纳音", (i: { naYin: string }) => i.naYin],
+                    ] as Array<[string, (i: any) => ReactNode]>
+                  ).map(([label, cell]) => (
+                    <tr key={label}>
+                      <th>
+                        <Term k={label}>{label}</Term>
+                      </th>
+                      <td className="col-cur">{lnCol ? cell(lnCol.info) : "—"}</td>
+                      <td className={dyCol ? "col-cur" : ""}>{dyCol ? cell(dyCol.info) : "—"}</td>
+                      {bz.pillars.map((p) => (
+                        <td key={p.label}>{cell(p as any)}</td>
+                      ))}
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -323,16 +394,21 @@ export default function FateCharts({ profile }: { profile: FateProfile | null })
               <div className="dy-head">
                 <Term k="大运">大运</Term> <small>{bz.yunStart}起运</small>
               </div>
-              <div className="dy-item cur liunian">
+              <div className="dy-item cur liunian" title="表头流年列显示的就是这里选中的年份">
                 <Term k="流年">流年</Term>
                 <b>
-                  {bz.liuNian.gz} <span className={gzWxClass(bz.liuNian.gz[0])}>{bz.liuNian.shiShen}</span>
+                  {lnCol?.gz} {lnCol && <span className={gzWxClass(lnCol.gz[0])}>{lnCol.info.shiShenGan}</span>}
                 </b>
-                <small>今年 {bz.liuNian.year}</small>
+                <small>{lnSel.year === bz.liuNian.year ? `今年 ${lnSel.year}` : `${lnSel.year}（点流年条可换）`}</small>
               </div>
               <div className="dy-list">
                 {bz.daYun.map((d) => (
-                  <div key={d.startYear} className={`dy-item${d.current ? " cur" : ""}`}>
+                  <div
+                    key={d.startYear}
+                    className={`dy-item${d.current ? " cur" : ""}${selDy?.startYear === d.startYear ? " sel" : ""}`}
+                    onClick={() => setDyKey(d.startYear)}
+                    title="点这步大运，下面的十年流年跟着换"
+                  >
                     <span className="dy-age">
                       {d.startAge}-{d.endAge}岁
                     </span>
@@ -347,6 +423,33 @@ export default function FateCharts({ profile }: { profile: FateProfile | null })
               </div>
             </aside>
           </div>
+          {selDy && liuNian.length > 0 && (
+            <div className="liunian-strip">
+              <div className="ln-title">
+                <Term k="大运">{selDy.gz}</Term>
+                的十年<Term k="流年">流年</Term>
+                <small>
+                  {selDy.startAge}-{selDy.endAge}岁 · {selDy.startYear}-{selDy.endYear} · 点右侧大运可换
+                </small>
+              </div>
+              <div className="ln-cells">
+                {liuNian.map((n) => (
+                  <div
+                    key={n.year}
+                    className={`ln-cell${n.now ? " now" : ""}${lnSel.year === n.year ? " sel" : ""}`}
+                    onClick={() => setLnYear(n.year)}
+                    title="点这年：表头流年列跟着换"
+                  >
+                    <span className="ln-year">{n.year}</span>
+                    <b className={gzWxClass(n.gz[0])}>{n.gz}</b>
+                    <span className="ln-ss">
+                      <Term k={n.shiShen}>{n.shiShen}</Term>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="pillars-foot">
             <span className="chip">
               <Term k="胎元">胎元</Term> {bz.taiYuan}
@@ -380,7 +483,20 @@ export default function FateCharts({ profile }: { profile: FateProfile | null })
               命宫{zw.soulZhi} · 身宫{zw.bodyZhi} · 农历{zw.lunarDate} · {zw.zodiac}年 / {zw.sign}
             </small>
           </h3>
-          <ZwLines zw={zw} />
+          <div className="zw-modes">
+            {(
+              [
+                ["natal", "本命命盘"],
+                ["decadal", "大运命盘"],
+                ["yearly", "流年命盘"],
+              ] as Array<[ZwMode, string]>
+            ).map(([m, label]) => (
+              <button key={m} type="button" className={`mat-check${zwMode === m ? " on" : ""}`} onClick={() => setZwMode(m)}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <ZwLines zw={zw} mode={zwMode} />
         </div>
       )}
     </div>

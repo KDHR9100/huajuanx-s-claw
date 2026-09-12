@@ -1917,3 +1917,75 @@ body.has-bg .room { display: none; }
 .sk-mine { flex: none; font-size: 9.5px; font-weight: 600; color: var(--accent-strong); background: var(--accent-soft); border-radius: 999px; padding: 0 6px; }
 .skill-row .sk-desc { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mcp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ========== 排盘三升级：十年流年条 / 紫微三盘 / 问卦合成条 ========== */
+.liunian-strip { margin-top: 12px; }
+.liunian-strip .ln-title { font-size: 12.5px; color: var(--text-dim); margin-bottom: 6px; }
+.liunian-strip .ln-title b { color: var(--text); }
+.liunian-strip .ln-title small { margin-left: 6px; font-size: 10.5px; opacity: 0.8; }
+.ln-cells { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 5px; overflow-x: auto; }
+@media (max-width: 760px) { .ln-cells { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+.ln-cell {
+  border: 1.5px solid var(--border); border-radius: 9px; padding: 5px 4px;
+  display: flex; flex-direction: column; align-items: center; gap: 2px; background: var(--bg);
+}
+.ln-cell .ln-year { font-size: 10px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.ln-cell b { font-size: 14.5px; letter-spacing: 1px; }
+.ln-cell .ln-ss { font-size: 9.5px; color: var(--text-dim); }
+.ln-cell.now { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 40%, transparent) inset; }
+.ln-cell.now .ln-year { color: var(--accent-strong); font-weight: 700; }
+
+/* 大运列表可点 */
+.dy-item { cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.dy-item:hover { border-color: var(--accent); }
+.dy-item.sel { border-color: color-mix(in srgb, #5aa9e6 70%, transparent); }
+.dy-item.cur.sel { border-color: var(--accent); }
+
+/* 紫微三盘模式 */
+.zw-modes { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.zw-cell.yun-soul { border-color: #5aa9e6; box-shadow: 0 0 0 1.5px color-mix(in srgb, #5aa9e6 45%, transparent) inset; }
+.zw-cell.nian-soul { border-color: #e0a34e; box-shadow: 0 0 0 1.5px color-mix(in srgb, #e0a34e 45%, transparent) inset; }
+.zw-yun-tag {
+  font-style: normal; font-size: 9px; color: #fff; border-radius: 4px;
+  padding: 0 4px; margin-left: 4px; vertical-align: 1px;
+}
+.zw-yun-tag.dy { background: #5aa9e6; }
+.zw-yun-tag.ln { background: #e0a34e; }
+.mut-badge { font-size: 9.5px; margin-left: 1px; }
+.mut-badge.decadal { color: #5aa9e6; font-weight: 700; }
+.mut-badge.yearly { color: #d18f33; font-weight: 700; }
+.zw-flow { font-size: 10px; color: var(--text-dim); opacity: 0.9; line-height: 1.4; }
+.zw-center .zw-yun-mut { font-size: 10.5px; color: var(--text); line-height: 1.6; max-width: 230px; }
+
+/* 问卦底部合成条 */
+.divi-compose {
+  border-top: 1.5px dashed var(--border); padding-top: 12px;
+  display: flex; flex-direction: column; gap: 9px;
+}
+.divi-compose .dc-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.divi-compose .dc-label { font-size: 11.5px; color: var(--text-dim); flex: none; }
+.divi-compose .dc-send { justify-content: flex-end; }
+.mat-check.mat-mat { font-weight: 650; }
+.mat-check:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ========== 命盘交互增强 ========== */
+/* 本命命宫标注加强：粗边框 + 底色 + 常驻标签 */
+.zw-cell.soul {
+  border-width: 2.5px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+}
+.zw-yun-tag.natal { background: var(--accent-strong); }
+/* 点按固定的宫位：常驻高亮 */
+.zw-cell.pinned { box-shadow: 0 0 0 2.5px var(--accent) inset, 0 0 14px color-mix(in srgb, var(--accent) 35%, transparent); }
+.zw-cell.pinned::after {
+  content: "已固定";
+  position: absolute; right: 5px; bottom: 4px;
+  font-size: 8.5px; color: #fff; background: var(--accent-strong);
+  border-radius: 4px; padding: 0 4px; pointer-events: none;
+}
+/* 流年条可点 + 选中态 */
+.ln-cell { cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
+.ln-cell:hover { border-color: var(--accent); }
+.ln-cell.sel { border-color: #5aa9e6; box-shadow: 0 0 0 1.5px color-mix(in srgb, #5aa9e6 45%, transparent) inset; }
+/* 表头流年/大运列副标（干支） */
+.bazi-table thead th .col-sub { display: block; font-size: 10px; font-weight: 400; margin-top: 1px; }

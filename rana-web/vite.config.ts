@@ -108,6 +108,19 @@ function providerReferences(cfg: FullConfig, providerId: string): string[] {
 function ranaProviderConfigMiddleware(): Plugin {
   const readProviders = () => readFullConfig().models?.providers ?? {};
 
+  /** 读 rana-web/.env 里的明文 key（可选，文件已 gitignore）：每次现读，改完即生效不用重启 vite。
+   *  provider id（如 aliyun-maas）→ .env 键名（ALIYUN_MAAS_API_KEY） */
+  const envKeyFor = (providerId: string) => {
+    const name = providerId.toUpperCase().replace(/-/g, "_") + "_API_KEY";
+    try {
+      const text = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), ".env"), "utf8");
+      const m = text.match(new RegExp("^" + name + "=(.+)$", "m"));
+      return m ? m[1].trim() : "";
+    } catch {
+      return "";
+    }
+  };
+
   const listProviders = () => {
     const providers = readProviders();
     return Object.entries(providers).map(([id, p]) => ({
@@ -209,6 +222,11 @@ function ranaProviderConfigMiddleware(): Plugin {
       key = key || p?.apiKey;
     }
     if (!url || !/^https?:\/\//.test(url)) throw new Error("需要 http(s):// 的 baseUrl");
+    // .env 明文 key 优先于密钥库 SecretRef（网页可直连拉全量目录）
+    if ((!key || typeof key !== "string") && providerId) {
+      const envKey = envKeyFor(providerId);
+      if (envKey) key = envKey;
+    }
     const local = /\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(url);
     if (key && typeof key !== "string") {
       // SecretRef：明文在密钥库里（只写），网页无法直连 provider，走运行时目录
@@ -1712,33 +1730,53 @@ function ranaFateMiddleware(): Plugin {
     }
   };
 
-  /** 解卦提示词：档案（服务端补）+ 前端本地算好的命理材料，全喂给她 */
-  const askMessage = (payload: {
-    domain?: string;
-    question?: string;
-    hexagram?: Record<string, unknown>;
-    almanac?: Record<string, unknown>;
-    bazi?: Record<string, unknown>;
-    ziwei?: Record<string, unknown>;
-  }, profile: FateProfile) => {
+  /** 解卦提示词：档案（服务端补，可能没有）+ 前端按勾选带来的材料；没勾的整段省略 */
+  const askMessage = (
+    payload: {
+      domain?: string;
+      question?: string;
+      hexagram?: Record<string, unknown> | null;
+      almanac?: Record<string, unknown>;
+      bazi?: Record<string, unknown> | null;
+      ziwei?: Record<string, unknown> | null;
+    },
+    profile: FateProfile | null,
+  ) => {
     const dom = String(payload.domain ?? "");
     const q = String(payload.question ?? "").trim();
-    return [
-      "【问卦·页面触发】用户在程序页摇了一卦，请你解卦。",
+    const parts: string[] = [
+      payload.hexagram ? "【问卦·页面触发】用户摇了一卦，请你解卦。" : "【命理咨询·页面触发】用户想问你命理问题。",
       `问题域：${dom || "综合"}${q ? `；他自己的问题：「${q}」` : ""}`,
-      `他的档案：${[profile.nick ? `昵称${profile.nick}` : "", `性别${profile.gender}`, `阳历生日${profile.birthday}`, profile.birthTime ? `出生时间${profile.birthTime}` : "出生时间未知", profile.birthplace ? `出生地${profile.birthplace}` : ""].filter(Boolean).join("，")}`,
-      `八字（前端排好）：${JSON.stringify(payload.bazi ?? {})}`,
-      `紫微要点（前端排好）：${JSON.stringify(payload.ziwei ?? {})}`,
-      `今日黄历（前端排好）：${JSON.stringify(payload.almanac ?? {})}`,
-      `卦象（前端排好，六爻从初爻到上爻）：${JSON.stringify(payload.hexagram ?? {})}`,
+    ];
+    if (profile) {
+      parts.push(
+        `他的档案：${[
+          profile.nick ? `昵称${profile.nick}` : "",
+          `性别${profile.gender}`,
+          `阳历生日${profile.birthday}`,
+          profile.birthTime ? `出生时间${profile.birthTime}` : "出生时间未知",
+          profile.birthplace ? `出生地${profile.birthplace}` : "",
+        ]
+          .filter(Boolean)
+          .join("，")}`,
+      );
+    }
+    if (payload.bazi) parts.push(`八字（前端排好）：${JSON.stringify(payload.bazi)}`);
+    if (payload.ziwei) parts.push(`紫微要点（前端排好，含当前大限/流年）：${JSON.stringify(payload.ziwei)}`);
+    if (payload.almanac) parts.push(`今日黄历（前端排好）：${JSON.stringify(payload.almanac)}`);
+    if (payload.hexagram) parts.push(`卦象（前端排好，六爻从初爻到上爻）：${JSON.stringify(payload.hexagram)}`);
+    parts.push(
       [
-        "解卦要求：",
-        "1) 结合他的命盘（八字五行、紫微命宫）和卦象（本卦变卦、动爻、卦辞，动爻爻辞凭你掌握的《周易》原文引用）回答他的问题；",
+        "回答要求：",
+        "1) 材料有什么用什么：结合命盘（八字五行、紫微命宫大限流年）和/或卦象（本卦变卦、动爻、卦辞，动爻爻辞凭你掌握的《周易》原文引用）回答他的问题；没给的材料别硬编；",
         "2) 保持你平时的说话风格，话少、直接，别迷信吓唬人，也别灌鸡汤；",
-        "3) 分三段：卦象说了什么 / 对他这个人的命盘意味着什么 / 落到这件事上一句可执行的建议；",
+        payload.hexagram
+          ? "3) 分三段：卦象说了什么 / 对他这个人的命盘意味着什么 / 落到这件事上一句可执行的建议；"
+          : "3) 分两段：命盘怎么说 / 落到这件事上一句可执行的建议；",
         "4) 直接输出给用户看的 markdown 正文，不要输出 ```json 契约块。",
       ].join("\n"),
-    ].join("\n\n");
+    );
+    return parts.join("\n\n");
   };
 
   const json = (
@@ -1820,11 +1858,12 @@ function ranaFateMiddleware(): Plugin {
         .then(async (body) => {
           const payload = JSON.parse(body || "{}") as Parameters<typeof askMessage>[0];
           const store = readStore();
-          if ("empty" in store) {
+          const prof = "empty" in store ? null : store.list.find((p) => p.id === store.active) ?? store.list[0];
+          // 没档案也放行——只问卦象（不排命盘）是合法用法；但带了八字/紫微就必须有档案
+          if (!prof && (payload.bazi || payload.ziwei)) {
             json(res, 400, { error: "还没填生辰档案——先在「我的档案」里存一份" });
             return;
           }
-          const prof = store.list.find((p) => p.id === store.active) ?? store.list[0];
           const r = await runAgent(askMessage(payload, prof));
           if (!r.ok) {
             json(res, 500, { error: r.error ?? "她没回话" });

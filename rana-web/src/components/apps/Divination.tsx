@@ -1,5 +1,6 @@
-// 问卜：三枚铜钱摇六爻成卦（本卦/变卦/动爻/卦辞），连同档案命盘交给云端 Rana 解卦。
-// 快捷四域（事业/金钱/爱情/健康）+ 自定义问题；解卦结果按 markdown 渲染。
+// 问卜：三枚铜钱摇六爻成卦（本卦/变卦/动爻/卦辞），与档案命盘一起交给云端 Rana 解卦。
+// 摇卦在上、卦象在中；最底部是「合成条」——自由勾选要带上的材料（八字/紫微/卦象，可单选可多选）
+// + 快捷方向（事业/金钱/爱情/健康）+ 自定义问题 + 发送。不摇卦只问命理也行。
 import { useEffect, useMemo, useState } from "react";
 import Markdown from "../Markdown";
 import { bazi, castLine, dayAlmanac, hourToTimeIndex, readHexagram, ziwei, YAO_NAMES } from "../../lib/fateCore";
@@ -36,6 +37,19 @@ export default function Divination({ profile }: { profile: FateProfile | null })
   const [reply, setReply] = useState("");
   const [error, setError] = useState("");
 
+  // 材料多选：八字 / 紫微 / 卦象（点亮=随问题发给她）
+  const prof = profile;
+  const hasBazi = Boolean(prof && /^\d{4}-\d{2}-\d{2}$/.test(prof.birthday) && (prof.gender === "男" || prof.gender === "女"));
+  const hasZiwei = hasBazi && Boolean(prof) && /^\d{2}:\d{2}$/.test(prof!.birthTime ?? "");
+  const [useBazi, setUseBazi] = useState(false);
+  const [useZiwei, setUseZiwei] = useState(false);
+  const [useHexi, setUseHexi] = useState(true);
+  useEffect(() => {
+    // 档案一变，材料默认值跟着档案齐备度走
+    setUseBazi(hasBazi);
+    setUseZiwei(hasZiwei);
+  }, [hasBazi, hasZiwei]);
+
   const hex = useMemo(() => readHexagram(lines), [lines]);
 
   const castOne = () => {
@@ -71,7 +85,7 @@ export default function Divination({ profile }: { profile: FateProfile | null })
     setError("");
   };
 
-  // 问卦要带的命盘材料（档案齐才排；不齐就只发卦象+黄历）
+  // 问卦要带的命理材料（按勾选现算）
   const material = useMemo(() => {
     const now = new Date();
     const alm = dayAlmanac(now.getFullYear(), now.getMonth() + 1, now.getDate());
@@ -84,25 +98,36 @@ export default function Divination({ profile }: { profile: FateProfile | null })
     };
     let baziSum: Record<string, unknown> | null = null;
     let ziweiSum: Record<string, unknown> | null = null;
-    if (profile && /^\d{4}-\d{2}-\d{2}$/.test(profile.birthday) && (profile.gender === "男" || profile.gender === "女")) {
-      const [y, m, d] = profile.birthday.split("-").map(Number);
-      const hour = /^\d{2}:\d{2}$/.test(profile.birthTime) ? Number(profile.birthTime.slice(0, 2)) : null;
-      const bz = bazi(y, m, d, hour, profile.gender === "男" ? 1 : 0);
+    const prof = profile;
+    if (hasBazi && prof && (prof.gender === "男" || prof.gender === "女") && /^\d{4}-\d{2}-\d{2}$/.test(prof.birthday)) {
+      const gender = prof.gender;
+      const [y, m, d] = prof.birthday.split("-").map(Number);
+      const hour = hasZiwei && /^\d{2}:\d{2}$/.test(prof.birthTime ?? "") ? Number(prof.birthTime!.slice(0, 2)) : null;
+      const bz = bazi(y, m, d, hour, gender === "男" ? 1 : 0);
       baziSum = {
         四柱: bz.pillars.map((p) => p.gz).join(" "),
         日主: `${bz.dayMaster}(${bz.dayMasterWx})`,
         五行: bz.wuxing.map((w) => `${w.name}${w.count}`).join(" "),
+        当前大运: (() => {
+          const c = bz.daYun.find((x) => x.current);
+          return c ? `${c.gz}（${c.shiShen}，${c.startYear}-${c.endYear}）` : "";
+        })(),
+        今年流年: `${bz.liuNian.gz}（${bz.liuNian.shiShen}）`,
       };
-      if (hour !== null) {
+      if (hasZiwei && hour !== null) {
         try {
-          const zw = ziwei(profile.birthday, hourToTimeIndex(hour), profile.gender);
+          const zw = ziwei(prof.birthday, hourToTimeIndex(hour), gender);
           const soul = zw.palaces.find((p) => p.isSoul);
+          const dy = zw.yun.decadal;
+          const yn = zw.yun.yearly;
           ziweiSum = {
             五行局: zw.fiveElements,
             命宫: `${zw.soulZhi}（${soul?.majors ?? "空宫"}）`,
-            四化: zw.palaces
+            生年四化: zw.palaces
               .flatMap((p) => (p.majors.match(/\S\[[禄权科忌]\]/g) ?? []).map((x) => `${p.name}:${x}`))
               .join("、"),
+            当前大限: dy ? `${dy.gz}入${dy.zhi}宫，四化${dy.mutagen.map((s, i) => `${s}[${"禄权科忌"[i]}]`).join(" ")}` : "",
+            今年流年盘: yn ? `${yn.gz}入${yn.zhi}宫，四化${yn.mutagen.map((s, i) => `${s}[${"禄权科忌"[i]}]`).join(" ")}` : "",
           };
         } catch {
           ziweiSum = null;
@@ -110,10 +135,13 @@ export default function Divination({ profile }: { profile: FateProfile | null })
       }
     }
     return { almanac, baziSum, ziweiSum };
-  }, [profile]);
+  }, [profile, hasBazi, hasZiwei]);
+
+  const anyMaterial = (useBazi && hasBazi) || (useZiwei && hasZiwei) || (useHexi && Boolean(hex));
+  const canAsk = anyMaterial && !asking && !spinning;
 
   const ask = async () => {
-    if (!hex || asking) return;
+    if (!canAsk) return;
     setAsking(true);
     setError("");
     setReply("");
@@ -124,16 +152,22 @@ export default function Divination({ profile }: { profile: FateProfile | null })
         body: JSON.stringify({
           domain: DOMAINS.find((d) => d.id === domain)?.label ?? (customQ.trim() ? "自定义" : "综合"),
           question: customQ.trim() || (DOMAINS.find((d) => d.id === domain)?.tpl ?? ""),
-          hexagram: {
-            本卦: `${hex.ben.name}（${hex.ben.gong}）`,
-            卦辞: hex.ben.ci,
-            变卦: hex.bian ? `${hex.bian.name}（${hex.bian.gong}）` : "无动爻，不变卦",
-            动爻: hex.moving.length ? hex.moving.map((i) => `第${i}爻`).join("、") : "无",
-            六爻自初至上: lines.map((l, i) => `${YAO_NAMES[i]}爻${l.yao}(${l.coins.map((c) => (c ? "背" : "字")).join("")})`).join("；"),
-          },
+          ...(useHexi && hex
+            ? {
+                hexagram: {
+                  本卦: `${hex.ben.name}（${hex.ben.gong}）`,
+                  卦辞: hex.ben.ci,
+                  变卦: hex.bian ? `${hex.bian.name}（${hex.bian.gong}）` : "无动爻，不变卦",
+                  动爻: hex.moving.length ? hex.moving.map((i) => `第${i}爻`).join("、") : "无",
+                  六爻自初至上: lines
+                    .map((l, i) => `${YAO_NAMES[i]}爻${l.yao}(${l.coins.map((c) => (c ? "背" : "字")).join("")})`)
+                    .join("；"),
+                },
+              }
+            : {}),
           almanac: material.almanac,
-          bazi: material.baziSum ?? "档案缺生日，未排",
-          ziwei: material.ziweiSum ?? "档案缺时辰，未排紫微",
+          ...(useBazi && hasBazi ? { bazi: material.baziSum } : {}),
+          ...(useZiwei && hasZiwei ? { ziwei: material.ziweiSum } : {}),
         }),
       });
       const j = (await r.json()) as { ok?: boolean; reply?: string; error?: string };
@@ -146,25 +180,21 @@ export default function Divination({ profile }: { profile: FateProfile | null })
     }
   };
 
-  const canAsk = Boolean(hex) && !asking && (domain !== null || customQ.trim().length > 0) && !spinning;
+  const matChip = (on: boolean, avail: boolean, label: string, toggle: () => void, why: string) => (
+    <button
+      key={label}
+      type="button"
+      className={`mat-check mat-mat${on && avail ? " on" : ""}`}
+      disabled={!avail}
+      title={avail ? (on ? "点亮=随问题发给她，点一下去掉" : "点一下带上") : why}
+      onClick={toggle}
+    >
+      {label}
+    </button>
+  );
 
   return (
     <div className="divi-wrap">
-      {/* 问题域 */}
-      <div className="divi-domains">
-        {DOMAINS.map((d) => (
-          <button key={d.id} type="button" className={`mat-check${domain === d.id ? " on" : ""}`} onClick={() => setDomain(domain === d.id ? null : d.id)}>
-            {d.label}
-          </button>
-        ))}
-        <input
-          className="set-input divi-q"
-          placeholder="或者自己写问题（可选）"
-          value={customQ}
-          onChange={(e) => setCustomQ(e.target.value)}
-        />
-      </div>
-
       {/* 摇卦器 */}
       <div className="divi-caster">
         <button
@@ -175,7 +205,11 @@ export default function Divination({ profile }: { profile: FateProfile | null })
           title="点铜钱摇一爻"
         >
           {[0, 1, 2].map((i) => (
-            <span key={i} className={`coin${spinning ? " spin" : ""}${coins ? (coins[i] ? " tails" : " heads") : ""}`} style={{ animationDelay: `${i * 0.09}s` }}>
+            <span
+              key={i}
+              className={`coin${spinning ? " spin" : ""}${coins ? (coins[i] ? " tails" : " heads") : ""}`}
+              style={{ animationDelay: `${i * 0.09}s` }}
+            >
               <i className="hole" />
               <b>{coins ? (coins[i] ? "背" : "字") : "摇"}</b>
             </span>
@@ -249,17 +283,11 @@ export default function Divination({ profile }: { profile: FateProfile | null })
         </div>
       )}
 
-      {/* 问她解卦 */}
-      {hex && (
-        <div className="divi-ask">
-          <button className="btn" onClick={() => void ask()} disabled={!canAsk}>
-            {asking ? "她在起卦推演……" : "问她解卦"}
-          </button>
-          {!domain && !customQ.trim() && <span className="tune-hint">先选一个快捷方向或写下问题</span>}
-          {!profile && <span className="tune-hint err">没存生辰档案也能问，但她就只看卦象不看命盘（建议先填档案）</span>}
+      {asking && (
+        <div className="card pending">
+          <p className="pending-text">她把你要的材料摊开看了……稍等。</p>
         </div>
       )}
-      {asking && <div className="card pending"><p className="pending-text">她把你的八字、命盘和卦象摊开看了……稍等。</p></div>}
       {reply && (
         <div className="card fate-reply">
           <h3>🔮 她说</h3>
@@ -267,6 +295,42 @@ export default function Divination({ profile }: { profile: FateProfile | null })
         </div>
       )}
       {error && <p className="sys-err">{error}</p>}
+
+      {/* 底部合成条：材料多选 + 问题 + 发送 */}
+      <div className="divi-compose">
+        <div className="dc-row">
+          <span className="dc-label">带什么问她</span>
+          {matChip(useBazi, hasBazi, "☯ 八字", () => setUseBazi(!useBazi), "档案里还没有生日（或性别），先去「我的档案」存一份")}
+          {matChip(useZiwei, hasZiwei, "✦ 紫微", () => setUseZiwei(!useZiwei), "紫微需要出生时间，档案里补一下时辰")}
+          {matChip(useHexi && Boolean(hex), Boolean(hex), "🪙 卦象", () => setUseHexi(!useHexi), "还没摇卦——上面摇一卦，或只问命理不摇也行")}
+        </div>
+        <div className="dc-row">
+          <span className="dc-label">问什么</span>
+          {DOMAINS.map((d) => (
+            <button
+              key={d.id}
+              type="button"
+              className={`mat-check${domain === d.id ? " on" : ""}`}
+              onClick={() => setDomain(domain === d.id ? null : d.id)}
+            >
+              {d.label}
+            </button>
+          ))}
+          <input
+            className="set-input divi-q"
+            placeholder="或者自己写问题（可选）"
+            value={customQ}
+            onChange={(e) => setCustomQ(e.target.value)}
+          />
+        </div>
+        <div className="dc-row dc-send">
+          <button className="btn" onClick={() => void ask()} disabled={!canAsk}>
+            {asking ? "她在推演……" : useHexi && hex ? "问她解卦" : "问她"}
+          </button>
+          {!anyMaterial && <span className="tune-hint">至少点亮一样材料（八字/紫微/卦象）</span>}
+          {useHexi && !hex && !asking && <span className="tune-hint">没摇卦也不影响——她只看命盘答</span>}
+        </div>
+      </div>
     </div>
   );
 }
