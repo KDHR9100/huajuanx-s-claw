@@ -108,7 +108,7 @@ export default function CloudConfigModal() {
       setMsg("已保存，gateway 已热重载——顶栏选择器即生效");
       setApiKey("");
       load();
-      void gateway.refreshModels();
+      gateway.refreshModelsSoon();
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -129,7 +129,7 @@ export default function CloudConfigModal() {
       setMsg(`已删除 ${sel.id}`);
       setSelId("");
       load();
-      void gateway.refreshModels();
+      gateway.refreshModelsSoon();
     } catch (e) {
       setErr((e as Error).message);
     } finally {

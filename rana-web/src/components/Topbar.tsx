@@ -14,6 +14,8 @@ function ModelPicker() {
   const currentKey = useAppStore((s) => s.currentKey);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  // 连通测试结果：modelId → {busy, ok, ms, error}
+  const [tests, setTests] = useState<Record<string, { busy?: boolean; ok?: boolean; ms?: number; error?: string }>>({});
   const ref = useRef<HTMLDivElement>(null);
 
   const current = sessions.find((s) => s.key === currentKey)?.model;
@@ -40,6 +42,31 @@ function ModelPicker() {
     }
   };
 
+  /** 测一个模型能不能通：一条最小消息，key 只在服务端配置里读 */
+  const test = async (modelId: string) => {
+    if (tests[modelId]?.busy) return;
+    setTests((t) => ({ ...t, [modelId]: { busy: true } }));
+    try {
+      const r = await fetch("/__rana/model-test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ modelId }),
+      });
+      const j = (await r.json()) as { ok?: boolean; ms?: number; error?: string };
+      setTests((t) => ({ ...t, [modelId]: { ok: Boolean(j.ok), ms: j.ms, error: j.error } }));
+    } catch (e) {
+      setTests((t) => ({ ...t, [modelId]: { ok: false, error: (e as Error).message } }));
+    }
+  };
+
+  const testBadge = (modelId: string) => {
+    const t = tests[modelId];
+    if (!t) return { text: "⚡", cls: "", title: "测试这个模型能不能连通" };
+    if (t.busy) return { text: "…", cls: "", title: "测试中" };
+    if (t.ok) return { text: `✓${t.ms ?? "?"}ms`, cls: "ok", title: `连通，延迟 ${t.ms}ms` };
+    return { text: "✗不通", cls: "bad", title: t.error ?? "不通" };
+  };
+
   const isActive = (modelId: string) => !!current && modelSuffix(current) === modelSuffix(modelId);
 
   // 按 provider 分组（aliyun-maas / lmstudio-local / 新增的档案…），组内保持原顺序
@@ -59,19 +86,31 @@ function ModelPicker() {
       </button>
       {open && (
         <div className="mp-menu">
-          <div className="mp-label">全部模型（{models.length}）· 按接口分组</div>
+          <div className="mp-label">全部模型（{models.length}）· 按接口分组 · ⚡测连通</div>
           {groups.map((g) => (
             <div key={g.provider}>
               <div className="mp-group">{g.provider}</div>
-              {g.items.map((m) => (
-                <button key={m.id} className={`mp-item${isActive(m.id) ? " active" : ""}`} disabled={busy} onClick={() => void apply(m.id)}>
-                  <span className="m-name">{m.name}</span>
-                  <span className="m-sub">
-                    {m.id}
-                    {m.contextWindow ? ` · ${(m.contextWindow / 1000).toFixed(0)}k ctx` : ""}
-                  </span>
-                </button>
-              ))}
+              {g.items.map((m) => {
+                const badge = testBadge(m.id);
+                return (
+                  <div key={m.id} className="mp-row">
+                    <button className={`mp-item${isActive(m.id) ? " active" : ""}`} disabled={busy} onClick={() => void apply(m.id)}>
+                      <span className="m-name">{m.name}</span>
+                      <span className="m-sub">
+                        {m.id}
+                        {m.contextWindow ? ` · ${(m.contextWindow / 1000).toFixed(0)}k ctx` : ""}
+                      </span>
+                    </button>
+                    <button
+                      className={`mp-test${badge.cls ? " " + badge.cls : ""}`}
+                      title={badge.title}
+                      onClick={() => void test(m.id)}
+                    >
+                      {badge.text}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           ))}
         </div>

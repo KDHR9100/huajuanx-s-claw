@@ -34,6 +34,8 @@ export interface SessionRow {
   sessionId?: string;
   /** agent 主会话（服务端禁止删除/归档） */
   isMain?: boolean;
+  /** 会话所属智能体（main / rana-rp…），右侧面板的技能清单跟着它切换 */
+  agentId?: string;
 }
 
 export interface ModelInfo {

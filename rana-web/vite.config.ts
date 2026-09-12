@@ -516,6 +516,11 @@ function ranaSysStatusMiddleware(): Plugin {
     res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void },
   ) => {
     if (req.method === "GET") {
+      // ?fresh=1：页面"立即刷新"——绕过 8 秒缓存，外网连通性也重测一遍
+      if (new URL(req.url ?? "/", "http://x").searchParams.get("fresh") === "1") {
+        cache = null;
+        netProbeCache = null;
+      }
       if (cache && Date.now() - cache.at < CACHE_MS) {
         json(res, 200, cache.data);
         return;
@@ -1871,6 +1876,205 @@ function ranaModelParamsMiddleware(): Plugin {
   };
 }
 
+/**
+ * 模型连通测试端点：POST /__rana/model-test {modelId} —— 用该模型发一条最小消息（max_tokens 16），
+ * 测能不能通、延迟多少。apiKey 只在运行时从 openclaw.json 读，不进日志不进前端。
+ * 仅本机回环来源可调。
+ */
+function ranaModelTestMiddleware(): Plugin {
+  const json = (res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void }, code: number, out: unknown) => {
+    res.setHeader("content-type", "application/json");
+    res.statusCode = code;
+    res.end(JSON.stringify(out));
+  };
+  const testModel = async (modelId: string) => {
+    const providerId = modelId.split("/")[0] ?? "";
+    const model = modelId.split("/").slice(1).join("/") || modelId;
+    const p = readFullConfig().models?.providers?.[providerId];
+    if (!p?.baseUrl) throw new Error(`找不到 provider：${providerId || "(空)"}`);
+    // apiKey 可能是明文串，也可能已是 SecretRef 对象（{source:"store",id}）——后者去 state SQLite 的 secrets 表里解析
+    let apiKey: string | undefined;
+    const rawKey = (p as { apiKey?: unknown }).apiKey;
+    if (typeof rawKey === "string") apiKey = rawKey;
+    else if (rawKey && typeof rawKey === "object" && (rawKey as { source?: string }).source === "store") {
+      const { DatabaseSync } = await import("node:sqlite");
+      const db = new DatabaseSync("K:\\openclaw\\.openclaw\\.openclaw\\state\\openclaw.sqlite", { readOnly: true });
+      try {
+        const row = db
+          .prepare(
+            "SELECT value FROM secret_store_entries WHERE name = ? AND kind = 'secret' AND deleted_at_ms IS NULL ORDER BY updated_at_ms DESC LIMIT 1",
+          )
+          .get(String((rawKey as { id?: string }).id ?? "")) as { value?: string } | undefined;
+        apiKey = row?.value;
+      } finally {
+        db.close();
+      }
+    }
+    const ctrl = new AbortController();
+    // 本地大模型冷加载可能要几十秒，手动测试按钮宁可多等
+    const timer = setTimeout(() => ctrl.abort(), 45000);
+    const t0 = Date.now();
+    try {
+      const r = await fetch(p.baseUrl.replace(/\/+$/, "") + "/chat/completions", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+        },
+        body: JSON.stringify({ model, messages: [{ role: "user", content: "连通测试：请只回复两个字：好的" }], max_tokens: 16, stream: false }),
+        signal: ctrl.signal,
+      });
+      const ms = Date.now() - t0;
+      if (!r.ok) {
+        const body = (await r.text()).slice(0, 200);
+        throw new Error(`HTTP ${r.status}${body ? "：" + body : ""}`);
+      }
+      const j = (await r.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
+      const content = j.choices?.[0]?.message?.content;
+      const reply = typeof content === "string" ? content.slice(0, 40) : Array.isArray(content) ? String(content[0]?.text ?? "").slice(0, 40) : "";
+      return { ok: true as const, ms, reply };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const handler = (
+    req: { method?: string; socket?: { remoteAddress?: string }; headers?: Record<string, unknown>; on: (ev: string, cb: (c?: string) => void) => void },
+    res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void },
+  ) => {
+    if (req.method !== "POST") {
+      json(res, 405, { error: "method not allowed" });
+      return;
+    }
+    const ra = req.socket?.remoteAddress ?? "";
+    const origin = String(req.headers?.origin ?? "");
+    if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(ra) || (origin && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin))) {
+      json(res, 403, { error: "仅本机可操作" });
+      return;
+    }
+    let body = "";
+    req.on("data", (c?: string) => { body += c ?? ""; });
+    req.on("end", () => {
+      let modelId = "";
+      try {
+        modelId = String((JSON.parse(body || "{}") as { modelId?: string }).modelId ?? "");
+      } catch { /* 坏 body 按空处理 */ }
+      if (!modelId) {
+        json(res, 400, { error: "缺 modelId" });
+        return;
+      }
+      testModel(modelId)
+        .then((out) => json(res, 200, out))
+        .catch((e: Error) => json(res, 200, { ok: false, error: e.message.includes("aborted") ? "45 秒超时（本地模型冷加载也超了？）" : e.message.slice(0, 200) }));
+    });
+  };
+  return {
+    name: "rana-model-test",
+    configureServer(server) {
+      server.middlewares.use("/__rana/model-test", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use("/__rana/model-test", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+  };
+}
+
+/**
+ * 智能体装备端点（只读，给右侧面板的技能/MCP 卡用）：
+ * GET /__rana/agent-info?agent=main[&refresh=1] → {agent, skills[], mcp[]}
+ * - 技能：子进程跑 openclaw CLI `skills list --json`（node 直跑 openclaw.mjs，不走 .cmd shim——
+ *   Windows 下 execFile 跑不了 .cmd；env 必须带 OPENCLAW_STATE_DIR），只留 modelVisible 且未停用的，
+ *   自装（workspace 来源）排前面。结果按 agent 缓存 120s，refresh=1 强制刷新。
+ * - MCP：读 openclaw.json 的 mcp.servers，只回 server id，command/args/env 一律不外传。
+ */
+function ranaAgentInfoMiddleware(): Plugin {
+  const OPENCLAW_MJS = "C:\\Users\\Administrator\\AppData\\Roaming\\npm\\node_modules\\openclaw\\openclaw.mjs";
+  const CACHE_MS = 120000;
+  const AGENT_RE = /^[a-z0-9][a-z0-9-]{0,40}$/;
+  const cache = new Map<string, { at: number; data: unknown }>();
+
+  const listSkills = async (agentId: string) => {
+    const { stdout } = await execFileP(
+      process.execPath,
+      [OPENCLAW_MJS, "skills", "list", "--json", "--agent", agentId],
+      {
+        encoding: "utf8",
+        timeout: 20000,
+        windowsHide: true,
+        maxBuffer: 8 * 1024 * 1024,
+        env: { ...process.env, OPENCLAW_STATE_DIR: "K:\\openclaw\\.openclaw\\.openclaw" },
+      },
+    );
+    const j = JSON.parse(stdout) as {
+      skills?: Array<{ name?: string; description?: string; emoji?: string; source?: string; modelVisible?: boolean; disabled?: boolean }>;
+    };
+    const rows = (j.skills ?? [])
+      .filter((s) => s.modelVisible && !s.disabled && s.name)
+      .map((s) => ({
+        name: String(s.name),
+        description: String(s.description ?? "").trim().slice(0, 140),
+        emoji: s.emoji ? String(s.emoji) : "",
+        source: s.source ? String(s.source) : "",
+      }));
+    // 自装的（workspace 来源）排前面，其余按名字排
+    rows.sort(
+      (a, b) =>
+        (a.source === "openclaw-workspace" ? 0 : 1) - (b.source === "openclaw-workspace" ? 0 : 1) ||
+        a.name.localeCompare(b.name),
+    );
+    return rows;
+  };
+
+  const listMcp = () => {
+    const cfg = readFullConfig() as { mcp?: { servers?: Record<string, unknown> } };
+    return Object.keys(cfg.mcp?.servers ?? {}).map((id) => ({ id }));
+  };
+
+  const handler = (
+    req: { method?: string; url?: string },
+    res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void },
+  ) => {
+    res.setHeader("content-type", "application/json");
+    if (req.method !== "GET") {
+      res.statusCode = 405;
+      res.end(JSON.stringify({ error: "method not allowed" }));
+      return;
+    }
+    const u = new URL(req.url ?? "/", "http://x");
+    const agentId = (u.searchParams.get("agent") ?? "main").toLowerCase();
+    const refresh = u.searchParams.get("refresh") === "1";
+    if (!AGENT_RE.test(agentId)) {
+      res.statusCode = 400;
+      res.end(JSON.stringify({ error: "agent id 格式不对" }));
+      return;
+    }
+    const hit = cache.get(agentId);
+    if (!refresh && hit && Date.now() - hit.at < CACHE_MS) {
+      res.end(JSON.stringify(hit.data));
+      return;
+    }
+    listSkills(agentId)
+      .then((skills) => {
+        const data = { agent: agentId, skills, mcp: listMcp() };
+        cache.set(agentId, { at: Date.now(), data });
+        res.end(JSON.stringify(data));
+      })
+      .catch((e: Error) => {
+        res.statusCode = 500;
+        res.end(JSON.stringify({ error: `技能清单拿不到：${e.message}` }));
+      });
+  };
+
+  return {
+    name: "rana-agent-info",
+    configureServer(server) {
+      server.middlewares.use("/__rana/agent-info", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use("/__rana/agent-info", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+  };
+}
+
 function ranaDevConfig(): Plugin {
   return {
     name: "rana-dev-config",
@@ -1887,7 +2091,7 @@ function ranaDevConfig(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), ranaDevConfig(), ranaProviderConfigMiddleware(), ranaSysStatusMiddleware(), ranaAvatarMiddleware(), ranaNewsMiddleware(), ranaStudyMiddleware(), ranaFateMiddleware(), ranaModelParamsMiddleware()],
+  plugins: [react(), ranaDevConfig(), ranaProviderConfigMiddleware(), ranaSysStatusMiddleware(), ranaAvatarMiddleware(), ranaNewsMiddleware(), ranaStudyMiddleware(), ranaFateMiddleware(), ranaAgentInfoMiddleware(), ranaModelTestMiddleware(), ranaModelParamsMiddleware()],
   server: {
     port: 5173,
     proxy: {

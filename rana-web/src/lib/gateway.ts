@@ -486,6 +486,7 @@ class GatewayConnection {
         hasActiveRun: Boolean(r.hasActiveRun) || r.status === "running",
         sessionId: r.sessionId ? String(r.sessionId) : undefined,
         isMain: r.isMain === true,
+        agentId: r.agentId ? String(r.agentId) : undefined,
       }));
       // 后台删除中的会话先过滤掉，避免陈旧列表让刚删的会话闪回
       const kept = mapped.filter((r) => !this.deletingKeys.has(r.key));
@@ -517,6 +518,16 @@ class GatewayConnection {
       store().setModels(mapped);
     } catch (e) {
       console.warn("[gateway] models.list 失败:", e);
+    }
+  }
+
+  /**
+   * 延时多次补刷模型列表：改完 provider 配置后 gateway 靠文件监听热重载，有延迟，
+   * 只刷一次经常拿到旧目录（表现就是"下拉不跟着变"）。0/0.4s/1.5s/3s 各补一次。
+   */
+  refreshModelsSoon() {
+    for (const delay of [0, 400, 1500, 3000]) {
+      setTimeout(() => void this.refreshModels(), delay);
     }
   }
 
