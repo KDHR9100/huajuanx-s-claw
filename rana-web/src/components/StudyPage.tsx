@@ -112,6 +112,14 @@ function nextFreeDate(courses: StudyCourse[], from: string): string {
   return d;
 }
 
+/** 周视图格子：某天所在周的周一到周日（7 格） */
+function weekCells(ds: string): Array<{ date: string; inMonth: boolean }> {
+  const [y, m, d] = ds.split("-").map(Number);
+  const lead = (new Date(y, m - 1, d).getDay() + 6) % 7;
+  const start = addDays(ds, -lead);
+  return Array.from({ length: 7 }, (_, i) => ({ date: addDays(start, i), inMonth: true }));
+}
+
 /** 负荷：一天的课程数与预估总时长；重了（>3节 或 >180分钟）算超载 */
 function dayLoad(courses: StudyCourse[]): { count: number; minutes: number; heavy: boolean } {
   const minutes = courses.reduce((n, c) => n + (c.estMin ?? 0), 0);
@@ -131,6 +139,24 @@ export default function StudyPage() {
     return { y: d.getFullYear(), m: d.getMonth() + 1 };
   });
   const [selDate, setSelDate] = useState(todayStr());
+  // 月/周视图切换（记住上次的偏好）
+  const [calMode, setCalMode] = useState<"month" | "week">(() => {
+    try {
+      return localStorage.getItem("study.calMode") === "week" ? "week" : "month";
+    } catch {
+      return "month";
+    }
+  });
+  const toggleCalMode = () =>
+    setCalMode((m) => {
+      const next = m === "month" ? "week" : "month";
+      try {
+        localStorage.setItem("study.calMode", next);
+      } catch {
+        /* 存不进就算了 */
+      }
+      return next;
+    });
   const [quizMode, setQuizMode] = useState<QuizMode | null>(null);
   // 计划
   const [planId, setPlanId] = useState(DEFAULT_PLAN);
@@ -409,6 +435,9 @@ export default function StudyPage() {
   const plannedToday = todays.filter((c) => c.status === "planned");
   const overdue = planCourses.filter((c) => c.status === "planned" && c.date < t);
   const doneCount = planCourses.filter((c) => c.status === "done").length;
+  const donePct = planCourses.length ? Math.round((doneCount / planCourses.length) * 100) : 0;
+  const quizScores = planCourses.map((c) => c.quiz?.score).filter((x): x is number => typeof x === "number");
+  const quizAvg = quizScores.length ? Math.round(quizScores.reduce((a, b) => a + b, 0) / quizScores.length) : null;
   const nowCourse =
     plannedToday.find((c) => c.timeStart && c.timeEnd && c.timeStart <= hm && hm <= c.timeEnd) ??
     plannedToday.find((c) => c.timeStart && !c.timeEnd && c.timeStart <= hm) ??
@@ -427,6 +456,53 @@ export default function StudyPage() {
       return { y: d.getFullYear(), m: d.getMonth() + 1 };
     });
   };
+  /** ‹ › 在月视图翻月、周视图挪一周 */
+  const shiftCal = (delta: number) => {
+    if (calMode === "month") shiftMonth(delta);
+    else setSelDate((d) => addDays(d, delta * 7));
+  };
+
+  /** 日历格子渲染：月视图每格最多 2 条课，周视图整列放开显示 */
+  const renderCalCell = (cell: { date: string; inMonth: boolean }, showAll: boolean) => {
+    const cs = byDate.get(cell.date) ?? [];
+    const load = dayLoad(cs);
+    const hasLate = cs.some((c) => c.status === "planned" && cell.date < t);
+    const show = showAll ? cs : cs.slice(0, 2);
+    return (
+      <button
+        key={cell.date}
+        type="button"
+        className={[
+          "cal-cell",
+          cell.inMonth ? "" : "other",
+          cell.date === t ? "today" : "",
+          cell.date === selDate ? "sel" : "",
+          load.heavy ? "heavy" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        onClick={() => setSelDate(cell.date)}
+      >
+        <span className="cd">
+          {Number(cell.date.slice(8))}
+          {hasLate && <i className="late-dot" title="有逾期未完成的课" />}
+          {load.count > 0 && load.minutes > 0 && <i className="load-min">≈{fmtMin(load.minutes)}</i>}
+        </span>
+        {show.map((c) => (
+          <span
+            key={c.id}
+            className={`cal-course ${c.status === "done" ? "done" : cell.date < t ? "late" : ""}`}
+            title={c.title}
+          >
+            {c.status === "done" ? "✓" : ""} {c.title}
+          </span>
+        ))}
+        {!showAll && cs.length > 2 && <span className="cal-more">+{cs.length - 2}</span>}
+      </button>
+    );
+  };
+
+  const weekCellsNow = weekCells(selDate);
 
   return (
     <div className="wallboard">
@@ -475,6 +551,11 @@ export default function StudyPage() {
             <span className="chip green" title={`历史最长 ${streak.best} 天`}>
               🔥 连续打卡 {streak.days} 天
             </span>
+            {quizAvg !== null && (
+              <span className="chip" title="当前计划已考过的测验平均分">
+                📊 测验均分 {quizAvg}
+              </span>
+            )}
             <button
               className="btn ghost sm"
               onClick={() => setQuizMode({ kind: "final", planId, title: curPlan?.name ?? "期末考" })}
@@ -533,23 +614,28 @@ export default function StudyPage() {
               <div className={`v${overdue.length ? " warn" : ""}`}>{overdue.length} 节</div>
             </div>
             <div className="st-cell">
-              <div className="k">进度</div>
+              <div className="k">完成率</div>
               <div className="v">
-                {doneCount}/{planCourses.length} <small>学完</small>
+                {donePct}% <small>（{doneCount}/{planCourses.length}）</small>
+              </div>
+              <div className="bar st-bar">
+                <i style={{ width: `${donePct}%` }} />
               </div>
             </div>
           </div>
         </div>
 
         <div className="study-layout">
-          {/* 月历（含负荷视图） */}
+          {/* 日历（月视图 / 周视图切换；含负荷标注） */}
           <div className="card study-cal">
             <div className="cal-nav">
-              <button className="btn ghost sm" onClick={() => shiftMonth(-1)}>
+              <button className="btn ghost sm" onClick={() => shiftCal(-1)}>
                 ‹
               </button>
               <b>
-                {cursor.y} 年 {cursor.m} 月
+                {calMode === "month"
+                  ? `${cursor.y} 年 ${cursor.m} 月`
+                  : `${weekCellsNow[0].date} ～ ${weekCellsNow[6].date}`}
               </b>
               <div className="cal-btns">
                 <button
@@ -560,9 +646,12 @@ export default function StudyPage() {
                     setSelDate(todayStr());
                   }}
                 >
-                  今天
+                  {calMode === "month" ? "今天" : "本周"}
                 </button>
-                <button className="btn ghost sm" onClick={() => shiftMonth(1)}>
+                <button className="btn ghost sm" onClick={toggleCalMode} title="月视图看全局，周视图看这一周的每节课">
+                  {calMode === "month" ? "📆 周视图" : "🗓 月视图"}
+                </button>
+                <button className="btn ghost sm" onClick={() => shiftCal(1)}>
                   ›
                 </button>
               </div>
@@ -572,45 +661,10 @@ export default function StudyPage() {
                 <span key={w}>{w}</span>
               ))}
             </div>
-            <div className="cal-grid">
-              {monthCells(cursor.y, cursor.m).map((cell) => {
-                const cs = byDate.get(cell.date) ?? [];
-                const load = dayLoad(cs);
-                const hasLate = cs.some((c) => c.status === "planned" && cell.date < t);
-                const show = cs.slice(0, 2);
-                return (
-                  <button
-                    key={cell.date}
-                    type="button"
-                    className={[
-                      "cal-cell",
-                      cell.inMonth ? "" : "other",
-                      cell.date === t ? "today" : "",
-                      cell.date === selDate ? "sel" : "",
-                      load.heavy ? "heavy" : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                    onClick={() => setSelDate(cell.date)}
-                  >
-                    <span className="cd">
-                      {Number(cell.date.slice(8))}
-                      {hasLate && <i className="late-dot" title="有逾期未完成的课" />}
-                      {load.count > 0 && load.minutes > 0 && <i className="load-min">≈{fmtMin(load.minutes)}</i>}
-                    </span>
-                    {show.map((c) => (
-                      <span
-                        key={c.id}
-                        className={`cal-course ${c.status === "done" ? "done" : cell.date < t ? "late" : ""}`}
-                        title={c.title}
-                      >
-                        {c.status === "done" ? "✓" : ""} {c.title}
-                      </span>
-                    ))}
-                    {cs.length > 2 && <span className="cal-more">+{cs.length - 2}</span>}
-                  </button>
-                );
-              })}
+            <div className={`cal-grid${calMode === "week" ? " wk" : ""}`}>
+              {(calMode === "month" ? monthCells(cursor.y, cursor.m) : weekCellsNow).map((cell) =>
+                renderCalCell(cell, calMode === "week"),
+              )}
             </div>
             <p className="cal-legend">格子右上 ≈ 时长是当天预估总负荷；偏红 = 超载（多于 3 节或超过 3 小时），找她重排吧。</p>
           </div>
@@ -634,6 +688,11 @@ export default function StudyPage() {
                       <b>{c.title}</b>
                       <span className="chip">{c.timeStart ? `${c.timeStart}${c.timeEnd ? `~${c.timeEnd}` : ""}` : "全天可学"}</span>
                       {c.kind === "review" && <span className="chip">🔁 复习+{c.reviewGap}天</span>}
+                      {c.status === "planned" && typeof c.quiz?.score === "number" && (
+                        <span className="chip warn" title="上次测验没到 60 分，这节打回重学了">
+                          ↩ 重学（上次 {c.quiz.score} 分）
+                        </span>
+                      )}
                       {c.estMin ? <span className="chip">≈{c.estMin}分钟</span> : null}
                       {c.status === "done" && <span className="chip green">✓ 学完</span>}
                       {late && <span className="chip warn">逾期</span>}

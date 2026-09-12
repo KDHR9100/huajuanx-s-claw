@@ -28,6 +28,9 @@
 - 解决方案：①`allowFrom` 填对方 openid（QQ 开放平台匿名 ID，从被拦日志直接抓，**不是 QQ 号**）并 `dmPolicy=allowlist`（白名单制）；②`bindings` 加 `{"type":"route","agentId":X,"match":{"channel":"qqbot","accountId":"default"}}`；③窗口要分开就绑**不同 agent**（各 agent 独立 sqlite，天然隔离）。终态布局（2026-09-12 用户两次调整后定稿）：**QQ→main（云端 flash，QQ 客户端功能多）、微信→rana-rp（本地 14B，RP 乐奈）**。**⚠️ 第四坑（同晚实证）：bindings 改 agentId 对"已活跃会话"热重载不生效**——运行中网关的会话路由粘在旧 agent 上（QQ 新会话能生效、微信老会话不跟），CLI `agents bindings` 读到的配置是对的但网关行为不对，表现为"改完绑定微信还是走云端"。解法：重启网关（清掉全部路由缓存），别信热重载。QQ 开发者控制台"未连接"指示灯不可信——WebSocket 实连且收发正常，以实测聊天为准。
 - 状态：已解决（2026-09-12 全链路验证：收消息→本地 14B 生成→回复送达，约 48s/条）。
 - ⚠️ 第五坑（2026-09-13）：终态跑偏——`agents.defaults.model.primary` 被写成本地 `rana-rp-14b` 而 main 无显式 model（吃默认），`rana-rp` 条目反被指到云端 flash，表现为「QQ→main 却是本地模型回话」。解法两层：①openclaw.json 修正 defaults 与 main=云端 `aliyun-maas/qwen3.8-flash`、rana-rp=`lmstudio-local/rana-rp-14b`（网关文件监听热重载）；②**会话级钉死模型也要改**——`agent:main:main` 的 model 字段停在 rana-rp-14b，仅改配置不动会话等于没改；用网关 RPC `sessions.patch {key, model}` 热生效，无需重启网关（第四坑的「热重载不生效」只针对 bindings 换 agent，模型 patch 是即时的）。
+- ✅ 多用户双待遇方案（2026-09-13 落地）：QQ 私聊全面开放，主人与陌生人各走各路——①`bindings` 支持按发信人精确匹配（`match.peer:{kind:"direct",id:"<openid>"}`），优先级高于频道级绑定：主人 openid→main（全套私人上下文），频道兜底→独立 agent `rana-qq-public`（专属工作区只放无私人信息的 SOUL/AGENTS、`tools.profile:"minimal"` 全锁、独立 sqlite，物理隔离）；②兜底绑定带 `session:{dmScope:"per-peer"}`，每个客人自动独立会话（`agent:rana-qq-public:direct:<openid>`）互不串；③`channels.qqbot.dmPolicy:"open"` + `groupPolicy:"disabled"`（群聊不开）。绑定改动需重启网关（第四坑同款）。
+- ⚠️ 第六坑（2026-09-13）：**经 bash 向 JSON 写 Windows 反斜杠路径会被吃**——脚本经 shell 传输时 `\\` 折成 `\`，JS 字符串再把它当转义吞掉，`K:\OpenClaw\...` 变成 `K:OpenClaw...`（agent workspace 解析成不存在的目录）。解法：OpenClaw 配置里的 Windows 路径**一律写正斜杠** `K:/OpenClaw/...`（node 全兼容），别用反斜杠。
+- ⚠️ 第七坑（2026-09-13）：`dmPolicy:"open"` 但 `allowFrom` 不含 `"*"` 时，core 配置层警告 **"all DMs will be dropped"**（且目录 schema 又禁止写 `"*"`，open 与白名单语义在 core/plugin 两层有分歧）。结合平台现实（QQ 个人开发者未放开，陌生人本来就私聊不到机器人），终态 v3 定稿：**`groupPolicy:"open"`（群聊=公开入口，@才回，走公共 agent，每群一个会话）+ `dmPolicy:"allowlist"`（私聊白名单，实际受众=开发者沙箱名单里的人，主人 openid 在列）**。以后有朋友进了沙箱名单要私聊：从被拦日志抓 openid 塞进 allowFrom。
 
 ## [行为说明] `openclaw gateway restart` 在本项目永远报错——非默认 state dir 不走服务管理（2026-09-12）
 
@@ -183,3 +186,27 @@
 - 症状：`openclaw cron add --system-event ... --announce` 报错 "--announce/--no-deliver require a non-main agentTurn, command, or script session target"。
 - 根因：system-event 载荷固定进 main 会话，CLI 不允许给它配 fallback 投递。
 - 解决方案：不配 --announce——main 会话的回复本来就按最近活跃频道（微信）投递，git 日报一直是这么跑的；事件文本里写"绝对不许 NO_REPLY"即可（同既有经验）。
+
+## [已解决] iztro 2.x 的 API 与官方文档不一致（2026-09-12）
+
+- 症状：`astro.getBySolarDate()` 不存在；`astrolabe.soulIndex/bodyIndex/minAge/maxAge` 均为 undefined。
+- 根因：npm 最新 2.6.1 已改名——排盘入口是 `astro.astrolabeBySolarDate(ymd, 时辰序号0-12, 性别)`；命宫/身宫用 `astrolabe.earthlyBranchOfSoulPalace/earthlyBranchOfBodyPalace`（或宫位 `name==='命宫'`、`isBodyPalace` 标记）；大限在 `palace.decadal.range`。
+- 解决方案：见 `src/lib/fateCore.ts` 的 `ziwei()` 封装；接入前先用 node 探针实测（本次 `Object.keys()` 逐层摸的）。
+
+## [行为说明] IAB 输入注入会阶段性完全失灵（2026-09-12）
+
+- 症状：同一会话内先还能用「×1.61 缩放坐标点击」，随后所有缩放系数（1.0/1.3/1.61）的 `cua.click` 全部静默无效；`cua.drag` 从未成功过；**页内 `dispatchEvent` 合成 PointerEvent/ MouseEvent 连 React 的委托监听都进不去**（按钮 onClick 完全不触发）。
+- 根因：宿主输入管线把非可信事件过滤/丢弃，且会随会话时长退化；与 DPR 缩放是两回事。
+- 解决方案：GUI 验证优先用 DOM 断言（snapshot/evaluate 读状态）+ 接口层 curl 直测；必须点按钮时先试真实缩放点击、失败就改为接口层等价验证；纯手势类（拖拽动效）直接留给用户上手验收，别在注入层死磕。
+
+## [已解决] nvidia-smi 在 Windows 查不到每进程显存（2026-09-12）
+
+- 症状：`nvidia-smi --query-compute-apps=pid,process_name,used_gpu_memory` 列出几十个进程但 used_memory 全是 `[N/A]`。
+- 根因：Windows 显卡跑在 WDDM 模式，驱动不向 nvidia-smi 提供每进程显存（TCC 模式才有）。
+- 解决方案：改用系统 GPU 性能计数器 `\GPU Process Memory(*)\Local Usage`（PowerShell `Get-Counter`），实例名正则抠 `pid_(\d+)` 按进程汇总，>50MB 才展示。见 `vite.config.ts` 的 `queryGpu`。
+
+## [已解决·要警惕] 状态接口返回形状与前端类型对不上 → React 整页白屏（2026-09-12）
+
+- 症状：状态页一有真数据整站白屏（无错误边界，nav 一起没），window.onerror 抓到 `services.map is not a function`。
+- 根因：中间件返回 `{services: [...]}` 包了一层，前端 `StatusPayload` 手写的类型却当数组；TS 查不出来（JSON 过了 unknown）。
+- 解决方案：中间件直接返回数组；**手写 payload 类型时形状必须和 buildStatus 返回逐字段核对**；排障时先 `window.addEventListener('error')` 抓原文再谈修复。

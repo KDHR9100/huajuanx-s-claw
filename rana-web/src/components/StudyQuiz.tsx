@@ -65,6 +65,7 @@ export default function StudyQuiz({
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [result, setResult] = useState<GradeResult | null>(null);
+  const [relearn, setRelearn] = useState(""); // 测验不过时服务端顺延到的重学日期
 
   const gen = async () => {
     if (busy) return;
@@ -116,9 +117,10 @@ export default function StudyQuiz({
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const j = (await r.json()) as { ok?: boolean; verdict?: GradeResult; error?: string };
+      const j = (await r.json()) as { ok?: boolean; verdict?: GradeResult; relearn?: string; error?: string };
       if (!r.ok || !j.ok || !j.verdict) throw new Error(j.error ?? `HTTP ${r.status}`);
       setResult(j.verdict);
+      setRelearn(j.relearn ?? "");
       setPhase("result");
       onGraded();
     } catch (e) {
@@ -227,6 +229,11 @@ export default function StudyQuiz({
             <span className="tune-hint">分</span>
           </div>
           {result.comment && <p className="plan-result">「{result.comment}」</p>}
+          {relearn && (
+            <p className="plan-result sys-err">
+              ↩ 没到 60 分，这节不算学会——已经打回未学、顺延到 {relearn} 重新安排了。错题也收进错题本，到时候重点考。
+            </p>
+          )}
           {(result.verdicts ?? []).map((v) => {
             const q = questions.find((x) => x.idx === v.idx);
             return (

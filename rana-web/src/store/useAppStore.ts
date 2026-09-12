@@ -29,8 +29,10 @@ interface AppState {
   /** 每个会话正在进行的 run（v1：每会话同时最多一个） */
   runs: Record<string, StreamingRun | undefined>;
 
-  /** 当前页面视图（会话 / 电脑状态 / 定时任务） */
+  /** 当前页面视图（会话 / Rana的状态 / 定时任务 / 早报 / 学习计划 / 程序） */
   view: AppView;
+  /** 顶部页签顺序（拖拽换位，持久化在 localStorage；新增页签自动补到末尾） */
+  tabOrder: AppView[];
   /** 会话页右侧用量面板开关 */
   panelOpen: boolean;
   /** 显示模型思考过程（<think> 折叠块）；关闭时完全不渲染 */
@@ -57,6 +59,7 @@ interface AppState {
   setRun: (key: string, run: StreamingRun | undefined) => void;
   markUnread: (key: string) => void;
   setView: (view: AppView) => void;
+  setTabOrder: (order: AppView[]) => void;
   togglePanel: () => void;
   setShowReasoning: (v: boolean) => void;
   updateSettings: (patch: Partial<ThemeSettings>) => void;
@@ -68,6 +71,22 @@ interface AppState {
 
 export const PINNED_STORAGE_KEY = "rana-web.pinned";
 const REASONING_KEY = "rana-web.show-reasoning";
+export const TAB_ORDER_KEY = "rana-web.tab-order";
+
+/** 全部合法页签（顺序即默认顺序；新增页签往这里加，已存的旧顺序会自动补上它） */
+export const ALL_VIEWS: AppView[] = ["chat", "sys", "cron", "news", "study", "apps"];
+
+function loadTabOrder(): AppView[] {
+  try {
+    const raw = localStorage.getItem(TAB_ORDER_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    const saved = Array.isArray(arr) ? arr.filter((v): v is AppView => ALL_VIEWS.includes(v)) : [];
+    // 已存顺序在前，新增（或缺失）的页签按默认顺序补到末尾
+    return [...saved, ...ALL_VIEWS.filter((v) => !saved.includes(v))];
+  } catch {
+    return [...ALL_VIEWS];
+  }
+}
 
 function loadShowReasoning(): boolean {
   return localStorage.getItem(REASONING_KEY) !== "0";
@@ -92,6 +111,7 @@ export const useAppStore = create<AppState>((set) => ({
   models: [],
   runs: {},
   view: "chat",
+  tabOrder: loadTabOrder(),
   panelOpen: true,
   showReasoning: loadShowReasoning(),
 
@@ -135,6 +155,10 @@ export const useAppStore = create<AppState>((set) => ({
   setRun: (key, run) => set((s) => ({ runs: { ...s.runs, [key]: run } })),
   markUnread: (key) => set((s) => ({ unread: { ...s.unread, [key]: Date.now() } })),
   setView: (view) => set({ view }),
+  setTabOrder: (order) => {
+    localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(order));
+    set({ tabOrder: order });
+  },
   togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
   setShowReasoning: (showReasoning) => {
     localStorage.setItem(REASONING_KEY, showReasoning ? "1" : "0");
