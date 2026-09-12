@@ -34,6 +34,8 @@ function readGatewayToken(): string {
 }
 
 const OPENCLAW_CONFIG = "K:\\openclaw\\.openclaw\\.openclaw\\openclaw.json";
+/** openclaw CLI 入口（拉运行时模型目录用；与 start-gateway.cmd 同源） */
+const OPENCLAW_MJS = "C:\\Users\\Administrator\\AppData\\Roaming\\npm\\node_modules\\openclaw\\openclaw.mjs";
 
 interface ModelEntry {
   id: string;
@@ -44,7 +46,8 @@ interface ModelEntry {
 }
 interface ProviderEntry {
   baseUrl?: string;
-  apiKey?: string;
+  /** 明文 key；OpenClaw doctor 会把密钥迁进密钥库，这里会变成 {source,provider,id} 的 SecretRef 引用 */
+  apiKey?: string | Record<string, unknown>;
   api?: string;
   models?: ModelEntry[];
   [k: string]: unknown;
@@ -64,8 +67,12 @@ function readFullConfig(): FullConfig {
   return JSON.parse(fs.readFileSync(OPENCLAW_CONFIG, "utf8")) as FullConfig;
 }
 
-function maskKey(key?: string): string {
-  return key ? key.slice(0, 5) + "…" + key.slice(-4) : "";
+function maskKey(key?: string | Record<string, unknown>): string {
+  if (!key) return "";
+  if (typeof key === "string") return key.slice(0, 5) + "…" + key.slice(-4);
+  // SecretRef：密钥本体在 OpenClaw 密钥库里，网页侧只能显示引用 id
+  const id = String(key.id ?? "");
+  return `🔒密钥库(${id.slice(0, 8)}${id.length > 8 ? "…" : ""})`;
 }
 
 function isLocalProvider(p: ProviderEntry): boolean {
@@ -137,7 +144,8 @@ function ranaProviderConfigMiddleware(): Plugin {
         .map((m) => ({
           ...(oldById.get(m.id.trim()) ?? {}),
           id: m.id.trim(),
-          ...(m.name ? { name: m.name } : {}),
+          // runtime 校验 name 必填：没填就用 id 兜底，否则整个配置会被判 invalid
+          name: (m.name && m.name.trim()) || m.id.trim(),
           ...(typeof m.contextWindow === "number" && m.contextWindow > 0 ? { contextWindow: m.contextWindow } : {}),
         }));
     }
@@ -162,22 +170,57 @@ function ranaProviderConfigMiddleware(): Plugin {
     return { ok: true as const, deleted: id };
   };
 
+  /** 密钥库托管（SecretRef）的 provider：网页拿不到明文，借 OpenClaw 运行时目录拿模型列表 */
+  const runtimeCatalog = async (providerId: string) => {
+    const runCli = (args: string[]) =>
+      execFileP(process.execPath, [OPENCLAW_MJS, ...args], {
+        encoding: "utf8",
+        timeout: 120000,
+        windowsHide: true,
+        env: { ...process.env, OPENCLAW_STATE_DIR: "K:\\openclaw\\.openclaw\\.openclaw" },
+      });
+    const listIds = async () => {
+      const { stdout } = await runCli(["models", "list", "--all", "--provider", providerId, "--json"]);
+      const j = JSON.parse(stdout) as { models?: Array<Record<string, unknown>>; items?: Array<Record<string, unknown>> };
+      // 目录行的模型标识在 key 字段（形如 "provider/model"），兼容 id/modelId
+      const rows = j.models ?? j.items ?? [];
+      return rows
+        .map((r) => String(r.key ?? r.id ?? r.modelId ?? ""))
+        .map((k) => (k.includes("/") ? k.split("/").slice(1).join("/") : k))
+        .filter(Boolean);
+    };
+    let ids = await listIds();
+    if (!ids.length) {
+      await runCli(["models", "refresh"]); // 目录还是空的：先从 provider 拉一遍（运行时自己解析密钥）
+      ids = await listIds();
+    }
+    if (!ids.length) throw new Error(`运行时也没拿到 ${providerId} 的模型目录（refresh 可能失败，看网络/密钥）`);
+    return { ok: true as const, models: [...new Set(ids)].sort(), source: "runtime" };
+  };
+
   const fetchProviderModels = async (body: string) => {
     const { baseUrl, apiKey, providerId } = JSON.parse(body) as { baseUrl?: string; apiKey?: string; providerId?: string };
     let url = baseUrl;
-    let key = apiKey;
-    if (!url && providerId) {
+    let key: string | Record<string, unknown> | undefined = apiKey;
+    // 面板会同时传 baseUrl 和 providerId：以 providerId 为准补全缺省（密钥库 key/地址都从配置取）
+    if (providerId) {
       const p = readProviders()[providerId];
-      url = p?.baseUrl;
+      url = url || p?.baseUrl;
       key = key || p?.apiKey;
     }
     if (!url || !/^https?:\/\//.test(url)) throw new Error("需要 http(s):// 的 baseUrl");
-    if (!key) throw new Error("缺少 API key（填写或选择已保存 key 的 provider）");
+    const local = /\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(url);
+    if (key && typeof key !== "string") {
+      // SecretRef：明文在密钥库里（只写），网页无法直连 provider，走运行时目录
+      if (!providerId) throw new Error("缺少 providerId，无法走运行时目录");
+      return await runtimeCatalog(providerId);
+    }
+    if (!key && !local) throw new Error("缺少 API key（填写或选择已保存 key 的 provider）");
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 15000);
     try {
       const r = await fetch(url.replace(/\/+$/, "") + "/models", {
-        headers: { authorization: `Bearer ${key}` },
+        ...(key ? { headers: { authorization: `Bearer ${key}` } } : {}), // LM Studio 等本机服务免 key
         signal: ctrl.signal,
       });
       if (!r.ok) throw new Error(`接口返回 HTTP ${r.status}`);

@@ -228,3 +228,21 @@
 - 做了什么：工作区加 MEMORY.md（所有 QQ 群共享一份长期记忆）+ `memory_search/memory_get/message/skill_workshop` alsoAllow + `memory.search.rememberAcrossConversations: true`（开跨会话回忆：A 群的对话 B 群检索得到）。
 - 边界：她仍无文件读写/命令/联网能力；共享记忆只含群聊公开内容，不含主人私人档案（将来"群里认主人"= 往 MEMORY.md 写一份过滤过的主人摘要即可，无需改配置）。
 - 注意：`rememberAcrossConversations` 的显式落点是 `agents.entries.<id>.memory.search.rememberAcrossConversations`（全局 `memory.search` 也行）；不设则默认看 dmScope——binding 带 `session.dmScope` 时默认关。
+
+## [已解决] doctor 密钥迁移(SecretRef)后 rana-web 云端模型面板变空（2026-09-12）
+
+- 症状：左下角「☁ 云端模型」打开是空的；`GET /__rana/provider-config` 返回 `{"error":"key.slice is not a function"}`。
+- 根因：OpenClaw doctor 维护把 provider 明文 apiKey 迁进密钥库，openclaw.json 里 `apiKey` 从字符串变成 `{source,provider,id}` 引用对象；rana-web 的 provider 中间件是明文时代写的，maskKey 直接 `.slice()` 崩了。
+- 解决方案：`vite.config.ts` 的 ProviderEntry.apiKey 类型放宽为 `string | Record<string,unknown>`；maskKey 对 SecretRef 显示 `🔒密钥库(id前8位…)`；`/provider-models` 代拉遇到 SecretRef 时明确报错（网页拿不到明文，模型 id 手填）。
+- 教训：**凡是读 openclaw.json 的 apiKey 的代码，都要兼容 SecretRef 对象**——密钥本体永远不在配置文件里。
+
+## [已解决] 云端面板「从接口拉取」全线失败 + 保存无 name 模型弄坏配置（2026-09-12）
+
+- 症状：云端模型面板里每个 provider 点「⟳ 从接口拉取」都报错，一个都不通。
+- 根因（三个叠加）：
+  1. 密钥库（SecretRef）provider：网页侧拿不到明文 key，直连必败（见上一条目）；
+  2. 本地 LM Studio：中间件无条件要求 key，而本机服务根本不需要；
+  3. 面板同时上送 baseUrl+providerId，中间件"有 baseUrl 就不看 providerId"，导致配置里的 key 取不到。
+- 附带事故：网页保存模型条目时不填 name 就不写 name，runtime 校验 name 必填 → 整个 openclaw.json 被判 invalid（CLI 全挂）。已手工给 qwenanliang 补 name（备份 .bak-qwenanliang-fix）。
+- 解决方案（vite.config.ts）：①模型条目 name 一律兜底=id；②拉取三路分发——本机地址免 key 直连 / 明文 key 直连 / SecretRef 走 `openclaw models list --all --provider X --json` 运行时目录（**目录行的模型标识在 key 字段**（"provider/model"），不是 id；目录为空先 `models refresh`）；③providerId 与 baseUrl 合并取缺省。实测：本地 6 个、aliyun 8 个、glm 2 个、qwenanliang 明文 249 个，全通。
+- 教训：SecretRef 时代网页要做 provider 级操作，借运行时 CLI 是正路（它自己解析密钥库），别想着读明文。
