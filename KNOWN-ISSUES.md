@@ -48,7 +48,12 @@
   - 卸载单实例：`POST /api/v1/models/unload {"instance_id":"<实例id>"}`——v1 卸载接口只收 instance_id；实例 id 与 config 从 `GET /api/v1/models` 的 `loaded_instances` 数组看（/api/v0/models 不显示 instance_id）。
   - `lms unload <key>` 会卸该模型全部实例；`lms load --context-length` 在本机对该模型报 Unknown error，改用 REST。
   - 与 09-10 的 rana-rp-14b:2 双实例同机制（当时显式加载 49152/parallel2 治好）。
-- 状态：已解决（驻留 1 份 ctx 32768，复用与调用均验证）。**2026-09-12 复发**：又见 8192 实例（常驻丢失后 OpenClaw JIT 以低 ctx 先行加载），同方治理一次成功（unload → 32768 常驻重载，/v1/embeddings 实测 1024 维）。防复发要点：重启 LM Studio 或改模型配置后必查 `/api/v1/models` 各实例 ctx 与 OpenClaw JIT 请求是否一致；同窗口常驻 LLM（如 rana-rp-14b ctx 16384）同理。
+- 状态：**已根治（2026-09-12 看门狗上线）**。历程：09-11 首治（32768 常驻）→ 09-12 上午复发（8192 再裂）→ 09-12 下午再复发，确认"手动治理"挡不住，转看门狗根治。终态方案（两层）：
+  1. **embedding 转纯 CPU 常驻**：0.6B 模型算向量 CPU 足够（实测单次 ~90ms 出 1024 维），显存零占用，还消除了"显存紧张挤掉常驻→再裂"的诱因。注意 REST `/api/v1/models/load` **没有** GPU offload 字段（实测报 unrecognized_keys），纯 CPU 只能走 `lms load <key> -c 32768 --gpu off -y`（lms.exe 在 `~/.lmstudio/bin/`）。
+  2. **看门狗锁死**：`tools/embedding-watchdog.mjs`，由 `rana-web/start-gateway.cmd` 随网关启动（无开机自启）。死规则 = 任何时刻该模型**恰好 1 份、ctx 32768、纯 CPU**；每 60s 巡检 `/api/v1/models`，偏离就 unload 全部 + `lms load --gpu off` 重载。端口锁（47611）防网关重启后多开。日志 `%TEMP%\openclaw\embedding-watchdog.log`。
+  - 已实测验收：人为 REST 加载 8192 制造 `:2` 双实例 → 60s 内自动收敛回 1 份 32768 纯 CPU。
+  - 想**手动清掉**模型（比如临时挤内存）：先停看门狗（关网关窗口，或 `taskkill /F /IM node.exe` 前先按端口找 PID：`netstat -ano | findstr 47611`），再 unload；否则下一轮会被拉回。
+  - 附注：本次排查确认裂开**与 QQ 不同群聊无关**——openclaw.json 的 `memory.search` 全局一份，main / rana-rp / rana-qq-public 三个 agent 共用；裂点始终是"JIT 默认参数(ctx 8192, GPU) ≠ 常驻参数(32768, CPU)"。API 的 `loaded_instances[].config` 只回报 ctx 不回报 GPU 属性，看门狗靠"重载永远 --gpu off + ctx 校验捕获 JIT 裂份"闭环。
 
 ## [已解决·会复发] Clash 7897 被 Windows 动态端口保留段圈占 → 代理失效 → git 推送 GitHub 挂死（2026-09-11）
 
@@ -210,3 +215,16 @@
 - 症状：状态页一有真数据整站白屏（无错误边界，nav 一起没），window.onerror 抓到 `services.map is not a function`。
 - 根因：中间件返回 `{services: [...]}` 包了一层，前端 `StatusPayload` 手写的类型却当数组；TS 查不出来（JSON 过了 unknown）。
 - 解决方案：中间件直接返回数组；**手写 payload 类型时形状必须和 buildStatus 返回逐字段核对**；排障时先 `window.addEventListener('error')` 抓原文再谈修复。
+
+## [已解决] SecretRef 迁移：gateway.auth.token 迁了会断掉全部旁路客户端（2026-09-12）
+
+- 症状：`gateway.auth.token` 改成 SecretRef 对象后，rana-web（vite 读 token）、study-agent/fate-agent 桥、e2e 脚本全部读到 `{source:"store",...}` 对象当令牌用，连网关一律 1008 断连。
+- 根因：这些客户端直读 openclaw.json 的 token 字段，**不会解析 SecretRef**；只有网关自己会解析。
+- 解决方案：**gateway.auth.token 保留明文**（本机回环 WS 令牌，风险可接受），只迁模型 provider 的 apiKey；旁路端点要自己解析时读 `state/openclaw.sqlite` 的 `secret_store_entries` 表（rana-web 的 `/__rana/model-test` 已内置 node:sqlite 解析）。迁移手法：`openclaw secrets store set 名字 --kind secret --value-file 临时文件`（值不过命令行）→ 写 plan.json → `secrets apply --dry-run` 核对 → apply → `secrets reload`。
+- 遗留明文（有意保留）：gateway.auth.token、channels.qqbot.clientSecret（后者不在 SecretRef 支持的目标路径里）；一堆旧 `openclaw.json.bak*` 里还有历史明文 key，删不删用户定。
+
+## [行为说明] rana-qq-public 装上共享记忆后的边界（2026-09-12）
+
+- 做了什么：工作区加 MEMORY.md（所有 QQ 群共享一份长期记忆）+ `memory_search/memory_get/message/skill_workshop` alsoAllow + `memory.search.rememberAcrossConversations: true`（开跨会话回忆：A 群的对话 B 群检索得到）。
+- 边界：她仍无文件读写/命令/联网能力；共享记忆只含群聊公开内容，不含主人私人档案（将来"群里认主人"= 往 MEMORY.md 写一份过滤过的主人摘要即可，无需改配置）。
+- 注意：`rememberAcrossConversations` 的显式落点是 `agents.entries.<id>.memory.search.rememberAcrossConversations`（全局 `memory.search` 也行）；不设则默认看 dmScope——binding 带 `session.dmScope` 时默认关。

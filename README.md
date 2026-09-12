@@ -253,12 +253,14 @@ K:\OpenClaw
 | `GET /__rana/config` | 给前端发网关 token | **只挂 dev 模式**；生产构建必须手动填 token，防止静态部署时泄露 |
 | `/__rana/provider-config` | 云端 provider 增改删（直接写 `openclaw.json`，网关文件监听自动热重载） | API key 列表里**打码**显示；删除前做**引用检查**（还有 agent 在用就拒删）；每次写前自动备份 `.bak-cloud`；保留既有模型条目的扩展字段不被 UI 覆盖 |
 | `POST /__rana/provider-models` | 服务端代理拉取供应商的 `/models` 列表 | 规避浏览器 CORS，key 不经过前端明文流转 |
+| `POST /__rana/model-test` | 测某个模型能不能连通（顶栏模型菜单每行一个 ⚡ 按钮） | 一条最小消息（max_tokens 16）实测；apiKey 只在服务端运行时从配置读，不进日志不进前端；45 秒超时照顾本地模型冷加载 |
 | `GET /__rana/sys/status` | 聚合硬盘/CPU/内存/开机时长/显卡(+显存进程明细)/电源计划/虚拟化/服务端口/网速/外网连通 | 8 秒缓存；子进程一律 `execFile` **数组参数**（不经 shell、无拼接注入面）；powercfg 输出是 GBK，按字节接收再 `TextDecoder("gbk")` 解码。服务端口 = 默认四件套（网关18789/前端5173/LM Studio 1234/Clash 7897）+ `rana-web/services.json` 自加项，附进程名与已运行时长；每进程显存用 GPU 性能计数器查（nvidia-smi 在 WDDM 下查不到，全是 [N/A]）；网速=物理网卡字节差分（排除 vEthernet 防重复计数）；外网连通（GitHub 走 Clash 代理 / 模型 API 直连）用 curl 探测，**60 秒缓存**别一直敲人家的门 |
 | `POST /__rana/sys/power` | 切换电源计划 | **仅接受 GUID 格式参数**（正则白名单，天然无注入）+ 仅本机回环 |
 | `/__rana/avatar` | 头像上传/读取/恢复默认 | png/jpg/webp ≤4MB，类型由 content-type 白名单判定；文件只存本地 gitignore 目录 |
 | `/__rana/news` | 读早报数据 + 触发生成 | POST 触发 `news-report.mjs` 子进程（90s 超时）；**进程级互斥锁**防并发重复生成（React 开发模式 effect 会跑两次，这是真踩过的坑） |
 | `/__rana/study/*` | 学习课程表读写 + 唤醒她排课/出题/判分 | 数据在本地 `.study/`（gitignore）；排课/出题走 `study-agent.mjs` 子进程连网关，往专用会话 `agent:main:study-planner` 发消息（180s 超时 + 互斥：她一次只干一件事）；判分成绩由中间件写回；资料删除前做**课程引用检查**；课程条目服务端清洗（日期/时段格式、id 唯一） |
 | `/__rana/fate/*` | 问卜：生辰档案存取 + 解卦转发 | 档案在本地 `.fate/`（gitignore，写前 .bak）；万年历/八字/紫微全在浏览器本地算（lunar-javascript + iztro），中间件只管档案与把前端算好的命盘摘要组装成提示词 → `fate-agent.mjs` 子进程（专用会话，180s 超时+互斥）→ 她的解卦 markdown 直接返回页面 |
+| `GET /__rana/agent-info` | 智能体装备：技能清单 + MCP 服务器名（右侧面板「🛠 技能 / 🔌 MCP」卡） | 子进程跑 openclaw CLI `skills list --json --agent <id>`（node 直跑 openclaw.mjs 不走 .cmd shim，env 带 OPENCLAW_STATE_DIR）；只留 modelVisible 且未停用的，自装（workspace 来源）排前；按 agent 缓存 120s（?refresh=1 强制）；MCP 只回 server id，command/args/env 不外传 |
 
 所有**写操作**端点都做双重来源校验：socket 必须是本机回环地址 + Origin 头必须匹配 localhost。这套东西不面向公网，但也没有裸奔。
 

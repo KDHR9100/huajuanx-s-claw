@@ -1,6 +1,7 @@
-// 会话页右侧用量面板（token 累计 / 上下文占用 / 费用）+ 本地模型超参数 + 快捷命令，可收起。
+// 会话页右侧用量面板（token 累计 / 上下文占用 / 费用）+ 本地模型超参数 + 快捷命令 + 技能/MCP 清单，可收起。
 import { useAppStore } from "../store/useAppStore";
 import ModelTuningCard from "./ModelTuningCard";
+import AgentKitCard from "./AgentKitCard";
 
 function fmtTokens(n?: number) {
   if (n === undefined || n === null) return "—";
@@ -67,6 +68,7 @@ export default function UsagePanel() {
       </div>
 
       <ModelTuningCard />
+      <AgentKitCard />
     </aside>
   );
 }

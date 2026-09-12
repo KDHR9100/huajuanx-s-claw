@@ -100,9 +100,9 @@ export default function SysPage() {
   const [virtMsg, setVirtMsg] = useState("");
   const timerRef = useRef<number | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (fresh = false) => {
     try {
-      const r = await fetch("/__rana/sys/status");
+      const r = await fetch(`/__rana/sys/status${fresh ? "?fresh=1" : ""}`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       setData((await r.json()) as StatusPayload);
       setError("");
@@ -351,10 +351,13 @@ export default function SysPage() {
             )}
           </div>
 
-          {/* 服务端口：谁在监听谁没开 */}
+          {/* 服务端口：谁在监听谁没开；⟳ 立即重测（绕过缓存，外网连通也重探） */}
           <div className="card">
             <h3>
               <span className="ic">🔌</span>服务端口 <small>红 = 没在监听</small>
+              <button className="nav-btn svc-refresh" title="立即刷新（绕过缓存重测，外网连通性也会重探）" onClick={() => void load(true)}>
+                ⟳
+              </button>
             </h3>
             {services ? (
               <>
@@ -379,6 +382,9 @@ export default function SysPage() {
           <div className="card">
             <h3>
               <span className="ic">🌐</span>网络 <small>连通性 1 分钟一测</small>
+              <button className="nav-btn svc-refresh" title="立即刷新（绕过缓存重测，外网连通性也会重探）" onClick={() => void load(true)}>
+                ⟳
+              </button>
             </h3>
             {net ? (
               <>
