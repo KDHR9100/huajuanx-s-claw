@@ -261,11 +261,13 @@ function ranaProviderConfigMiddleware(): Plugin {
 
 /**
  * 电脑状态端点（本机只读监控 + 电源计划切换）：
- * - GET /__rana/sys/status  聚合系统数据（硬盘/CPU/内存/开机时长/显卡/电源计划），8 秒缓存
+ * - GET /__rana/sys/status  聚合系统数据（硬盘/CPU/内存/开机时长/显卡+显存进程/电源计划/虚拟化/服务端口/网速/外网连通），8 秒缓存
  * - POST /__rana/sys/power {guid}  切换电源计划（仅接受 GUID 格式参数、仅本机回环来源）
+ * 服务端口清单 = 默认四件套 + rana-web/services.json 用户自加项（{name,port}）。
  * 所有子进程调用均用 execFile 数组参数（不经 shell、无字符串拼接）。
  */
 function ranaSysStatusMiddleware(): Plugin {
+  const here = path.dirname(fileURLToPath(import.meta.url));
   const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const CACHE_MS = 8000;
   let cache: { at: number; data: unknown } | null = null;
@@ -288,7 +290,7 @@ function ranaSysStatusMiddleware(): Plugin {
     return JSON.parse(stdout);
   };
 
-  /** 显卡：nvidia-smi CSV（无显卡/超时返回 null，前端单独降级） */
+  /** 显卡：nvidia-smi CSV（无显卡/超时返回 null，前端单独降级）；附带占显存的进程明细 */
   const queryGpu = async () => {
     try {
       const { stdout } = await execFileP(
@@ -298,12 +300,35 @@ function ranaSysStatusMiddleware(): Plugin {
       );
       const parts = stdout.trim().split("\n")[0].split(",").map((s) => s.trim());
       if (parts.length < 5) return null;
+      const procs: Array<{ pid: number; name: string; memMB: number | null }> = [];
+      try {
+        // nvidia-smi 在 Windows WDDM 模式下查不到每进程显存（全是 [N/A]），
+        // 改用系统 GPU 性能计数器「GPU Process Memory(*)\Local Usage」按 pid 汇总
+        const psProcs = [
+          "$m = @{}",
+          "Get-Counter '\\GPU Process Memory(*)\\Local Usage' -ErrorAction SilentlyContinue | ForEach-Object { $_.CounterSamples } | ForEach-Object { if ($_.InstanceName -match 'pid_(\\d+)') { $k = [int]$Matches[1]; $m[$k] = [double]$m[$k] + $_.CookedValue } }",
+          "$top = $m.GetEnumerator() | Sort-Object Value -Descending | Where-Object { $_.Value -gt 50MB } | Select-Object -First 8",
+          "$out = foreach ($e in $top) { $p = Get-Process -Id $e.Key -ErrorAction SilentlyContinue; if ($p) { [pscustomobject]@{ pid = $e.Key; name = $p.ProcessName; memMB = [math]::Round($e.Value / 1MB) } } }",
+          "@($out) | ConvertTo-Json -Compress",
+        ].join("; ");
+        const procsRes = await execFileP("powershell", ["-NoProfile", "-NonInteractive", "-Command", psProcs], {
+          encoding: "utf8", timeout: 15000, windowsHide: true,
+        });
+        let rows = JSON.parse(procsRes.stdout) as Array<{ pid?: number; name?: string; memMB?: number }>;
+        if (!Array.isArray(rows)) rows = [rows];
+        for (const r of rows) {
+          if (r?.name) procs.push({ pid: Number(r.pid ?? 0), name: String(r.name), memMB: Number(r.memMB ?? 0) });
+        }
+      } catch {
+        // 明细失败不影响主数据
+      }
       return {
         name: parts[0],
         memTotalMB: Number(parts[1]),
         memUsedMB: Number(parts[2]),
         tempC: Number(parts[3]),
         utilPct: Number(parts[4]),
+        procs,
       };
     } catch {
       return null;
@@ -338,14 +363,138 @@ function ranaSysStatusMiddleware(): Plugin {
     return JSON.parse(stdout) as { hypervisorPresent: boolean; vbsStatus: number; hvciRunning: boolean };
   };
 
+  /** 服务端口清单：默认四件套 + rana-web/services.json 自加项（{name,port}，端口非法/重名的忽略） */
+  const DEFAULT_SERVICES: Array<{ name: string; port: number }> = [
+    { name: "OpenClaw 网关", port: 18789 },
+    { name: "rana-web 前端", port: 5173 },
+    { name: "LM Studio", port: 1234 },
+    { name: "Clash 代理", port: 7897 },
+  ];
+  const readServiceList = () => {
+    const list = [...DEFAULT_SERVICES];
+    try {
+      const raw = JSON.parse(fs.readFileSync(path.join(here, "services.json"), "utf8")) as Array<{ name?: unknown; port?: unknown }>;
+      if (Array.isArray(raw)) {
+        for (const item of raw) {
+          const port = Number(item?.port);
+          const name = String(item?.name ?? "").trim().slice(0, 24);
+          if (!Number.isInteger(port) || port < 1 || port > 65535 || !name) continue;
+          if (list.some((s) => s.port === port)) continue;
+          list.push({ name, port });
+        }
+      }
+    } catch {
+      // 没有配置文件或格式不对：只用默认清单
+    }
+    return list;
+  };
+
+  /** 服务端口监听状态：一次 PS 拿 监听行 + 进程名 + 进程已运行时长（网关跑多久就从这来） */
+  const queryServices = async () => {
+    const wanted = readServiceList();
+    const ports = wanted.map((s) => s.port);
+    const ps = [
+      "[Console]::OutputEncoding=[Text.Encoding]::UTF8",
+      `$ports = @(${ports.join(",")})`,
+      "$rows = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $ports -contains [int]$_.LocalPort }",
+      "$pids = @($rows | ForEach-Object { [int]$_.OwningProcess } | Sort-Object -Unique | Where-Object { $_ -gt 0 })",
+      "$procs = @{}",
+      "if ($pids.Count) { Get-Process -Id $pids -ErrorAction SilentlyContinue | ForEach-Object { $procs[[int]$_.Id] = $_ } }",
+      "$out = foreach ($p in $ports) { $c = @($rows | Where-Object { [int]$_.LocalPort -eq $p })[0]; $ownerPid = 0; $pname = $null; $up = $null; if ($c) { $ownerPid = [int]$c.OwningProcess; if ($procs.ContainsKey($ownerPid)) { $pr = $procs[$ownerPid]; $pname = $pr.ProcessName; try { $up = [math]::Round(([datetime]::Now - $pr.StartTime).TotalSeconds) } catch {} } }; [pscustomobject]@{ port = $p; listening = [bool]$c; pid = $ownerPid; proc = $pname; uptimeSec = $up } }",
+      "@($out) | ConvertTo-Json -Compress",
+    ].join("; ");
+    const { stdout } = await execFileP("powershell", ["-NoProfile", "-NonInteractive", "-Command", ps], {
+      encoding: "utf8", timeout: 15000, windowsHide: true,
+    });
+    let rows = JSON.parse(stdout) as Array<{ port?: number; listening?: boolean; pid?: number; proc?: string | null; uptimeSec?: number | null }>;
+    if (!Array.isArray(rows)) rows = [rows];
+    const byPort = new Map(rows.map((r) => [Number(r.port), r]));
+    return wanted.map((s) => {
+      const r = byPort.get(s.port);
+      return {
+        ...s,
+        listening: Boolean(r?.listening),
+        pid: Number(r?.pid ?? 0),
+        proc: r?.proc ?? null,
+        uptimeSec: typeof r?.uptimeSec === "number" ? r.uptimeSec : null,
+      };
+    });
+  };
+
+  /** 网速：读物理网卡累计字节数，与上次采样求差（跟着 8s 状态缓存走，第一次没有速率） */
+  let lastNetSample: { at: number; recv: number; sent: number } | null = null;
+  const queryNetSpeed = async () => {
+    const ps = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' } | Get-NetAdapterStatistics | Select-Object Name,ReceivedBytes,SentBytes) | ConvertTo-Json -Compress";
+    const { stdout } = await execFileP("powershell", ["-NoProfile", "-NonInteractive", "-Command", ps], {
+      encoding: "utf8", timeout: 15000, windowsHide: true,
+    });
+    let rows = JSON.parse(stdout) as Array<{ Name?: string; ReceivedBytes?: number; SentBytes?: number }>;
+    if (!Array.isArray(rows)) rows = [rows];
+    // 只算物理网卡：WSL/Hyper-V 的 vEthernet 会出现重复计数
+    const physical = rows.filter((r) => r && typeof r.ReceivedBytes === "number" && !/^vEthernet/i.test(String(r.Name ?? "")));
+    const recv = physical.reduce((a, r) => a + (r.ReceivedBytes ?? 0), 0);
+    const sent = physical.reduce((a, r) => a + (r.SentBytes ?? 0), 0);
+    let speed: { downKBs: number; upKBs: number } | null = null;
+    if (lastNetSample) {
+      const dt = (Date.now() - lastNetSample.at) / 1000;
+      if (dt >= 1) {
+        speed = {
+          downKBs: Math.max(0, (recv - lastNetSample.recv) / dt / 1024),
+          upKBs: Math.max(0, (sent - lastNetSample.sent) / dt / 1024),
+        };
+      }
+    }
+    lastNetSample = { at: Date.now(), recv, sent };
+    return speed;
+  };
+
+  /** 外网连通性：curl 探 GitHub（走 Clash）+ 模型 API（直连）；60 秒缓存，别一直敲人家的门 */
+  const NET_PROBE_MS = 60000;
+  let netProbeCache: { at: number; data: { probes: Array<{ label: string; ok: boolean; ms: number }> } } | null = null;
+  const probeUrl = async (label: string, url: string, proxy?: string) => {
+    const args = ["-I", "-s", "-o", "NUL", "-w", "%{time_total}", "--connect-timeout", "3", "--max-time", "5"];
+    if (proxy) args.push("-x", proxy);
+    args.push(url);
+    try {
+      const { stdout } = await execFileP("curl", args, { encoding: "utf8", timeout: 9000, windowsHide: true });
+      return { label, ok: true, ms: Math.round(parseFloat(stdout.trim()) * 1000) };
+    } catch {
+      return { label, ok: false, ms: 0 };
+    }
+  };
+  const queryNetProbes = async () => {
+    if (netProbeCache && Date.now() - netProbeCache.at < NET_PROBE_MS) return netProbeCache.data;
+    // 模型 API 直连目标：取云端 provider 里第一个非本地的 baseUrl
+    let apiOrigin = "";
+    try {
+      for (const p of Object.values(readFullConfig().models?.providers ?? {})) {
+        if (p.baseUrl && !isLocalProvider(p)) {
+          apiOrigin = new URL(p.baseUrl).origin;
+          break;
+        }
+      }
+    } catch {
+      // 读不到配置就只探 GitHub
+    }
+    const jobs: Array<Promise<{ label: string; ok: boolean; ms: number }>> = [probeUrl("GitHub（走 Clash）", "https://github.com", "http://127.0.0.1:7897")];
+    if (apiOrigin) jobs.push(probeUrl("模型 API（直连）", apiOrigin));
+    const probes = await Promise.all(jobs);
+    const data = { probes };
+    netProbeCache = { at: Date.now(), data };
+    return data;
+  };
+
   const buildStatus = async () => {
-    const [sys, gpu, power, virt] = await Promise.all([
+    const [sys, gpu, power, virt, services, netSpeed, netProbes] = await Promise.all([
       querySystem(),
       queryGpu().catch(() => null),
       queryPower().catch(() => null),
       queryVirt().catch(() => null),
+      queryServices().catch(() => readServiceList().map((s) => ({ ...s, listening: false, pid: 0, proc: null, uptimeSec: null }))),
+      queryNetSpeed().catch(() => null),
+      queryNetProbes().catch(() => ({ probes: [] })),
     ]);
-    return { sys, gpu, power, virt, ts: Date.now() };
+    return { sys, gpu, power, virt, services, net: { speed: netSpeed, probes: netProbes.probes }, ts: Date.now() };
   };
 
   const isLoopback = (req: { socket?: { remoteAddress?: string }; headers?: Record<string, unknown> }) => {
@@ -749,6 +898,16 @@ function ranaStudyMiddleware(): Plugin {
     return localDate(new Date(y, m - 1, d + n));
   };
   const todayStr = () => localDate(new Date());
+  /** 从 from 的第二天起，找第一个当天没有任何课的日期（与页面顺延规则一致；测验不过重学用） */
+  const nextFreeDay = (s: StudySchedule, from: string): string => {
+    const taken = new Set(s.courses.map((c) => c.date));
+    let d = addDays(from, 1);
+    for (let i = 0; i < 400; i++) {
+      if (!taken.has(d)) return d;
+      d = addDays(d, 1);
+    }
+    return d;
+  };
 
   const emptySchedule = (): StudySchedule => ({
     version: 2,
@@ -1302,6 +1461,7 @@ function ranaStudyMiddleware(): Plugin {
 
           const courseId = typeof parsed.courseId === "string" ? parsed.courseId : "";
           const course = courseId ? s.courses.find((c) => c.id === courseId) : undefined;
+          let relearn = "";
           if (course) {
             courseTitle = `课程「${course.title}」的测验`;
             matText = `关联资料（判定有疑问时可 read 核对）：\n${courseMats(course, s)}`;
@@ -1326,6 +1486,17 @@ function ranaStudyMiddleware(): Plugin {
 
           if (course) {
             course.quiz = { status: "done", score: d.score, comment: d.comment ?? "", at: Date.now() };
+            // 测验不过（<60 分）不算学会：打回未学，自动顺延到后面的空位重学；
+            // 清掉 doneAt 保打卡诚实（这节不算完成过），quiz 留着上次分数供页面标「上次 X 分」
+            if (d.score < 60) {
+              const relearnDate = nextFreeDay(s, todayStr());
+              course.status = "planned";
+              course.doneAt = undefined;
+              course.date = relearnDate;
+              course.postponedCount = (course.postponedCount ?? 0) + 1;
+              course.quiz = { status: "pending", score: d.score, comment: d.comment ?? "", at: Date.now() };
+              relearn = relearnDate;
+            }
           } else if (parsed.drill === true) {
             // 错题重考销账：题目标了 targetMistake 且判全对 → 该错题 resolved
             for (const q of questions as Array<{ idx: number; targetMistake?: string }>) {
@@ -1340,7 +1511,7 @@ function ranaStudyMiddleware(): Plugin {
             if (plan) plan.lastFinal = { score: d.score, comment: d.comment ?? "", at: Date.now() };
           }
           writeSchedule(s);
-          json(res, 200, { ok: true, verdict: d, mistakesAdded: added.length, schedule: s });
+          json(res, 200, { ok: true, verdict: d, mistakesAdded: added.length, relearn, schedule: s });
         })
         .catch((e: Error) => {
           json(res, 500, { error: e.message });
@@ -1358,6 +1529,277 @@ function ranaStudyMiddleware(): Plugin {
     },
     configurePreviewServer(server) {
       server.middlewares.use("/__rana/study", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+  };
+}
+
+/**
+ * 问卜（玄学）端点——生辰档案本地存 .fate/（已进 .gitignore，不入公开仓库）：
+ * - GET  /__rana/fate/profile   读档案库（多档案 {list, active}；无则 {empty:true}；旧单档案 profile.json 自动迁入）
+ * - POST /__rana/fate/profile   {action:"save"|"select"|"delete", profile?, id?} —— 多档案增改/切换/删除
+ * - POST /__rana/fate/ask       解卦：万年历/八字/紫微/卦象由前端本地算好一并传来，
+ *   中间件补上当前选中档案后组装提示词 → 子进程跑 fate-agent.mjs（专用会话 agent:main:fate-teller）
+ *   → 返回她的解卦正文（markdown，给用户看的，不走 JSON 契约）。
+ * 隐私：每次 ask 会把命盘摘要发到云端模型（用户已知情拍板）；档案本体不出本机。
+ */
+function ranaFateMiddleware(): Plugin {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const fateDir = path.join(here, ".fate");
+  const profilesFile = path.join(fateDir, "profiles.json");
+  const legacyProfileFile = path.join(fateDir, "profile.json"); // 单档案时代的老文件，首次访问自动迁入
+  let agentBusy = false;
+
+  interface FateProfile {
+    id?: string;
+    nick?: string;
+    gender: "男" | "女";
+    birthday: string; // YYYY-MM-DD 阳历
+    birthTime?: string; // HH:MM，可空（八字少时柱、紫微不可排）
+    birthplace?: string;
+    savedAt?: number;
+  }
+  interface FateStore {
+    version: 1;
+    active: string | null;
+    list: Array<FateProfile & { id: string }>;
+  }
+
+  const newId = () => `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+  const writeStore = (store: FateStore) => {
+    fs.mkdirSync(fateDir, { recursive: true });
+    try {
+      fs.copyFileSync(profilesFile, profilesFile + ".bak");
+    } catch {
+      // 首次没有旧文件
+    }
+    fs.writeFileSync(profilesFile, JSON.stringify(store, null, 2), "utf8");
+  };
+
+  /** 读多档案库；没有 profiles.json 但有旧单档案 profile.json 时自动迁移（老文件保留不动） */
+  const readStore = (): FateStore | { empty: true } => {
+    try {
+      const s = JSON.parse(fs.readFileSync(profilesFile, "utf8")) as FateStore;
+      if (!s || !Array.isArray(s.list)) return { empty: true };
+      s.list = s.list.filter((p) => p && p.id && p.birthday && p.gender);
+      if (!s.active || !s.list.some((p) => p.id === s.active)) s.active = s.list[0]?.id ?? null;
+      return s;
+    } catch {
+      // 试旧单档案迁移
+    }
+    try {
+      const old = JSON.parse(fs.readFileSync(legacyProfileFile, "utf8")) as FateProfile;
+      if (old && old.birthday && old.gender) {
+        const id = newId();
+        const store: FateStore = { version: 1, active: id, list: [{ ...old, id }] };
+        writeStore(store);
+        return store;
+      }
+    } catch {
+      /* 也没有旧档案 */
+    }
+    return { empty: true };
+  };
+
+  const validateProfile = (p: FateProfile) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(p.birthday)) throw new Error("生日需为 YYYY-MM-DD");
+    if (p.gender !== "男" && p.gender !== "女") throw new Error("性别需为 男/女（紫微排盘必需）");
+    if (p.birthTime && !/^\d{2}:\d{2}$/.test(p.birthTime)) throw new Error("出生时间需为 HH:MM");
+    if (p.nick && p.nick.length > 24) throw new Error("昵称太长");
+    if (p.birthplace && p.birthplace.length > 60) throw new Error("出生地太长");
+  };
+
+  /** 保存（有 id 更新、无 id 新建）并把此人设为当前选中 */
+  const upsertProfile = (p: FateProfile): FateStore => {
+    validateProfile(p);
+    const cur = readStore();
+    const store: FateStore = "empty" in cur ? { version: 1, active: null, list: [] } : cur;
+    const entry = { ...p, savedAt: Date.now() };
+    const idx = p.id ? store.list.findIndex((x) => x.id === p.id) : -1;
+    if (idx >= 0) store.list[idx] = { ...entry, id: store.list[idx].id };
+    else {
+      const id = newId();
+      store.list.push({ ...entry, id });
+      store.active = id;
+    }
+    if (p.id) store.active = p.id;
+    writeStore(store);
+    return store;
+  };
+
+  const selectProfile = (id: string): FateStore => {
+    const cur = readStore();
+    if ("empty" in cur || !cur.list.some((p) => p.id === id)) throw new Error("没有这份档案");
+    cur.active = id;
+    writeStore(cur);
+    return cur;
+  };
+
+  const deleteProfile = (id: string): FateStore => {
+    const cur = readStore();
+    const store: FateStore = "empty" in cur ? { version: 1, active: null, list: [] } : cur;
+    store.list = store.list.filter((p) => p.id !== id);
+    if (store.active === id) store.active = store.list[0]?.id ?? null;
+    writeStore(store);
+    return store;
+  };
+
+  const spawnAgent = async (message: string): Promise<{ ok: boolean; reply?: string; error?: string }> => {
+    const { stdout } = await execFileP(process.execPath, [path.join(here, "fate-agent.mjs"), "--message", message], {
+      encoding: "utf8",
+      timeout: 180000,
+      windowsHide: true,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    return JSON.parse(stdout.trim().split("\n").pop() ?? "{}");
+  };
+
+  const runAgent = async (message: string) => {
+    if (agentBusy) throw new Error("她正忙着上一个请求，等一下再试");
+    agentBusy = true;
+    try {
+      return await spawnAgent(message);
+    } finally {
+      agentBusy = false;
+    }
+  };
+
+  /** 解卦提示词：档案（服务端补）+ 前端本地算好的命理材料，全喂给她 */
+  const askMessage = (payload: {
+    domain?: string;
+    question?: string;
+    hexagram?: Record<string, unknown>;
+    almanac?: Record<string, unknown>;
+    bazi?: Record<string, unknown>;
+    ziwei?: Record<string, unknown>;
+  }, profile: FateProfile) => {
+    const dom = String(payload.domain ?? "");
+    const q = String(payload.question ?? "").trim();
+    return [
+      "【问卦·页面触发】用户在程序页摇了一卦，请你解卦。",
+      `问题域：${dom || "综合"}${q ? `；他自己的问题：「${q}」` : ""}`,
+      `他的档案：${[profile.nick ? `昵称${profile.nick}` : "", `性别${profile.gender}`, `阳历生日${profile.birthday}`, profile.birthTime ? `出生时间${profile.birthTime}` : "出生时间未知", profile.birthplace ? `出生地${profile.birthplace}` : ""].filter(Boolean).join("，")}`,
+      `八字（前端排好）：${JSON.stringify(payload.bazi ?? {})}`,
+      `紫微要点（前端排好）：${JSON.stringify(payload.ziwei ?? {})}`,
+      `今日黄历（前端排好）：${JSON.stringify(payload.almanac ?? {})}`,
+      `卦象（前端排好，六爻从初爻到上爻）：${JSON.stringify(payload.hexagram ?? {})}`,
+      [
+        "解卦要求：",
+        "1) 结合他的命盘（八字五行、紫微命宫）和卦象（本卦变卦、动爻、卦辞，动爻爻辞凭你掌握的《周易》原文引用）回答他的问题；",
+        "2) 保持你平时的说话风格，话少、直接，别迷信吓唬人，也别灌鸡汤；",
+        "3) 分三段：卦象说了什么 / 对他这个人的命盘意味着什么 / 落到这件事上一句可执行的建议；",
+        "4) 直接输出给用户看的 markdown 正文，不要输出 ```json 契约块。",
+      ].join("\n"),
+    ].join("\n\n");
+  };
+
+  const json = (
+    res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void },
+    code: number,
+    out: unknown,
+  ) => {
+    res.setHeader("content-type", "application/json");
+    res.statusCode = code;
+    res.end(JSON.stringify(out));
+  };
+  const isLoopback = (req: { socket?: { remoteAddress?: string }; headers?: Record<string, unknown> }) => {
+    const ra = req.socket?.remoteAddress ?? "";
+    if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(ra)) return false;
+    const origin = String(req.headers?.origin ?? "");
+    if (origin && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) return false;
+    return true;
+  };
+  const readBody = (req: { on: (ev: string, cb: (c?: string) => void) => void }) =>
+    new Promise<string>((resolve) => {
+      let body = "";
+      req.on("data", (c?: string) => {
+        body += c ?? "";
+      });
+      req.on("end", () => resolve(body));
+    });
+
+  const handler = (
+    req: {
+      method?: string;
+      url?: string;
+      socket?: { remoteAddress?: string };
+      headers?: Record<string, unknown>;
+      on: (ev: string, cb: (c?: string) => void) => void;
+    },
+    res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void },
+  ) => {
+    const route = (new URL(req.url ?? "/", "http://x").pathname || "/").replace(/\/+$/, "") || "/";
+
+    if (req.method === "GET" && route === "/profile") {
+      const store = readStore();
+      json(res, 200, "empty" in store ? { empty: true } : { list: store.list, active: store.active });
+      return;
+    }
+    if (!isLoopback(req)) {
+      json(res, 403, { error: "仅本机可操作" });
+      return;
+    }
+
+    if (req.method === "POST" && route === "/profile") {
+      readBody(req).then((body) => {
+        try {
+          const { action, profile, id } = JSON.parse(body) as {
+            action?: "save" | "select" | "delete";
+            profile?: FateProfile;
+            id?: string;
+          };
+          let store: FateStore;
+          if (action === "select") {
+            if (!id) throw new Error("缺 id");
+            store = selectProfile(id);
+          } else if (action === "delete") {
+            if (!id) throw new Error("缺 id");
+            store = deleteProfile(id);
+          } else {
+            if (!profile) throw new Error("缺 profile");
+            store = upsertProfile(profile);
+          }
+          json(res, 200, { ok: true, list: store.list, active: store.active });
+        } catch (e) {
+          json(res, 400, { error: (e as Error).message });
+        }
+      });
+      return;
+    }
+
+    if (req.method === "POST" && route === "/ask") {
+      readBody(req)
+        .then(async (body) => {
+          const payload = JSON.parse(body || "{}") as Parameters<typeof askMessage>[0];
+          const store = readStore();
+          if ("empty" in store) {
+            json(res, 400, { error: "还没填生辰档案——先在「我的档案」里存一份" });
+            return;
+          }
+          const prof = store.list.find((p) => p.id === store.active) ?? store.list[0];
+          const r = await runAgent(askMessage(payload, prof));
+          if (!r.ok) {
+            json(res, 500, { error: r.error ?? "她没回话" });
+            return;
+          }
+          json(res, 200, { ok: true, reply: r.reply ?? "" });
+        })
+        .catch((e: Error) => {
+          json(res, 500, { error: e.message });
+        });
+      return;
+    }
+
+    json(res, 405, { error: "method not allowed" });
+  };
+
+  return {
+    name: "rana-fate",
+    configureServer(server) {
+      server.middlewares.use("/__rana/fate", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use("/__rana/fate", handler as Parameters<typeof server.middlewares.use>[1]);
     },
   };
 }
@@ -1445,7 +1887,7 @@ function ranaDevConfig(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), ranaDevConfig(), ranaProviderConfigMiddleware(), ranaSysStatusMiddleware(), ranaAvatarMiddleware(), ranaNewsMiddleware(), ranaStudyMiddleware(), ranaModelParamsMiddleware()],
+  plugins: [react(), ranaDevConfig(), ranaProviderConfigMiddleware(), ranaSysStatusMiddleware(), ranaAvatarMiddleware(), ranaNewsMiddleware(), ranaStudyMiddleware(), ranaFateMiddleware(), ranaModelParamsMiddleware()],
   server: {
     port: 5173,
     proxy: {

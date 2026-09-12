@@ -21,6 +21,7 @@ interface GpuInfo {
   memUsedMB: number;
   tempC: number;
   utilPct: number;
+  procs?: Array<{ pid: number; name: string; memMB: number | null }> | null;
 }
 interface PowerInfo {
   plans: Array<{ guid: string; name: string }>;
@@ -31,14 +32,43 @@ interface VirtInfo {
   vbsStatus: number;
   hvciRunning: boolean;
 }
+interface ServiceRow {
+  name: string;
+  port: number;
+  listening: boolean;
+  pid: number;
+  proc: string | null;
+  uptimeSec: number | null;
+}
+interface NetInfo {
+  speed?: { downKBs: number; upKBs: number } | null;
+  probes?: Array<{ label: string; ok: boolean; ms: number }>;
+}
 interface StatusPayload {
   sys?: SysInfo;
   gpu?: GpuInfo | null;
   power?: PowerInfo | null;
   virt?: VirtInfo | null;
+  services?: ServiceRow[];
+  net?: NetInfo | null;
 }
 
 const POLL_MS = 5000;
+
+/** 进程/服务的已运行时长：人话格式 */
+function fmtUptime(sec: number | null | undefined): string {
+  if (typeof sec !== "number" || sec < 0) return "";
+  if (sec < 60) return `${Math.round(sec)} 秒`;
+  if (sec < 3600) return `${Math.round(sec / 60)} 分钟`;
+  if (sec < 86400) return `${(sec / 3600).toFixed(1)} 小时`;
+  return `${Math.floor(sec / 86400)} 天 ${Math.round((sec % 86400) / 3600)} 小时`;
+}
+
+/** KB/s → 人话速率 */
+function fmtRate(kbs: number): string {
+  if (kbs >= 1024) return `${(kbs / 1024).toFixed(1)} MB/s`;
+  return `${Math.round(kbs)} KB/s`;
+}
 
 function DiskBar({ disk }: { disk: DiskRow }) {
   const used = disk.sizeGB - disk.freeGB;
@@ -145,6 +175,8 @@ export default function SysPage() {
   const sys = data?.sys;
   const gpu = data?.gpu;
   const power = data?.power;
+  const services = data?.services ?? null;
+  const net = data?.net ?? null;
   const memUsed = sys ? sys.memTotalGB - sys.memFreeGB : 0;
   const memPct = sys && sys.memTotalGB > 0 ? (memUsed / sys.memTotalGB) * 100 : 0;
   const uptimeText = sys
@@ -159,7 +191,7 @@ export default function SysPage() {
     <div className="wallboard">
       <div className="board-inner">
         <div className="page-intro">
-          <h2>电脑状态</h2>
+          <h2>Rana 的状态</h2>
           <p>家里的样子，她帮你看着。{error && <span className="sys-err">（{error}）</span>}</p>
         </div>
         <div className="sys-grid">
@@ -261,6 +293,22 @@ export default function SysPage() {
                     {gpu.utilPct}% · {gpu.tempC}°C
                   </span>
                 </div>
+                <div style={{ height: 6 }} />
+                {gpu.procs && gpu.procs.length > 0 ? (
+                  gpu.procs.slice(0, 5).map((p) => (
+                    <div className="kv" key={`${p.pid}-${p.name}`}>
+                      <span className="k" title={`PID ${p.pid}`}>
+                        📦 {p.name}
+                      </span>
+                      <span className="v">{p.memMB !== null ? `${(p.memMB / 1024).toFixed(1)} GB` : "—"}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="kv">
+                    <span className="k">占显存进程</span>
+                    <span className="v">没有</span>
+                  </div>
+                )}
               </>
             ) : (
               <p className="pending-text">……看不见了。</p>
@@ -297,6 +345,55 @@ export default function SysPage() {
                   <span className="k">开机时长</span>
                   <span className="v">{uptimeText}</span>
                 </div>
+              </>
+            ) : (
+              <p className="pending-text">……看不见了。</p>
+            )}
+          </div>
+
+          {/* 服务端口：谁在监听谁没开 */}
+          <div className="card">
+            <h3>
+              <span className="ic">🔌</span>服务端口 <small>红 = 没在监听</small>
+            </h3>
+            {services ? (
+              <>
+                {services.map((s) => (
+                  <div className="svc-row" key={s.port}>
+                    <span className={`svc-dot${s.listening ? " ok" : ""}`} />
+                    <span className="svc-name">{s.name}</span>
+                    <span className="svc-port">:{s.port}</span>
+                    <span className="svc-meta" title={s.pid ? `PID ${s.pid}` : undefined}>
+                      {s.listening ? [s.proc, fmtUptime(s.uptimeSec)].filter(Boolean).join(" · ") : "没在跑"}
+                    </span>
+                  </div>
+                ))}
+                <div className="plan-hint">想多盯一个端口：在 rana-web/services.json 里加一行 {"{"} name, port {"}"}</div>
+              </>
+            ) : (
+              <p className="pending-text">……看不见了。</p>
+            )}
+          </div>
+
+          {/* 网络：实时网速 + 外网连通性 */}
+          <div className="card">
+            <h3>
+              <span className="ic">🌐</span>网络 <small>连通性 1 分钟一测</small>
+            </h3>
+            {net ? (
+              <>
+                <div className="net-line">
+                  <span className="k">网速（物理网卡）</span>
+                  <span className="v">
+                    {net.speed ? `↓ ${fmtRate(net.speed.downKBs)} · ↑ ${fmtRate(net.speed.upKBs)}` : "测量中…"}
+                  </span>
+                </div>
+                {(net.probes ?? []).map((p) => (
+                  <div className="net-line" key={p.label}>
+                    <span className="k">{p.label}</span>
+                    <span className={p.ok ? "ok" : "bad"}>{p.ok ? `通 · ${p.ms >= 1000 ? (p.ms / 1000).toFixed(1) + " s" : p.ms + " ms"}` : "不通"}</span>
+                  </div>
+                ))}
               </>
             ) : (
               <p className="pending-text">……看不见了。</p>

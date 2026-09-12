@@ -11,11 +11,14 @@
   "dependencies": {
     "@openclaw/gateway-client": "2026.8.1",
     "@openclaw/gateway-protocol": "2026.8.1",
+    "iztro": "^2.6.1",
+    "lunar-javascript": "^1.7.7",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.1",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
+    "ws": "^8.21.3",
     "zustand": "^5.0.2"
   },
   "devDependencies": {

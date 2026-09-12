@@ -962,13 +962,14 @@ body.dragging iframe, body.dragging .chat-scroll { pointer-events: none; }
   color: var(--text-dim);
   border: 1.5px solid transparent;
   border-radius: 999px;
-  padding: 7px 15px;
+  padding: 7px 12px;
   font-size: 13.5px;
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
   transition: all 0.2s;
   user-select: none;
+  white-space: nowrap; /* 页签名不许折行（Rana 的状态 这类长名会换行成两行） */
 }
 .tab:hover { color: var(--accent-strong); background: var(--accent-soft); }
 .tab.on { background: var(--accent-soft); color: var(--accent-strong); border-color: var(--accent); }
@@ -1577,3 +1578,299 @@ body.has-bg .room { display: none; }
 .study-contract textarea { width: 100%; min-height: 64px; resize: vertical; }
 .study-report .rp-title { font-size: 13px; font-weight: 650; margin-bottom: 6px; }
 .study-report .rp-text { font-size: 12.5px; line-height: 1.8; white-space: pre-wrap; margin: 0; max-height: 220px; overflow-y: auto; }
+
+/* ========== 页签拖拽换位 ========== */
+.tab { touch-action: none; } /* 拖拽自己接管指针，别让页面滚动抢走 */
+.tab.dragging {
+  cursor: grabbing;
+  z-index: 20;
+  scale: 1.06;
+  box-shadow: 0 8px 22px rgba(60, 120, 70, 0.35);
+  transition: scale 0.15s cubic-bezier(.34,1.56,.64,1), box-shadow 0.15s;
+  will-change: transform;
+}
+/* 非拖拽时 transform 有回弹过渡；拖拽中由 JS 直控（内联 style），transition 只管松手归位 */
+.tab:not(.dragging) { transition: transform 0.22s cubic-bezier(.2,.9,.25,1.18), color 0.2s, background 0.2s, border-color 0.2s, scale 0.15s; }
+
+/* ========== 🧰 程序页 ========== */
+.apps-nav { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 20px; }
+.apps-nav .chip.big { font-size: 13px; padding: 7px 16px; cursor: pointer; font-family: inherit; }
+.apps-nav .chip.big:hover { border-color: var(--accent); color: var(--accent-strong); }
+.app-sec { margin-bottom: 26px; }
+.sec-title {
+  font-size: 16px; margin: 0 0 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+.app-sec .card + .card { margin-top: 14px; }
+
+/* ---------- 万年历 ---------- */
+.alm-cal .al-cell {
+  min-height: 58px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-panel) 55%, transparent);
+  padding: 4px 5px;
+  cursor: pointer;
+  display: flex; flex-direction: column; gap: 2px; align-items: stretch;
+  font-family: inherit;
+  transition: border-color 0.15s, background 0.15s;
+}
+.alm-cal .al-cell:hover { border-color: var(--accent); }
+.alm-cal .al-cell.other { opacity: 0.4; }
+.alm-cal .al-cell.today { border-color: var(--accent); box-shadow: 0 0 0 1.5px var(--accent) inset; background: var(--accent-soft); }
+.alm-cal .al-cell.sel { background: var(--accent-soft); }
+.al-cell .al-d { font-size: 12.5px; font-weight: 600; color: var(--text); text-align: left; }
+.al-cell .al-lunar { font-size: 10px; color: var(--text-dim); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.al-cell .al-lunar.jq { color: var(--accent-strong); font-weight: 600; }
+.alm-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.alm-kv {
+  display: grid; grid-template-columns: repeat(5, auto) 1fr; gap: 4px 14px;
+  align-items: baseline; margin-bottom: 10px;
+}
+.alm-kv .k { font-size: 11px; color: var(--text-dim); }
+.alm-kv b { font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.alm-yiji { display: flex; flex-direction: column; gap: 6px; }
+.alm-yiji .yj { display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; line-height: 1.6; }
+.yj-t {
+  flex: none; width: 22px; height: 22px; border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; color: #fff;
+}
+.yj.yi .yj-t { background: var(--ok); }
+.yj.ji .yj-t { background: var(--danger); }
+.alm-feast { margin: 10px 0 0; font-size: 12.5px; color: var(--accent-strong); }
+
+.hour-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 6px; }
+.hour-cell {
+  border: 1.5px solid var(--border); border-radius: 10px;
+  padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; background: var(--bg);
+}
+.hour-cell b { font-size: 14px; display: flex; align-items: baseline; gap: 6px; }
+.hour-cell .hour-luck { font-size: 10.5px; font-weight: 700; border-radius: 5px; padding: 0 5px; color: var(--text-dim); background: var(--bg-hover); }
+.hour-cell .hour-luck.luck { color: #fff; background: var(--ok); }
+.hour-cell .hour-luck.bad { color: #fff; background: var(--danger); }
+.hour-cell .hour-hm, .hour-cell .hour-gz { font-size: 10.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+/* ---------- 我的档案 ---------- */
+.fate-form { display: flex; flex-direction: column; gap: 10px; }
+.sf-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr auto; gap: 8px; }
+@media (max-width: 760px) { .sf-row { grid-template-columns: 1fr 1fr; } }
+/* 名字框 minmax(0,1fr)：把行宽让给右侧选人下拉和按钮 */
+.sf-row4 { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; }
+.sf-pick { max-width: 150px; }
+.sf-field { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--text-dim); }
+.gender-pick { display: flex; gap: 6px; }
+.gender-pick .mode-btn { flex: none; min-width: 72px; }
+
+/* ---------- 排盘 ---------- */
+.chart-form { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 14px; }
+
+/* 八字表与大运左右并排（窄屏上下叠） */
+.bazi-layout { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 14px; align-items: start; }
+@media (max-width: 760px) { .bazi-layout { grid-template-columns: 1fr; } }
+.bazi-scroll { overflow-x: auto; }
+.bazi-table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.bazi-table th, .bazi-table td {
+  border: 1px solid var(--border);
+  padding: 5px 8px; text-align: center; vertical-align: middle;
+  min-width: 58px; white-space: nowrap;
+}
+.bazi-table thead th { font-size: 11px; color: var(--text-dim); font-weight: 600; background: var(--bg); }
+.bazi-table tbody th { font-size: 11px; color: var(--text-dim); font-weight: 600; background: var(--bg); }
+.bazi-table .row-gz td { font-size: 21px; font-weight: 700; }
+.bazi-table .dim { color: var(--text-dim); opacity: 0.55; }
+.bazi-table .col-cur { background: var(--accent-soft); }
+.hidegan { display: inline-flex; flex-direction: column; align-items: center; line-height: 1.25; margin: 0 3px; }
+.hidegan b { font-size: 13px; }
+.hidegan .term { font-size: 9.5px; color: var(--text-dim); }
+/* 干支按五行着色 */
+.wx-mu { color: #4e9f5a; }
+.wx-huo { color: #d8644a; }
+.wx-tu { color: #b08a3e; }
+.wx-jin { color: #c9a13b; }
+.wx-shui { color: #4a7fc1; }
+:root[data-mode="dark"] .wx-mu { color: #7fd08a; }
+:root[data-mode="dark"] .wx-huo { color: #f08a6c; }
+:root[data-mode="dark"] .wx-tu { color: #d1a95c; }
+:root[data-mode="dark"] .wx-jin { color: #e3bd5e; }
+:root[data-mode="dark"] .wx-shui { color: #7aa8e0; }
+
+/* 大运竖排列表 */
+.dayun-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.dy-head { font-size: 12.5px; font-weight: 650; color: var(--text-dim); }
+.dy-head small { font-weight: 400; margin-left: 4px; }
+.dy-list { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow-y: auto; }
+.dy-item {
+  display: grid; grid-template-columns: 1fr auto; gap: 0 8px; align-items: baseline;
+  border: 1.5px solid var(--border); border-radius: 10px;
+  padding: 5px 10px; font-size: 12px; background: var(--bg);
+}
+.dy-item .dy-age { color: var(--text-dim); font-size: 10.5px; grid-column: 1; }
+.dy-item b { grid-column: 2; grid-row: 1 / 3; font-size: 14px; }
+.dy-item small { color: var(--text-dim); font-size: 10px; grid-column: 1; }
+.dy-item b .term { font-size: 10px; color: var(--text-dim); }
+.dy-item.cur { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 40%, transparent) inset; }
+.dy-item.cur b { color: var(--accent-strong); }
+.dy-item.liunian { border-style: dashed; }
+.pillars-foot { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.wuxing-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 12px; }
+@media (max-width: 700px) { .wuxing-row { grid-template-columns: repeat(2, 1fr); } }
+.wx-item { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-dim); }
+.wx-item .bar { height: 8px; }
+.wx-item .wx-c { text-align: center; font-size: 12px; font-weight: 650; color: var(--text); }
+
+/* 术语悬停注释：气泡本体由 Term 组件 portal 到 body 顶层，fixed 定位谁都盖不住 */
+.term { position: relative; border-bottom: 1px dotted color-mix(in srgb, currentColor 55%, transparent); cursor: help; }
+.term-tip {
+  position: fixed; z-index: 9999;
+  background: var(--bg-panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 9px;
+  padding: 6px 10px; font-size: 11.5px; line-height: 1.55;
+  box-shadow: 0 8px 22px rgba(40, 60, 40, 0.28);
+  pointer-events: none;
+}
+
+.zw-board {
+  display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(4, minmax(96px, auto));
+  gap: 6px; user-select: none; position: relative;
+}
+/* 三方四正连线层：悬停宫位时盖在盘上（pointer-events:none 不挡悬停） */
+.zw-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 6; }
+.zw-lines .zw-tri { fill: color-mix(in srgb, var(--accent) 14%, transparent); stroke: none; }
+.zw-lines .zw-line-san { stroke: color-mix(in srgb, var(--accent) 75%, transparent); stroke-width: 2; stroke-dasharray: 7 5; }
+.zw-lines .zw-line-dui { stroke: color-mix(in srgb, #5aa9e6 80%, transparent); stroke-width: 2.5; }
+.zw-cell {
+  border: 1.5px solid var(--border); border-radius: 12px; padding: 6px 8px;
+  display: flex; flex-direction: column; gap: 3px; background: var(--bg);
+  min-width: 0; position: relative; z-index: 1;
+}
+.zw-cell:hover, .zw-cell.hot { border-color: var(--accent); }
+.zw-cell.soul { border-color: var(--accent); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 45%, transparent) inset; }
+.zw-head { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; }
+.zw-name { font-size: 12px; font-weight: 700; }
+.zw-name .zw-body {
+  font-style: normal; font-size: 9.5px; color: #fff; background: var(--accent-strong);
+  border-radius: 4px; padding: 0 4px; margin-left: 4px; vertical-align: 1px;
+}
+.zw-gz { font-size: 10.5px; color: var(--text-dim); }
+.zw-stars { font-size: 12.5px; font-weight: 650; line-height: 1.45; }
+.zw-minors { font-size: 10.5px; color: var(--text-dim); line-height: 1.45; }
+.zw-decadal { font-size: 10px; color: var(--accent-strong); opacity: 0.8; margin-top: auto; }
+.zw-center {
+  border: 1.5px dashed var(--border); border-radius: 12px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  background: var(--accent-soft); text-align: center; padding: 8px;
+}
+.zw-center b { font-size: 16px; color: var(--accent-strong); }
+.zw-center span { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+
+/* ---------- 摇卦问卜 ---------- */
+.divi-wrap { display: flex; flex-direction: column; gap: 14px; }
+.divi-domains { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.divi-q { flex: 1; min-width: 200px; }
+.divi-caster { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.coin-tray {
+  display: flex; gap: 12px; padding: 12px 16px;
+  border: 1.5px dashed var(--border); border-radius: 16px;
+  background: transparent; cursor: pointer;
+}
+.coin-tray:disabled { cursor: default; }
+.coin-tray:not(:disabled):hover { border-color: var(--accent); }
+.coin {
+  position: relative;
+  width: 54px; height: 54px; border-radius: 50%;
+  background: radial-gradient(circle at 32% 30%, #f7e3a1, #e2b93f 58%, #b98d21);
+  box-shadow: inset 0 -3px 6px rgba(120, 80, 0, 0.35), 0 3px 8px rgba(90, 60, 0, 0.3);
+  display: flex; align-items: center; justify-content: center;
+  transform-style: preserve-3d;
+}
+.coin .hole {
+  position: absolute; width: 16px; height: 16px; border-radius: 2px;
+  background: var(--bg-panel);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.coin b { position: relative; z-index: 1; font-size: 13px; color: #6b4d08; font-weight: 700; text-shadow: 0 1px 0 rgba(255,255,255,.4); }
+.coin.heads b { margin-top: -34px; } /* 字面：字在方孔上方 */
+.coin.tails b { margin-top: 34px; }  /* 背面：字在方孔下方 */
+/* 摇动：三枚铜钱翻转弹跳，落定回正 */
+.coin.spin { animation: coin-toss 0.95s cubic-bezier(.3,.6,.4,1) both; }
+@keyframes coin-toss {
+  0% { transform: translateY(0) rotateX(0); }
+  30% { transform: translateY(-26px) rotateX(400deg); }
+  60% { transform: translateY(2px) rotateX(760deg); }
+  80% { transform: translateY(-8px) rotateX(880deg); }
+  100% { transform: translateY(0) rotateX(900deg); }
+}
+@media (prefers-reduced-motion: reduce) { .coin.spin { animation-duration: 0.2s; } }
+.divi-cast-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.divi-hex { display: flex; gap: 22px; flex-wrap: wrap; align-items: center; }
+.yao-stack { display: flex; flex-direction: column; gap: 7px; padding: 12px 16px; border: 1.5px solid var(--border); border-radius: 14px; }
+.yao-row { display: flex; align-items: center; gap: 10px; }
+.yao-row .yao-name { font-size: 11px; color: var(--text-dim); width: 16px; text-align: right; }
+.yao-row .yao-type { font-size: 11.5px; color: var(--text-dim); }
+.yao-row .yao-type.dim { opacity: 0.5; }
+.yao-row.moving .yao-type { color: var(--accent-strong); font-weight: 700; }
+.yao {
+  position: relative; display: inline-flex; width: 108px; height: 10px;
+  background: var(--accent-strong); border-radius: 3px;
+}
+.yao.yin { background: transparent; gap: 12px; }
+.yao.yin::before, .yao.yin::after { content: ""; flex: 1; height: 10px; background: var(--accent-strong); border-radius: 3px; }
+.yao.moving { background: var(--accent-strong); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent); }
+.yao em {
+  /* 动爻标记直接画在爻线右端（传统写法），不再伸出去和"老阳/老阴"文字重叠 */
+  position: absolute; right: 3px; top: 50%; translate: 0 -50%;
+  font-style: normal; font-size: 11px; color: #fff; font-weight: 700; line-height: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+.yao-row { gap: 14px; }
+
+.hex-card { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.hex-ben { display: flex; flex-direction: column; gap: 3px; align-items: center; text-align: center; }
+.hex-ben b { font-size: 15px; }
+.hex-ben small, .hex-arrow small { font-size: 11px; color: var(--text-dim); }
+.hex-sym {
+  font-size: 52px; line-height: 1; color: var(--accent-strong);
+  text-shadow: 0 3px 12px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.hex-sym.sm { font-size: 34px; }
+.hex-ci { font-size: 11.5px; color: var(--text-dim); max-width: 260px; line-height: 1.6; margin: 4px 0 0; }
+.hex-arrow { display: flex; flex-direction: column; gap: 3px; align-items: center; font-size: 15px; color: var(--text-dim); }
+.hex-arrow b { font-size: 13.5px; color: var(--text); }
+
+.divi-ask { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.fate-reply { line-height: 1.7; }
+.fate-reply p { margin: 0.4em 0; }
+.fate-reply h1, .fate-reply h2, .fate-reply h3 { font-size: 14.5px; margin: 0.8em 0 0.4em; }
+.fate-reply ul, .fate-reply ol { margin: 0.4em 0; padding-left: 1.4em; }
+
+/* ========== 状态页：服务端口 / 网络 ========== */
+.svc-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 12.5px;
+}
+.svc-row:last-of-type { border-bottom: none; }
+.svc-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--danger); }
+.svc-dot.ok { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 20%, transparent); }
+.svc-name { font-weight: 650; white-space: nowrap; }
+.svc-port { color: var(--text-dim); font-family: var(--mono); font-size: 11.5px; flex: none; }
+.svc-meta { margin-left: auto; color: var(--text-dim); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.net-line { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 12.5px; padding: 4px 0; }
+.net-line .k { color: var(--text-dim); }
+.net-line .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+.net-line .ok { color: var(--accent-strong); font-weight: 650; }
+.net-line .bad { color: var(--danger); font-weight: 650; }
+
+/* ========== 学习计划 v2.1：周视图 / 完成率 ========== */
+/* 周视图：7 列长条格，当天全部课程放开显示 */
+.cal-grid.wk { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.cal-grid.wk .cal-cell { min-height: 230px; }
+.cal-grid.wk .cal-course { white-space: normal; }
+.st-cell .st-bar { margin-top: 7px; height: 7px; }
+
+/* 日期行放不下时：时长徽章缩省略号，不许把格子撑爆（月/周视图共用） */
+.cal-cell .cd { min-width: 0; overflow: hidden; }
+.cal-cell .load-min { flex: none; max-width: 62%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
