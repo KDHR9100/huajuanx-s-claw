@@ -1463,6 +1463,7 @@ body.has-bg .room { display: none; }
 .mat-row .mr-meta { font-size: 11px; color: var(--text-dim); flex: none; }
 
 .plan-box { margin-top: 16px; border-top: 1px dashed var(--border); padding-top: 12px; }
+.study-model { width: auto; max-width: 220px; flex-shrink: 0; }
 .plan-req { width: 100%; min-height: 58px; resize: vertical; }
 .plan-result {
   font-size: 12.5px; line-height: 1.7;
@@ -1503,3 +1504,76 @@ body.has-bg .room { display: none; }
 .quiz-verdict .half { color: #c9a54a; }
 .quiz-verdict .qv-q { color: var(--text-dim); margin-top: 4px; }
 .quiz-verdict .qv-review { margin-top: 4px; line-height: 1.6; }
+
+/* ----- v2：计划条 / 负荷 / 错题本 / 契约与周报 ----- */
+.study-planbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  flex-wrap: wrap; margin-bottom: 16px;
+}
+.plan-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.plan-chip {
+  display: inline-flex; align-items: center; gap: 2px;
+  border: 1.5px solid var(--border); border-radius: 999px;
+  background: var(--panel-t); backdrop-filter: blur(8px);
+  overflow: hidden;
+}
+.plan-chip.on { border-color: var(--accent); box-shadow: 0 0 0 1.5px var(--accent) inset; }
+.plan-chip .pc-btn {
+  border: none; background: transparent; cursor: pointer;
+  font-size: 12.5px; font-weight: 600; font-family: inherit;
+  color: var(--text); padding: 6px 10px; display: inline-flex; gap: 6px; align-items: center;
+}
+.plan-chip.on .pc-btn { color: var(--accent-strong); }
+.plan-chip .pc-btn i {
+  font-style: normal; font-size: 10.5px; color: var(--text-dim);
+  background: var(--accent-soft); border-radius: 999px; padding: 1px 7px;
+}
+.plan-chip .pc-del {
+  border: none; background: transparent; cursor: pointer;
+  color: var(--text-dim); font-size: 11px; padding: 2px 8px 2px 0;
+}
+.plan-chip .pc-del:hover { color: var(--danger); }
+.plan-chip.add .pc-input {
+  border: none; outline: none; background: transparent;
+  font-size: 12px; font-family: inherit; color: var(--text);
+  width: 96px; padding: 6px 4px 6px 10px;
+}
+.plan-chip.add .pc-input::placeholder { color: var(--text-dim); }
+.plan-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.cal-cell.heavy { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); background: color-mix(in srgb, var(--danger) 7%, transparent); }
+.cal-cell .load-min {
+  font-style: normal; font-size: 9.5px; color: var(--text-dim);
+  margin-left: auto; opacity: 0.9;
+}
+.cal-legend { font-size: 11px; color: var(--text-dim); margin: 8px 2px 0; line-height: 1.5; }
+
+.cc-block {
+  font-size: 12px; color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border-radius: 8px; padding: 5px 9px; margin: 7px 0 0;
+}
+
+.quiz-mode-tag {
+  font-size: 11px; font-weight: 650; color: var(--accent-strong);
+  background: var(--accent-soft); border-radius: 999px;
+  display: inline-block; padding: 2px 10px; margin-bottom: 8px;
+}
+.qq-tag { font-size: 10px; color: var(--danger); margin-left: 6px; }
+
+.study-mistakes .mis-row {
+  border: 1.5px solid var(--border); border-radius: 12px;
+  padding: 8px 11px; margin-bottom: 8px;
+  background: color-mix(in srgb, var(--bg-panel) 55%, transparent);
+}
+.study-mistakes .mis-q { font-size: 13px; font-weight: 600; line-height: 1.55; }
+.study-mistakes .mis-meta {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  font-size: 11.5px; color: var(--text-dim); margin-top: 4px; line-height: 1.5;
+}
+
+.study-duo { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; align-items: start; }
+@media (max-width: 900px) { .study-duo { grid-template-columns: 1fr; } }
+.study-contract textarea { width: 100%; min-height: 64px; resize: vertical; }
+.study-report .rp-title { font-size: 13px; font-weight: 650; margin-bottom: 6px; }
+.study-report .rp-text { font-size: 12.5px; line-height: 1.8; white-space: pre-wrap; margin: 0; max-height: 220px; overflow-y: auto; }

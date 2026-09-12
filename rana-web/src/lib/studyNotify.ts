@@ -95,9 +95,27 @@ function writeFired(date: string, ids: string[]) {
 /**
  * 启动提醒引擎（挂在 App 根部，开哪个页面都有效）：
  * 每 30 秒读一次课程表，到点的课发通知；权限没给/开关没开时静默空转。
+ * 到点时顺手查一下电脑状态（/__rana/sys/status 有 8 秒缓存）：
+ * 显卡还在高负载（大概率在打游戏/跑本地模型）就换个口吻提醒。
  * 用法：useEffect(() => startStudyNotifier(), [])；返回值即 effect 清理函数。
  */
 export function startStudyNotifier(): () => void {
+  /** 查显卡是否在忙（状态接口挂了就当不忙，不影响正常提醒） */
+  const gpuBusy = async (): Promise<string | null> => {
+    try {
+      const r = await fetch("/__rana/sys/status");
+      if (!r.ok) return null;
+      const j = (await r.json()) as { gpu?: { utilPct?: number; memUsedMB?: number } | null };
+      const g = j.gpu;
+      if (g && typeof g.utilPct === "number" && g.utilPct >= 50) {
+        return g.utilPct >= 85 ? "显卡满负荷跑着呢——游戏先存个档吧。" : "显卡还在忙（可能是游戏）。该收心了。";
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
   const tick = async () => {
     if (!getNotifyPref() || typeof Notification === "undefined" || Notification.permission !== "granted") return;
     try {
@@ -107,9 +125,13 @@ export function startStudyNotifier(): () => void {
       const date = todayStr();
       const fired = readFired(date);
       const due = dueForNotify(s.courses ?? [], date, nowHM(), fired);
+      if (!due.length) return;
+      const busy = await gpuBusy();
       for (const c of due) {
         const n = new Notification(`该学习了 · ${c.title}`, {
-          body: `${c.timeStart}${c.timeEnd ? ` ~ ${c.timeEnd}` : ""} 这节课到点了`,
+          body: busy
+            ? `${c.timeStart}${c.timeEnd ? ` ~ ${c.timeEnd}` : ""} 这节课到点了。${busy}`
+            : `${c.timeStart}${c.timeEnd ? ` ~ ${c.timeEnd}` : ""} 这节课到点了`,
           tag: c.id, // 同一节课重复发会被浏览器去重合并
         });
         n.onclick = () => {
@@ -118,7 +140,7 @@ export function startStudyNotifier(): () => void {
         };
         fired.push(c.id);
       }
-      if (due.length) writeFired(date, fired);
+      writeFired(date, fired);
     } catch {
       // 读表失败（dev server 重启中等）就等下一轮
     }

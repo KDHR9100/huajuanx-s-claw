@@ -1,12 +1,15 @@
-// 学习计划的答题面板：出题（quiz-gen 唤醒 Rana 按 study-quiz skill 出题）→ 逐题作答 →
-// 交卷判分（quiz-grade，成绩由中间件写回课程表）→ 展示分数与她的点评。
-import { useState } from "react";
+// 学习计划的答题面板 v2：三种模式共用一套流程——
+// 日常测验（某节课）/ 错题重考（针对薄弱点）/ 期末考（整计划大卷）。
+// 出题和判分都真的过 Rana（专用会话 + study-quiz skill）；选项在页面侧打乱显示（防背位置），
+// 判分按选项内容不按位置，所以乱序不影响判卷。
+import { useMemo, useState } from "react";
 
 export interface QuizQuestion {
   idx: number;
   type: "choice" | "short";
   q: string;
   options?: string[];
+  targetMistake?: string;
 }
 interface QuizVerdict {
   idx: number;
@@ -19,7 +22,14 @@ interface GradeResult {
   verdicts?: QuizVerdict[];
 }
 
+/** 三种出题模式：判分参数不一样，其余流程完全一致 */
+export type QuizMode =
+  | { kind: "course"; courseId: string; title: string }
+  | { kind: "drill"; mistakeIds: string[]; title: string }
+  | { kind: "final"; planId: string; title: string };
+
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
+const MODE_LABEL = { course: "测验", drill: "错题重考", final: "期末考" } as const;
 
 function VerdictMark({ correct }: { correct: boolean | string }) {
   if (correct === true) return <span className="ok">✓ 对</span>;
@@ -27,12 +37,24 @@ function VerdictMark({ correct }: { correct: boolean | string }) {
   return <span className="bad">✗ 不对</span>;
 }
 
+/** Fisher-Yates 洗牌（选项乱序用） */
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 export default function StudyQuiz({
-  courseId,
+  mode,
+  model,
   onClose,
   onGraded,
 }: {
-  courseId: string;
+  mode: QuizMode;
+  model?: string;
   onClose: () => void;
   onGraded: () => void;
 }) {
@@ -49,14 +71,23 @@ export default function StudyQuiz({
     setBusy(true);
     setError("");
     try {
+      const payload =
+        mode.kind === "course"
+          ? { courseId: mode.courseId, requirements: req, ...(model ? { model } : {}) }
+          : mode.kind === "drill"
+            ? { mistakeIds: mode.mistakeIds, ...(model ? { model } : {}) }
+            : { planId: mode.planId, final: true, ...(model ? { model } : {}) };
       const r = await fetch("/__rana/study/quiz-gen", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ courseId, requirements: req }),
+        body: JSON.stringify(payload),
       });
       const j = (await r.json()) as { ok?: boolean; questions?: QuizQuestion[]; error?: string };
       if (!r.ok || !j.ok || !j.questions?.length) throw new Error(j.error ?? `HTTP ${r.status}`);
-      setQuestions(j.questions);
+      // 选择题选项当场打乱（重考同一课时顺序不一样，防背位置）
+      setQuestions(
+        j.questions.map((q) => (q.type === "choice" && q.options?.length ? { ...q, options: shuffle(q.options) } : q)),
+      );
       setAnswers({});
       setPhase("answer");
     } catch (e) {
@@ -74,14 +105,16 @@ export default function StudyQuiz({
     setPhase("grading");
     setError("");
     try {
+      const payload =
+        mode.kind === "course"
+          ? { courseId: mode.courseId, questions, answers: toAnswerArray(), ...(model ? { model } : {}) }
+          : mode.kind === "drill"
+            ? { drill: true, questions, answers: toAnswerArray(), ...(model ? { model } : {}) }
+            : { forPlanId: mode.planId, questions, answers: toAnswerArray(), ...(model ? { model } : {}) };
       const r = await fetch("/__rana/study/quiz-grade", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          courseId,
-          questions,
-          answers: questions.map((q) => ({ idx: q.idx, answer: answers[q.idx] ?? "" })),
-        }),
+        body: JSON.stringify(payload),
       });
       const j = (await r.json()) as { ok?: boolean; verdict?: GradeResult; error?: string };
       if (!r.ok || !j.ok || !j.verdict) throw new Error(j.error ?? `HTTP ${r.status}`);
@@ -94,6 +127,8 @@ export default function StudyQuiz({
     }
   };
 
+  const toAnswerArray = () => questions.map((q) => ({ idx: q.idx, answer: answers[q.idx] ?? "" }));
+
   const restart = () => {
     setQuestions([]);
     setAnswers({});
@@ -101,20 +136,38 @@ export default function StudyQuiz({
     setPhase("gen");
   };
 
+  const genHint = useMemo(() => {
+    if (mode.kind === "drill") return "她会针对你错过的点出新题（换角度问，不是原题复读），答对的自动销账。";
+    if (mode.kind === "final") return "综合这个计划全部资料的 10 题大卷，判分严一点。";
+    return "她会按这节课挂的资料出题（默认 3~5 题，选择+简答），错过的点多出。";
+  }, [mode.kind]);
+
   return (
     <div className="quiz-panel">
+      <div className="quiz-mode-tag">{MODE_LABEL[mode.kind]} · {mode.title}</div>
+
       {phase === "gen" && (
         <div className="quiz-gen">
-          <p className="tune-hint">她会按这节课挂的资料出题（默认 3~5 题，选择+简答）。</p>
-          <input
-            className="set-input"
-            placeholder="附加要求（可选）：只出选择题 / 出10道 / 出难点的…"
-            value={req}
-            onChange={(e) => setReq(e.target.value)}
-          />
+          <p className="tune-hint">{genHint}</p>
+          {mode.kind === "course" && (
+            <input
+              className="set-input"
+              placeholder="附加要求（可选）：只出选择题 / 出10道 / 出难点的…"
+              value={req}
+              onChange={(e) => setReq(e.target.value)}
+            />
+          )}
           <div className="cc-acts" style={{ marginTop: 8 }}>
             <button className="btn sm" onClick={() => void gen()} disabled={busy}>
-              {busy ? "她在翻资料出题……" : "📝 开始出题"}
+              {busy
+                ? mode.kind === "final"
+                  ? "她在出大卷……"
+                  : "她在翻资料出题……"
+                : mode.kind === "drill"
+                  ? "🔁 再考错题"
+                  : mode.kind === "final"
+                    ? "📝 开始期末考"
+                    : "📝 开始出题"}
             </button>
             <button className="btn ghost sm" onClick={onClose}>
               收起
@@ -129,6 +182,7 @@ export default function StudyQuiz({
             <div key={q.idx} className="quiz-q">
               <div className="qq-head">
                 第{q.idx}题 · {q.type === "choice" ? "选择" : "简答"}
+                {q.targetMistake && <span className="qq-tag">错题重考</span>}
               </div>
               <p className="qq-text">{q.q}</p>
               {q.type === "choice" ? (
@@ -185,9 +239,10 @@ export default function StudyQuiz({
               </div>
             );
           })}
+          <p className="tune-hint">答错/半对的题已收进错题本，可以过几天再考。</p>
           <div className="cc-acts" style={{ marginTop: 10 }}>
             <button className="btn sm" onClick={restart}>
-              再考一套
+              再来一套
             </button>
             <button className="btn ghost sm" onClick={onClose}>
               完事了
