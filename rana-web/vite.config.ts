@@ -652,15 +652,15 @@ function ranaNewsMiddleware(): Plugin {
 }
 
 /**
- * 学习计划端点（数据只存本地 .study/ 目录，已进 .gitignore 不入公开仓库）：
- * - GET    /__rana/study                  读课程表 schedule.json
- * - POST   /__rana/study/save             页面手动编辑保存（只收 courses；materials 由上传/删除端点管理）
- * - POST   /__rana/study/material?name=   上传学习资料（raw body ≤10MB，登记进 materials[]）
+ * 学习计划端点 v2（数据只存本地 .study/ 目录，已进 .gitignore 不入公开仓库）：
+ * - GET    /__rana/study                  读课程表 schedule.json（v1 自动迁移 v2）
+ * - POST   /__rana/study/save             保存 {courses?, plans?, contract?}（materials 由上传/删除端点管理）
+ * - POST   /__rana/study/material?name=   上传学习资料（raw body ≤10MB）
  * - DELETE /__rana/study/material?id=     删除资料（仍被课程引用时拒删）
- * - POST   /__rana/study/plan             让 Rana 排课：子进程跑 study-agent.mjs，她按 study-planner skill 直接改 schedule.json
- * - POST   /__rana/study/quiz-gen         让 Rana 按课程资料出题（study-quiz skill）
- * - POST   /__rana/study/quiz-grade       让 Rana 判分，成绩由本中间件写回课程表
- * 写操作仅本机回环来源；写前 .bak 备份；排课/出题/判分共用一个互斥（她一次只干一件事）。
+ * - POST   /__rana/study/plan             排课（Rana 按 study-planner skill 直接改 schedule.json）
+ * - POST   /__rana/study/quiz-gen         出题：{courseId} | {mistakeIds:错题重考} | {planId, final:期末考}
+ * - POST   /__rana/study/quiz-grade       判分；错题自动回收、错题重考自动销账、期末考成绩记到计划
+ * 服务端还负责：done 课自动排复习课（+1/+7/+16 天）、连续打卡计算、打卡里程碑评语（异步）。
  */
 function ranaStudyMiddleware(): Plugin {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -682,9 +682,16 @@ function ranaStudyMiddleware(): Plugin {
     timeStart?: string;
     timeEnd?: string;
     status: "planned" | "done";
+    kind?: "lesson" | "review";
+    reviewOf?: string;
+    reviewGap?: number;
+    planId?: string;
+    dependsOn?: string[];
+    estMin?: number;
     materialIds?: string[];
     note?: string;
     postponedCount?: number;
+    doneAt?: number;
     quiz?: StudyQuiz;
   }
   interface StudyMaterial {
@@ -694,24 +701,110 @@ function ranaStudyMiddleware(): Plugin {
     size: number;
     addedAt: number;
   }
+  interface StudyPlan {
+    id: string;
+    name: string;
+    createdAt: number;
+    lastFinal?: { score: number; comment: string; at: number };
+  }
+  interface StudyMistake {
+    id: string;
+    courseId?: string;
+    courseTitle: string;
+    q: string;
+    myAnswer: string;
+    review?: string;
+    addedAt: number;
+    resolvedAt?: number;
+  }
+  interface StudyReport {
+    id: string;
+    kind: "weekly";
+    title: string;
+    text: string;
+    at: number;
+  }
   interface StudySchedule {
     version: number;
+    plans: StudyPlan[];
     courses: StudyCourse[];
     materials: StudyMaterial[];
+    mistakes: StudyMistake[];
+    reports: StudyReport[];
+    streak: { days: number; best: number; lastDay: string; comment?: string; commentDay?: string };
+    contract?: { text: string; updatedAt: number };
     updatedAt: number;
   }
 
-  const emptySchedule = (): StudySchedule => ({ version: 1, courses: [], materials: [], updatedAt: 0 });
+  const DEFAULT_PLAN_ID = "p-default";
+  /** 学完一节正课自动安排的复习间隔（天）：1 / 7 / 16 */
+  const REVIEW_GAPS = [1, 7, 16];
+  /** 打卡里程碑（连续天数），到了让她说一句 */
+  const STREAK_MILESTONES = [3, 7, 14, 21, 30, 50, 100, 365];
+
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  const localDate = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const addDays = (ds: string, n: number) => {
+    const [y, m, d] = ds.split("-").map(Number);
+    return localDate(new Date(y, m - 1, d + n));
+  };
+  const todayStr = () => localDate(new Date());
+
+  const emptySchedule = (): StudySchedule => ({
+    version: 2,
+    plans: [{ id: DEFAULT_PLAN_ID, name: "默认计划", createdAt: Date.now() }],
+    courses: [],
+    materials: [],
+    mistakes: [],
+    reports: [],
+    streak: { days: 0, best: 0, lastDay: "" },
+    updatedAt: 0,
+  });
 
   const readSchedule = (): StudySchedule => {
     try {
       const s = JSON.parse(fs.readFileSync(scheduleFile, "utf8")) as StudySchedule;
+      // v1 → v2 迁移：补齐新字段，旧数据原样保留
+      if (!Array.isArray(s.plans) || !s.plans.length) s.plans = emptySchedule().plans;
       if (!Array.isArray(s.courses)) s.courses = [];
       if (!Array.isArray(s.materials)) s.materials = [];
+      if (!Array.isArray(s.mistakes)) s.mistakes = [];
+      if (!Array.isArray(s.reports)) s.reports = [];
+      if (!s.streak) s.streak = { days: 0, best: 0, lastDay: "" };
+      s.version = 2;
       return s;
     } catch {
       return emptySchedule();
     }
+  };
+
+  /** 连续打卡：按 doneAt 的本地日期，从最近一天（今天或昨天）往前数连续有完成的天数 */
+  const computeStreak = (s: StudySchedule) => {
+    const days = new Set(
+      s.courses.filter((c) => c.status === "done" && c.doneAt).map((c) => localDate(new Date(c.doneAt!))),
+    );
+    if (!days.size) {
+      s.streak.days = 0;
+      s.streak.lastDay = "";
+      return;
+    }
+    const sorted = [...days].sort().reverse();
+    let last = sorted[0];
+    const t = todayStr();
+    if (last !== t && last !== addDays(t, -1)) {
+      // 最近一次完成既不是今天也不是昨天：断卡
+      s.streak.days = 0;
+      s.streak.lastDay = last;
+      return;
+    }
+    let n = 1;
+    while (days.has(addDays(last, -1))) {
+      last = addDays(last, -1);
+      n++;
+    }
+    s.streak.days = n;
+    s.streak.lastDay = sorted[0];
+    s.streak.best = Math.max(s.streak.best ?? 0, n);
   };
 
   const writeSchedule = (s: StudySchedule) => {
@@ -721,6 +814,7 @@ function ranaStudyMiddleware(): Plugin {
     } catch {
       // 首次写入没有旧文件
     }
+    computeStreak(s);
     s.updatedAt = Date.now();
     fs.writeFileSync(scheduleFile, JSON.stringify(s, null, 2), "utf8");
   };
@@ -731,7 +825,7 @@ function ranaStudyMiddleware(): Plugin {
   /** 校验并规整页面提交的 courses：未知字段丢弃，坏行抛错（页面直接展示错误） */
   const cleanCourses = (input: unknown): StudyCourse[] => {
     if (!Array.isArray(input)) throw new Error("courses 需为数组");
-    if (input.length > 500) throw new Error("课程数超出上限（500）");
+    if (input.length > 2000) throw new Error("课程数超出上限（2000）");
     const ids = new Set<string>();
     return input.map((raw, i) => {
       const c = raw as Partial<StudyCourse>;
@@ -754,14 +848,44 @@ function ranaStudyMiddleware(): Plugin {
         title,
         date,
         status: c.status === "done" ? "done" : "planned",
+        ...(c.kind === "review" ? { kind: "review" as const } : { kind: "lesson" as const }),
+        ...(typeof c.reviewOf === "string" ? { reviewOf: c.reviewOf } : {}),
+        ...(typeof c.reviewGap === "number" ? { reviewGap: c.reviewGap } : {}),
+        ...(typeof c.planId === "string" && c.planId ? { planId: c.planId } : { planId: DEFAULT_PLAN_ID }),
+        ...(Array.isArray(c.dependsOn) && c.dependsOn.length ? { dependsOn: c.dependsOn.map(String) } : {}),
+        ...(typeof c.estMin === "number" && c.estMin > 0 ? { estMin: Math.round(c.estMin) } : {}),
         ...(typeof c.timeStart === "string" && TIME_RE.test(c.timeStart) ? { timeStart: c.timeStart } : {}),
         ...(typeof c.timeEnd === "string" && TIME_RE.test(c.timeEnd) ? { timeEnd: c.timeEnd } : {}),
         ...(Array.isArray(c.materialIds) ? { materialIds: c.materialIds.map(String) } : {}),
         ...(typeof c.note === "string" ? { note: c.note } : {}),
         ...(typeof c.postponedCount === "number" ? { postponedCount: c.postponedCount } : {}),
+        ...(typeof c.doneAt === "number" ? { doneAt: c.doneAt } : {}),
         quiz,
       };
     });
+  };
+
+  const cleanPlans = (input: unknown): StudyPlan[] => {
+    if (!Array.isArray(input)) throw new Error("plans 需为数组");
+    if (input.length > 20) throw new Error("计划数超出上限（20）");
+    const out: StudyPlan[] = [];
+    for (const raw of input) {
+      const p = raw as Partial<StudyPlan>;
+      const id = String(p.id ?? "");
+      const name = String(p.name ?? "").trim().slice(0, 40);
+      if (!id || !name) continue;
+      if (out.some((x) => x.id === id)) continue;
+      out.push({
+        id,
+        name,
+        createdAt: typeof p.createdAt === "number" ? p.createdAt : Date.now(),
+        ...(p.lastFinal && typeof p.lastFinal.score === "number"
+          ? { lastFinal: { score: p.lastFinal.score, comment: String(p.lastFinal.comment ?? ""), at: p.lastFinal.at ?? Date.now() } }
+          : {}),
+      });
+    }
+    if (!out.some((p) => p.id === DEFAULT_PLAN_ID)) out.unshift({ id: DEFAULT_PLAN_ID, name: "默认计划", createdAt: Date.now() });
+    return out;
   };
 
   /** Windows 文件名安全化：去掉非法字符与前导点，限长 */
@@ -772,15 +896,109 @@ function ranaStudyMiddleware(): Plugin {
 
   const materialAbs = (m: StudyMaterial) => path.join(materialsDir, m.file);
 
-  /** 唤醒 Rana：子进程跑 study-agent.mjs，解析它 stdout 的最后一行 JSON */
-  const spawnAgent = async (message: string): Promise<{ ok: boolean; reply?: string; data?: Record<string, unknown>; error?: string }> => {
-    const { stdout } = await execFileP(process.execPath, [path.join(here, "study-agent.mjs"), "--message", message], {
+  /** 唤醒 Rana：子进程跑 study-agent.mjs，解析它 stdout 的最后一行 JSON；model 可选（页面选的模型） */
+  const spawnAgent = async (message: string, model?: string): Promise<{ ok: boolean; reply?: string; data?: Record<string, unknown>; error?: string }> => {
+    const args = [path.join(here, "study-agent.mjs"), "--message", message];
+    if (model) args.push("--model", model);
+    const { stdout } = await execFileP(process.execPath, args, {
       encoding: "utf8",
       timeout: 180000,
       windowsHide: true,
       maxBuffer: 8 * 1024 * 1024,
     });
     return JSON.parse(stdout.trim().split("\n").pop() ?? "{}");
+  };
+
+  /** 排课/出题/判分共用的互斥执行：她一次只干一件事 */
+  const runAgent = async (message: string, model?: string) => {
+    if (agentBusy) throw new Error("她正忙着上一个请求，等一下再试");
+    agentBusy = true;
+    try {
+      return await spawnAgent(message, model);
+    } finally {
+      agentBusy = false;
+    }
+  };
+
+  /** 学完一节正课 → 自动排复习课（+1/+7/+16 天，已存在的不重复排） */
+  const insertReviews = (s: StudySchedule, course: StudyCourse) => {
+    if (course.kind === "review") return; // 复习课不再套娃
+    const doneDay = course.doneAt ? localDate(new Date(course.doneAt)) : todayStr();
+    for (const gap of REVIEW_GAPS) {
+      const id = `rv-${course.id}-${gap}`;
+      if (s.courses.some((c) => c.id === id)) continue;
+      s.courses.push({
+        id,
+        title: `复习：${course.title}`,
+        date: addDays(doneDay, gap),
+        status: "planned",
+        kind: "review",
+        reviewOf: course.id,
+        reviewGap: gap,
+        planId: course.planId ?? DEFAULT_PLAN_ID,
+        estMin: 30,
+        ...(course.materialIds?.length ? { materialIds: [...course.materialIds] } : {}),
+        quiz: { status: "none" },
+      });
+    }
+  };
+
+  /** 打卡里程碑：到了给一句她的评语（异步，不挡保存请求） */
+  const fireStreakComment = () => {
+    const s = readSchedule();
+    if (!s.streak.days || !STREAK_MILESTONES.includes(s.streak.days)) return;
+    if (s.streak.commentDay === todayStr()) return;
+    const days = s.streak.days;
+    void runAgent(
+      [
+        `【打卡评语·页面触发】用户刚把连续学习打卡打到了 ${days} 天。`,
+        `给一句评语（就一句，保持你平时的说话风格：话少、直接，坚持这么久可以难得地夸一句，别肉麻）。`,
+        '最后输出一个 ```json 代码块：{"comment":"评语"}',
+      ].join("\n"),
+    )
+      .then((r) => {
+        const comment = (r.data ?? {}).comment;
+        if (typeof comment !== "string" || !comment) return;
+        const fresh = readSchedule(); // 写回前重读，别覆盖这期间的改动
+        if (fresh.streak.days === days && fresh.streak.commentDay !== todayStr()) {
+          fresh.streak.comment = comment;
+          fresh.streak.commentDay = todayStr();
+          writeSchedule(fresh);
+        }
+      })
+      .catch(() => {
+        // 评语失败无所谓，打卡数照算
+      });
+  };
+
+  /** 判分后回收错题（答错/半对的题），返回新增的错题 */
+  const collectMistakes = (
+    s: StudySchedule,
+    courseTitle: string,
+    courseId: string | undefined,
+    questions: Array<{ idx: number; q: string }>,
+    answers: Array<{ idx: number; answer: string }>,
+    verdicts: Array<{ idx: number; correct: boolean | string; review?: string }>,
+  ): StudyMistake[] => {
+    const out: StudyMistake[] = [];
+    for (const v of verdicts) {
+      if (v.correct === true) continue;
+      const q = questions.find((x) => x.idx === v.idx);
+      const a = answers.find((x) => x.idx === v.idx);
+      if (!q) continue;
+      out.push({
+        id: `mk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}-${v.idx}`,
+        ...(courseId ? { courseId } : {}),
+        courseTitle,
+        q: q.q,
+        myAnswer: a?.answer ?? "",
+        review: v.review ?? "",
+        addedAt: Date.now(),
+      });
+    }
+    s.mistakes.push(...out);
+    if (s.mistakes.length > 500) s.mistakes = s.mistakes.slice(-500); // 错题本封顶，太老的丢弃
+    return out;
   };
 
   const matLines = (s: StudySchedule) =>
@@ -797,6 +1015,21 @@ function ranaStudyMiddleware(): Plugin {
       : "（这节课没挂资料，按课程标题和笔记出。）";
   };
 
+  /** 难度自适应的上下文：近期成绩 + 未解决错题 */
+  const difficultyContext = (s: StudySchedule, planId: string) => {
+    const recent = s.courses
+      .filter((c) => (c.planId ?? DEFAULT_PLAN_ID) === planId && c.quiz?.status === "done")
+      .sort((a, b) => (b.quiz?.at ?? 0) - (a.quiz?.at ?? 0))
+      .slice(0, 6)
+      .map((c) => `${c.title}=${c.quiz?.score}分`);
+    const open = s.mistakes.filter((m) => !m.resolvedAt);
+    return [
+      recent.length ? `该计划近期测验：${recent.join("、")}` : "该计划还没有测验记录",
+      open.length ? `未解决错题 ${open.length} 道，例如：${open.slice(0, 3).map((m) => `「${m.q.slice(0, 40)}」`).join("；")}` : "没有未解决错题",
+      "出题时自适应：掌握好的点别出重复送分题；错过的、分数低的地方多出、出难一点。",
+    ].join("\n");
+  };
+
   const planMessage = (requirements: string) => {
     const s = readSchedule();
     return [
@@ -804,25 +1037,54 @@ function ranaStudyMiddleware(): Plugin {
       `用户要求：${requirements.trim() || "（没写具体要求。按资料情况合理排，拿不准的假设写进 summary 里说明。）"}`,
       `资料库（可用 read 工具读的绝对路径）：\n${matLines(s)}`,
       `课程表文件：${scheduleFile}（先 read 最新内容，改完写回；数据格式与规则见 study-planner skill）`,
-      '按 study-planner skill 的流程处理。完成后回复的最后必须是一个 ```json 代码块：{"ok":true,"summary":"一两句话说明排了什么"}；失败则 {"ok":false,"summary":"原因"}。',
+      '按 study-planner skill 的流程处理（估时、超90分钟拆分、负荷均衡、依赖关系都按 skill 里的规则）。完成后回复的最后必须是一个 ```json 代码块：{"ok":true,"summary":"一两句话说明排了什么"}；失败则 {"ok":false,"summary":"原因"}。',
     ].join("\n\n");
   };
 
   const quizGenMessage = (course: StudyCourse, s: StudySchedule, requirements: string) =>
     [
-      `【出题·页面触发】用户学完了课程「${course.title}」（${course.date}），点了「出题测验」。`,
+      `【出题·页面触发】用户学完了课程「${course.title}」（${course.date}${course.kind === "review" ? "，这是复习课，题目要综合一点" : ""}），点了「出题测验」。`,
       `课程笔记：${course.note?.trim() || "无"}`,
       `关联资料（可用 read 工具读的绝对路径）：\n${courseMats(course, s)}`,
+      `难度参考（自适应）：\n${difficultyContext(s, course.planId ?? DEFAULT_PLAN_ID)}`,
       `用户附加要求：${requirements.trim() || "无"}`,
       '按 study-quiz skill 出题。回复的最后必须是一个 ```json 代码块：{"questions":[{"idx":1,"type":"choice","q":"…","options":["…","…","…","…"]},{"idx":2,"type":"short","q":"…"}]}。题目里不要带答案。',
     ].join("\n\n");
 
-  const quizGradeMessage = (course: StudyCourse, s: StudySchedule, questions: unknown, answers: unknown) =>
+  const drillMessage = (mistakes: StudyMistake[]) =>
     [
-      `【判题·页面触发】课程「${course.title}」的测验，请判分。`,
-      `关联资料（判定有疑问时可 read 核对）：\n${courseMats(course, s)}`,
+      "【出题·错题重考·页面触发】以下是用户之前的错题（含他当时的错误作答与点评）：",
+      JSON.stringify(
+        mistakes.map((m) => ({ id: m.id, 课程: m.courseTitle, 题: m.q, 他的答案: m.myAnswer, 当时点评: m.review ?? "" })),
+        null,
+        1,
+      ),
+      "针对这些薄弱点出 3~5 道新题：可以换角度、换题型问同一个点，别原题复读。",
+      '回复的最后必须是一个 ```json 代码块：{"questions":[{"idx":1,"type":"choice","q":"…","options":[…],"targetMistake":"对应的错题id"}]}，每题标 targetMistake。',
+    ].join("\n\n");
+
+  const finalMessage = (plan: StudyPlan, s: StudySchedule) => {
+    const cs = s.courses.filter((c) => (c.planId ?? DEFAULT_PLAN_ID) === plan.id);
+    const mats = [...new Set(cs.flatMap((c) => c.materialIds ?? []))]
+      .map((id) => s.materials.find((m) => m.id === id))
+      .filter((m): m is StudyMaterial => Boolean(m));
+    return [
+      `【期末考·页面触发】用户要对计划「${plan.name}」发起期末考。`,
+      `计划内课程：\n${cs.map((c) => `- ${c.title}（${c.status === "done" ? "已学完" : "未完成"}${c.quiz?.score != null ? `，测验${c.quiz.score}分` : ""}）`).join("\n") || "（还没有课程）"}`,
+      `涉及资料（可用 read 工具读的绝对路径）：\n${mats.map((m) => `- ${m.name} → ${materialAbs(m)}`).join("\n") || "（无资料）"}`,
+      `难度参考（自适应）：\n${difficultyContext(s, plan.id)}`,
+      "按 study-quiz skill 的期末考模式：综合全部资料出 10 题混合大卷，覆盖面要全，错过的点重点考。",
+      '回复的最后必须是一个 ```json 代码块：{"questions":[…]}（格式同学规出题）。',
+    ].join("\n\n");
+  };
+
+  const quizGradeMessage = (courseTitle: string, matText: string, questions: unknown, answers: unknown, hint: string) =>
+    [
+      `【判题·页面触发】${courseTitle}，请判分。`,
+      matText,
       `题目与用户作答（JSON）：\n${JSON.stringify({ questions, answers }, null, 1)}`,
-      '按 study-quiz skill 判题。回复的最后必须是一个 ```json 代码块：{"score":0到100的整数,"comment":"总评","verdicts":[{"idx":1,"correct":true,"review":"一句点评"}]}。判分结果由页面写回课程表，你不要动 schedule.json。',
+      hint,
+      '按 study-quiz skill 判题。回复的最后必须是一个 ```json 代码块：{"score":0到100的整数,"comment":"总评","verdicts":[{"idx":1,"correct":true,"review":"一句点评"}]}。',
     ].join("\n\n");
 
   const json = (
@@ -850,17 +1112,6 @@ function ranaStudyMiddleware(): Plugin {
       req.on("end", () => resolve(body));
     });
 
-  /** 排课/出题/判分共用的互斥执行：她一次只干一件事，页面等待期间再点直接拒 */
-  const runAgent = async (message: string) => {
-    if (agentBusy) throw new Error("她正忙着上一个请求，等一下再试");
-    agentBusy = true;
-    try {
-      return await spawnAgent(message);
-    } finally {
-      agentBusy = false;
-    }
-  };
-
   const handler = (
     req: {
       method?: string;
@@ -886,11 +1137,28 @@ function ranaStudyMiddleware(): Plugin {
     if (req.method === "POST" && route === "/save") {
       readBody(req).then((body) => {
         try {
-          const { courses } = JSON.parse(body) as { courses?: unknown };
+          const parsed = JSON.parse(body || "{}") as { courses?: unknown; plans?: unknown; contract?: { text?: string } };
           const s = readSchedule();
-          s.courses = cleanCourses(courses);
+          const before = new Map(s.courses.map((c) => [c.id, c]));
+          if (parsed.plans !== undefined) s.plans = cleanPlans(parsed.plans);
+          if (parsed.courses !== undefined) s.courses = cleanCourses(parsed.courses);
+          if (parsed.contract !== undefined) {
+            const text = String(parsed.contract?.text ?? "").trim().slice(0, 500);
+            s.contract = text ? { text, updatedAt: Date.now() } : undefined;
+          }
+          // 新学完的课：补 doneAt + 自动排复习课
+          let reviewsAdded = 0;
+          for (const c of s.courses) {
+            if (c.status === "done" && !c.doneAt && !before.get(c.id)?.doneAt) {
+              c.doneAt = Date.now();
+              const n0 = s.courses.length;
+              insertReviews(s, c);
+              reviewsAdded += s.courses.length - n0;
+            }
+          }
           writeSchedule(s);
-          json(res, 200, { ok: true, updatedAt: s.updatedAt });
+          fireStreakComment(); // 内部自判：到里程碑且今天没说过才让她说一句（异步，不挡保存）
+          json(res, 200, { ok: true, reviewsAdded, updatedAt: s.updatedAt, streak: s.streak });
         } catch (e) {
           json(res, 400, { error: (e as Error).message });
         }
@@ -959,8 +1227,10 @@ function ranaStudyMiddleware(): Plugin {
       readBody(req)
         .then(async (body) => {
           const parsed = JSON.parse(body || "{}") as Record<string, unknown>;
+          const model = typeof parsed.model === "string" && parsed.model ? parsed.model : undefined;
+
           if (route === "/plan") {
-            const r = await runAgent(planMessage(String(parsed.requirements ?? "")));
+            const r = await runAgent(planMessage(String(parsed.requirements ?? "")), model);
             const d = (r.data ?? {}) as { ok?: boolean; summary?: string };
             const ok = r.ok && d.ok !== false;
             json(res, ok ? 200 : 500, {
@@ -970,15 +1240,49 @@ function ranaStudyMiddleware(): Plugin {
             });
             return;
           }
-          const s = readSchedule();
-          const courseId = String(parsed.courseId ?? "");
-          const course = s.courses.find((c) => c.id === courseId);
-          if (!course) {
-            json(res, 400, { error: `课程不存在：${courseId || "(空id)"}` });
-            return;
-          }
+
           if (route === "/quiz-gen") {
-            const r = await runAgent(quizGenMessage(course, s, String(parsed.requirements ?? "")));
+            const s = readSchedule();
+            // 三种出题：错题重考 > 期末考 > 普通课程
+            if (Array.isArray(parsed.mistakeIds) && parsed.mistakeIds.length) {
+              const mistakes = s.mistakes.filter(
+                (m) => !m.resolvedAt && (parsed.mistakeIds as string[]).includes(m.id),
+              );
+              if (!mistakes.length) {
+                json(res, 400, { error: "这些错题不存在或都已销账" });
+                return;
+              }
+              const r = await runAgent(drillMessage(mistakes), model);
+              const questions = (r.data ?? {}).questions;
+              if (!r.ok || !Array.isArray(questions) || !questions.length) {
+                json(res, 500, { ok: false, error: "她没按契约出题：" + (r.error ?? (r.reply ?? "").slice(0, 200)) });
+                return;
+              }
+              json(res, 200, { ok: true, questions });
+              return;
+            }
+            if (parsed.final === true && typeof parsed.planId === "string") {
+              const plan = s.plans.find((p) => p.id === parsed.planId);
+              if (!plan) {
+                json(res, 400, { error: `计划不存在：${parsed.planId}` });
+                return;
+              }
+              const r = await runAgent(finalMessage(plan, s), model);
+              const questions = (r.data ?? {}).questions;
+              if (!r.ok || !Array.isArray(questions) || !questions.length) {
+                json(res, 500, { ok: false, error: "她没按契约出期末考卷：" + (r.error ?? (r.reply ?? "").slice(0, 200)) });
+                return;
+              }
+              json(res, 200, { ok: true, questions });
+              return;
+            }
+            const courseId = String(parsed.courseId ?? "");
+            const course = s.courses.find((c) => c.id === courseId);
+            if (!course) {
+              json(res, 400, { error: `课程不存在：${courseId || "(空id)"}` });
+              return;
+            }
+            const r = await runAgent(quizGenMessage(course, s, String(parsed.requirements ?? "")), model);
             const questions = (r.data ?? {}).questions;
             if (!r.ok || !Array.isArray(questions) || !questions.length) {
               json(res, 500, { ok: false, error: "她没按契约出题：" + (r.error ?? (r.reply ?? "").slice(0, 200)) });
@@ -987,16 +1291,56 @@ function ranaStudyMiddleware(): Plugin {
             json(res, 200, { ok: true, questions });
             return;
           }
-          // quiz-grade：她判分，中间件写回课程表
-          const r = await runAgent(quizGradeMessage(course, s, parsed.questions, parsed.answers));
-          const d = (r.data ?? {}) as { score?: number; comment?: string; verdicts?: unknown };
-          if (!r.ok || typeof d.score !== "number") {
+
+          // quiz-grade：课程 / 错题重考 / 期末考三种
+          const s = readSchedule();
+          const questions = Array.isArray(parsed.questions) ? (parsed.questions as Array<Record<string, unknown>>) : [];
+          const answers = Array.isArray(parsed.answers) ? (parsed.answers as Array<{ idx: number; answer: string }>) : [];
+          let courseTitle = "测验";
+          let matText = "（无资料）";
+          let hint = "判分由页面写回课程表，你不要动 schedule.json。";
+
+          const courseId = typeof parsed.courseId === "string" ? parsed.courseId : "";
+          const course = courseId ? s.courses.find((c) => c.id === courseId) : undefined;
+          if (course) {
+            courseTitle = `课程「${course.title}」的测验`;
+            matText = `关联资料（判定有疑问时可 read 核对）：\n${courseMats(course, s)}`;
+          } else if (parsed.drill === true) {
+            courseTitle = "错题重考";
+            hint = "这是错题重考：逐题判定。页面会按你的 verdict 把 targetMistake 对应的错题销账（全对才销），你不要动 schedule.json。";
+          } else if (typeof parsed.forPlanId === "string") {
+            const plan = s.plans.find((p) => p.id === parsed.forPlanId);
+            courseTitle = `计划「${plan?.name ?? parsed.forPlanId}」的期末考`;
+            hint = "这是期末考：判分严格一点，总评按整个计划的学习质量给。成绩由页面写回计划，你不要动 schedule.json。";
+          }
+
+          const r = await runAgent(quizGradeMessage(courseTitle, matText, questions, answers, hint), model);
+          const d = (r.data ?? {}) as { score?: number; comment?: string; verdicts?: Array<{ idx: number; correct: boolean | string; review?: string }> };
+          if (!r.ok || typeof d.score !== "number" || !Array.isArray(d.verdicts)) {
             json(res, 500, { ok: false, error: "她没按契约判分：" + (r.error ?? (r.reply ?? "").slice(0, 200)) });
             return;
           }
-          course.quiz = { status: "done", score: d.score, comment: d.comment ?? "", at: Date.now() };
+
+          // 错题回收（三种模式都收）
+          const added = collectMistakes(s, course?.title ?? courseTitle, course?.id, questions as Array<{ idx: number; q: string }>, answers, d.verdicts);
+
+          if (course) {
+            course.quiz = { status: "done", score: d.score, comment: d.comment ?? "", at: Date.now() };
+          } else if (parsed.drill === true) {
+            // 错题重考销账：题目标了 targetMistake 且判全对 → 该错题 resolved
+            for (const q of questions as Array<{ idx: number; targetMistake?: string }>) {
+              const v = d.verdicts.find((x) => x.idx === q.idx);
+              if (v?.correct === true && q.targetMistake) {
+                const m = s.mistakes.find((x) => x.id === q.targetMistake && !x.resolvedAt);
+                if (m) m.resolvedAt = Date.now();
+              }
+            }
+          } else if (typeof parsed.forPlanId === "string") {
+            const plan = s.plans.find((p) => p.id === parsed.forPlanId);
+            if (plan) plan.lastFinal = { score: d.score, comment: d.comment ?? "", at: Date.now() };
+          }
           writeSchedule(s);
-          json(res, 200, { ok: true, verdict: d, schedule: s });
+          json(res, 200, { ok: true, verdict: d, mistakesAdded: added.length, schedule: s });
         })
         .catch((e: Error) => {
           json(res, 500, { error: e.message });

@@ -1,7 +1,8 @@
 // 学习计划桥接脚本：把页面发起的请求（排课 / 出题 / 判分）送进 Rana 的专用会话，
 // 等她干完活，把最终回复连同其中最后一个 ```json 结果块打印到 stdout（一行 JSON）。
 // 由 vite.config.ts 的 /__rana/study/* 中间件以子进程方式调用：
-//   node study-agent.mjs --message "完整指令文本"
+//   node study-agent.mjs --message "完整指令文本" [--model "模型id"]
+// --model：可选，指定这轮用哪个模型（sessions.patch 到专用会话，粘性生效）。
 // 输出契约：{ok:true, reply:"她的最终回复", data:{解析出的json} | null} 或 {ok:false, error:"原因"}
 import WebSocket from "ws";
 import { generateKeyPairSync, sign as cryptoSign, createHash } from "node:crypto";
@@ -14,8 +15,10 @@ const WAIT_FINAL_MS = 165000; // 等 final 的上限（中间件 execFile 超时
 
 const argv = process.argv.slice(2);
 let message = "";
+let wantModel = "";
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--message") message = argv[i + 1] ?? "";
+  if (argv[i] === "--model") wantModel = argv[i + 1] ?? "";
 }
 if (!message) {
   console.log(JSON.stringify({ ok: false, error: "缺少 --message 参数" }));
@@ -153,7 +156,12 @@ try {
   } catch { /* list 失败不致命，下面直接试创建 */ }
   if (!sessionKey) {
     try {
-      const created = await request("sessions.create", { key: SESSION_KEY, agentId: "main", label: SESSION_LABEL });
+      const created = await request("sessions.create", {
+        key: SESSION_KEY,
+        agentId: "main",
+        label: SESSION_LABEL,
+        ...(wantModel ? { model: wantModel } : {}), // 创建时直接带上模型
+      });
       sessionKey = created.key ?? SESSION_KEY;
     } catch (e) {
       // 已存在等并发情形：再 list 一次兜底
@@ -162,6 +170,12 @@ try {
       if (!hit) throw e;
       sessionKey = hit.key;
     }
+  }
+  // 会话已存在时要换模型：patch 一下（失败不致命，用当前模型继续干）
+  if (wantModel && sessionKey) {
+    try {
+      await request("sessions.patch", { key: sessionKey, model: wantModel });
+    } catch { /* 模型切不动就用会话现有模型继续 */ }
   }
 
   // 3) 发消息，等她的最终回复

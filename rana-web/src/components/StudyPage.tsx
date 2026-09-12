@@ -1,10 +1,17 @@
-// 学习计划页：真实日期的月历课程表（不是循环课）。数据在 rana-web/.study/schedule.json，
-// 页面走 /__rana/study* 接口；Rana 通过 study-planner/study-quiz skill 直接改同一份文件，
-// 页面手动改动 POST /save（只提交 courses，资料登记由上传/删除接口管）。
-// 顺延规则：标"没完成"→ 从明天起找第一个没有任何课的日期挪过去，其他课不动。
+// 学习计划页 v2：真实日期的月历课程表（不是循环课）。数据在 rana-web/.study/schedule.json，
+// 页面走 /__rana/study* 接口；Rana 通过 study-planner/study-quiz skill 直接改同一份文件。
+// v2 新增：多计划并行、错题本（判分自动回收/重考销账）、连续打卡与里程碑评语、学习契约、
+// 周报展示、期末考、复习课展示、课程依赖（等前置）、负荷视图、"今天不想学"一键顺延。
 import { useCallback, useEffect, useMemo, useState } from "react";
-import StudyQuiz from "./StudyQuiz";
+import StudyQuiz, { type QuizMode } from "./StudyQuiz";
 import { getNotifyPref, setNotifyPref, requestNotifyPermission, notifyPermission } from "../lib/studyNotify";
+import { gateway } from "../lib/gateway";
+import { useAppStore } from "../store/useAppStore";
+import { modelSuffix } from "../lib/types";
+
+/** 排课/出题/判分共用的专用会话 key（study-agent.mjs 里的 SESSION_KEY 同款） */
+const STUDY_SESSION_KEY = "agent:main:study-planner";
+const MODEL_PREF_KEY = "study.model.v1";
 
 export interface StudyCourse {
   id: string;
@@ -13,9 +20,16 @@ export interface StudyCourse {
   timeStart?: string;
   timeEnd?: string;
   status: "planned" | "done";
+  kind?: "lesson" | "review";
+  reviewOf?: string;
+  reviewGap?: number;
+  planId?: string;
+  dependsOn?: string[];
+  estMin?: number;
   materialIds?: string[];
   note?: string;
   postponedCount?: number;
+  doneAt?: number;
   quiz?: { status: "none" | "pending" | "done"; score?: number; comment?: string; at?: number };
 }
 export interface StudyMaterial {
@@ -25,13 +39,42 @@ export interface StudyMaterial {
   size: number;
   addedAt: number;
 }
+export interface StudyPlan {
+  id: string;
+  name: string;
+  createdAt: number;
+  lastFinal?: { score: number; comment: string; at: number };
+}
+export interface StudyMistake {
+  id: string;
+  courseId?: string;
+  courseTitle: string;
+  q: string;
+  myAnswer: string;
+  review?: string;
+  addedAt: number;
+  resolvedAt?: number;
+}
+export interface StudyReport {
+  id: string;
+  kind: "weekly";
+  title: string;
+  text: string;
+  at: number;
+}
 interface Schedule {
   version: number;
+  plans: StudyPlan[];
   courses: StudyCourse[];
   materials: StudyMaterial[];
+  mistakes: StudyMistake[];
+  reports: StudyReport[];
+  streak: { days: number; best: number; lastDay: string; comment?: string; commentDay?: string };
+  contract?: { text: string; updatedAt: number };
   updatedAt: number;
 }
 
+const DEFAULT_PLAN = "p-default";
 const pad2 = (n: number) => String(n).padStart(2, "0");
 const dateStr = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 const todayStr = () => dateStr(new Date());
@@ -58,7 +101,7 @@ function monthCells(y: number, m: number): Array<{ date: string; inMonth: boolea
   return cells;
 }
 
-/** 从 from 的第二天起，找第一个当天没有任何课的日期 */
+/** 从 from 的第二天起，找第一个当天没有任何课的日期（跨计划一起算，避免撞车） */
 function nextFreeDate(courses: StudyCourse[], from: string): string {
   const taken = new Set(courses.map((c) => c.date));
   let d = addDays(from, 1);
@@ -69,7 +112,15 @@ function nextFreeDate(courses: StudyCourse[], from: string): string {
   return d;
 }
 
+/** 负荷：一天的课程数与预估总时长；重了（>3节 或 >180分钟）算超载 */
+function dayLoad(courses: StudyCourse[]): { count: number; minutes: number; heavy: boolean } {
+  const minutes = courses.reduce((n, c) => n + (c.estMin ?? 0), 0);
+  const heavy = courses.length > 3 || minutes > 180;
+  return { count: courses.length, minutes, heavy };
+}
+
 const WEEK = ["一", "二", "三", "四", "五", "六", "日"];
+const fmtMin = (m: number) => (m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? `${m % 60}m` : ""}` : `${m}m`);
 
 export default function StudyPage() {
   const [sched, setSched] = useState<Schedule | null>(null);
@@ -80,43 +131,62 @@ export default function StudyPage() {
     return { y: d.getFullYear(), m: d.getMonth() + 1 };
   });
   const [selDate, setSelDate] = useState(todayStr());
-  const [quizId, setQuizId] = useState<string | null>(null);
+  const [quizMode, setQuizMode] = useState<QuizMode | null>(null);
+  // 计划
+  const [planId, setPlanId] = useState(DEFAULT_PLAN);
+  const [newPlan, setNewPlan] = useState("");
   // 手动加课表单
   const [addOpen, setAddOpen] = useState(false);
-  const [addForm, setAddForm] = useState({ title: "", date: todayStr(), timeStart: "", timeEnd: "", note: "" });
+  const [addForm, setAddForm] = useState({ title: "", date: todayStr(), timeStart: "", timeEnd: "", note: "", estMin: "" });
   const [addMats, setAddMats] = useState<string[]>([]);
+  const [addDep, setAddDep] = useState("");
   // 资料上传 + 排课
   const [uploading, setUploading] = useState(false);
   const [planReq, setPlanReq] = useState("");
   const [planning, setPlanning] = useState(false);
   const [planMsg, setPlanMsg] = useState("");
+  // 契约
+  const [contractText, setContractText] = useState<string | null>(null);
+  const [lazyDay, setLazyDay] = useState("");
+  // 到点弹窗提醒开关
+  const [, setNotifyVersion] = useState(0);
+  // 排课/出题用的模型（""=跟随专用会话当前模型；选择存 localStorage，会话已存在时立即热切）
+  const [pickModel, setPickModel] = useState(() => {
+    try {
+      return localStorage.getItem(MODEL_PREF_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  });
+  const models = useAppStore((s) => s.models);
+  const sessions = useAppStore((s) => s.sessions);
+  const studySession = sessions.find((s) => s.key === STUDY_SESSION_KEY);
+  const modelGroups = useMemo(() => {
+    const g = new Map<string, typeof models>();
+    for (const m of models) {
+      const k = m.provider ?? "其他";
+      g.set(k, [...(g.get(k) ?? []), m]);
+    }
+    return [...g.entries()];
+  }, [models]);
+  const changeModel = (id: string) => {
+    setPickModel(id);
+    try {
+      localStorage.setItem(MODEL_PREF_KEY, id);
+    } catch { /* 存不进就算了 */ }
+    // 会话已在：立即切，侧栏和这里同步显示；还没建会话：下次排课时生效
+    if (id && studySession) void gateway.setModel(STUDY_SESSION_KEY, id).catch(() => {});
+  };
   // "现在该学什么"每分钟刷新一次
   const [, setTick] = useState(0);
-
-  // 到点弹窗提醒开关（点一次重算一次状态）
-  const [, setNotifyVersion] = useState(0);
-  const notifyOn = getNotifyPref() && notifyPermission() === "granted";
-  const toggleNotify = async () => {
-    if (notifyOn) {
-      setNotifyPref(false);
-    } else {
-      const perm = await requestNotifyPermission();
-      if (perm === "granted") setNotifyPref(true);
-      else
-        setError(
-          perm === "unsupported"
-            ? "这个浏览器不支持通知。"
-            : "浏览器没给通知权限：地址栏左侧的锁/ⓘ 图标里把通知设为允许，再回来打开。",
-        );
-    }
-    setNotifyVersion((v) => v + 1);
-  };
 
   const load = useCallback(async () => {
     try {
       const r = await fetch("/__rana/study");
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      setSched((await r.json()) as Schedule);
+      const j = (await r.json()) as Schedule;
+      setSched(j);
+      setContractText((prev) => (prev === null || prev === j.contract?.text ? j.contract?.text ?? "" : prev));
       setError("");
     } catch (e) {
       setError((e as Error).message);
@@ -131,24 +201,33 @@ export default function StudyPage() {
 
   const courses = sched?.courses ?? [];
   const materials = sched?.materials ?? [];
+  const plans = sched?.plans ?? [];
+  const mistakes = sched?.mistakes ?? [];
+  const openMistakes = useMemo(() => mistakes.filter((m) => !m.resolvedAt), [mistakes]);
+  const latestReport = useMemo(() => [...(sched?.reports ?? [])].sort((a, b) => b.at - a.at)[0], [sched?.reports]);
 
-  const saveCourses = useCallback(
-    async (next: StudyCourse[]) => {
+  /** 通用保存：courses / plans / contract 任意组合 */
+  const save = useCallback(
+    async (patch: { courses?: StudyCourse[]; plans?: StudyPlan[]; contract?: { text: string } }) => {
       setSaving(true);
       setError("");
-      setSched((s) => (s ? { ...s, courses: next } : s)); // 先改本地，失败再回滚重载
+      if (patch.courses) setSched((s) => (s ? { ...s, courses: patch.courses! } : s));
+      if (patch.plans) setSched((s) => (s ? { ...s, plans: patch.plans! } : s));
       try {
         const r = await fetch("/__rana/study/save", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ courses: next }),
+          body: JSON.stringify(patch),
         });
-        const j = (await r.json()) as { ok?: boolean; error?: string; updatedAt?: number };
+        const j = (await r.json()) as { ok?: boolean; error?: string; streak?: Schedule["streak"] };
         if (!r.ok || !j.ok) throw new Error(j.error ?? `HTTP ${r.status}`);
-        if (j.updatedAt) setSched((s) => (s ? { ...s, updatedAt: j.updatedAt! } : s));
+        // 服务端可能补了 doneAt/复习课/打卡，重新拉一遍真数据
+        await load();
+        return true;
       } catch (e) {
         setError(`保存失败：${(e as Error).message}`);
-        void load();
+        await load();
+        return false;
       } finally {
         setSaving(false);
       }
@@ -156,10 +235,15 @@ export default function StudyPage() {
     [load],
   );
 
-  const setCourse = (id: string, patch: Partial<StudyCourse>) =>
-    void saveCourses(courses.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  const planCourses = useMemo(
+    () => courses.filter((c) => (c.planId ?? DEFAULT_PLAN) === planId),
+    [courses, planId],
+  );
 
-  const markDone = (c: StudyCourse) => setCourse(c.id, { status: "done", quiz: { status: "pending" } });
+  const setCourse = (id: string, patch: Partial<StudyCourse>) =>
+    void save({ courses: courses.map((c) => (c.id === id ? { ...c, ...patch } : c)) });
+
+  const markDone = (c: StudyCourse) => void save({ courses: courses.map((x) => (x.id === c.id ? { ...x, status: "done" as const, quiz: { status: "pending" as const } } : x)) });
   const postpone = (c: StudyCourse) => {
     const d = nextFreeDate(courses, todayStr());
     setCourse(c.id, { date: d, postponedCount: (c.postponedCount ?? 0) + 1 });
@@ -167,7 +251,25 @@ export default function StudyPage() {
   };
   const delCourse = (c: StudyCourse) => {
     if (!window.confirm(`删掉「${c.title}」？删了就没了。`)) return;
-    void saveCourses(courses.filter((x) => x.id !== c.id));
+    void save({ courses: courses.filter((x) => x.id !== c.id) });
+  };
+
+  /** "今天不想学"：今天的课（当前计划）逐节顺延到空位（后面的课排队往后找） */
+  const lazyToday = () => {
+    const t = todayStr();
+    const todayPlanned = planCourses.filter((c) => c.status === "planned" && c.date === t);
+    if (!todayPlanned.length) {
+      setLazyDay("今天本来就没课。");
+      return;
+    }
+    if (!window.confirm(`把今天的 ${todayPlanned.length} 节课全部顺延？她会记着的。`)) return;
+    let next = [...courses];
+    for (const c of todayPlanned) {
+      const d = nextFreeDate(next, t);
+      next = next.map((x) => (x.id === c.id ? { ...x, date: d, postponedCount: (x.postponedCount ?? 0) + 1 } : x));
+    }
+    void save({ courses: next });
+    setLazyDay(`……偷懒。${todayPlanned.length} 节课挪到后面了。`);
   };
 
   const addCourse = () => {
@@ -181,16 +283,38 @@ export default function StudyPage() {
       title,
       date: addForm.date,
       status: "planned",
+      kind: "lesson",
+      planId,
       quiz: { status: "none" },
       ...(addForm.timeStart ? { timeStart: addForm.timeStart } : {}),
       ...(addForm.timeEnd ? { timeEnd: addForm.timeEnd } : {}),
+      ...(addForm.estMin && Number(addForm.estMin) > 0 ? { estMin: Math.round(Number(addForm.estMin)) } : {}),
+      ...(addDep ? { dependsOn: [addDep] } : {}),
       ...(addMats.length ? { materialIds: [...addMats] } : {}),
       ...(addForm.note.trim() ? { note: addForm.note.trim() } : {}),
     };
-    void saveCourses([...courses, c]);
+    void save({ courses: [...courses, c] });
     setSelDate(addForm.date);
-    setAddForm({ title: "", date: addForm.date, timeStart: "", timeEnd: "", note: "" });
+    setAddForm({ title: "", date: addForm.date, timeStart: "", timeEnd: "", note: "", estMin: "" });
     setAddMats([]);
+    setAddDep("");
+  };
+
+  const addPlan = () => {
+    const name = newPlan.trim();
+    if (!name) return;
+    const p: StudyPlan = { id: `p-${Date.now().toString(36)}`, name, createdAt: Date.now() };
+    void save({ plans: [...plans, p] }).then(() => setPlanId(p.id));
+    setNewPlan("");
+  };
+  const delPlan = (p: StudyPlan) => {
+    if (courses.some((c) => (c.planId ?? DEFAULT_PLAN) === p.id)) {
+      setError(`计划「${p.name}」里还有课，删课之后才能删计划。`);
+      return;
+    }
+    if (!window.confirm(`删掉计划「${p.name}」？`)) return;
+    void save({ plans: plans.filter((x) => x.id !== p.id) });
+    setPlanId(DEFAULT_PLAN);
   };
 
   const upload = async (file: File) => {
@@ -232,7 +356,7 @@ export default function StudyPage() {
       const r = await fetch("/__rana/study/plan", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ requirements: planReq }),
+        body: JSON.stringify({ requirements: planReq, ...(pickModel ? { model: pickModel } : {}) }),
       });
       const j = (await r.json()) as { ok?: boolean; summary?: string; error?: string };
       setPlanMsg(j.ok ? j.summary ?? "排好了。" : j.error ?? j.summary ?? "她没排成，看下面错误。");
@@ -245,33 +369,57 @@ export default function StudyPage() {
     }
   };
 
+  // ---- 到点弹窗开关 ----
+  const notifyOn = getNotifyPref() && notifyPermission() === "granted";
+  const toggleNotify = async () => {
+    if (notifyOn) {
+      setNotifyPref(false);
+    } else {
+      const perm = await requestNotifyPermission();
+      if (perm === "granted") setNotifyPref(true);
+      else
+        setError(
+          perm === "unsupported"
+            ? "这个浏览器不支持通知。"
+            : "浏览器没给通知权限：地址栏左侧的锁/ⓘ 图标里把通知设为允许，再回来打开。",
+        );
+    }
+    setNotifyVersion((v) => v + 1);
+  };
+
   // ---- 派生数据 ----
   const byDate = useMemo(() => {
     const map = new Map<string, StudyCourse[]>();
-    for (const c of courses) {
+    for (const c of planCourses) {
       const list = map.get(c.date) ?? [];
       list.push(c);
       map.set(c.date, list);
     }
     for (const list of map.values()) list.sort(byDateTime);
     return map;
-  }, [courses]);
+  }, [planCourses]);
+
+  const doneIds = useMemo(() => new Set(planCourses.filter((c) => c.status === "done").map((c) => c.id)), [planCourses]);
+  /** 前置课没全完成的课（等前置） */
+  const blockedOf = (c: StudyCourse) => (c.dependsOn ?? []).filter((id) => !doneIds.has(id));
 
   const t = todayStr();
   const hm = nowHM();
   const todays = byDate.get(t) ?? [];
   const plannedToday = todays.filter((c) => c.status === "planned");
-  const overdue = courses.filter((c) => c.status === "planned" && c.date < t);
-  const doneCount = courses.filter((c) => c.status === "done").length;
+  const overdue = planCourses.filter((c) => c.status === "planned" && c.date < t);
+  const doneCount = planCourses.filter((c) => c.status === "done").length;
   const nowCourse =
     plannedToday.find((c) => c.timeStart && c.timeEnd && c.timeStart <= hm && hm <= c.timeEnd) ??
     plannedToday.find((c) => c.timeStart && !c.timeEnd && c.timeStart <= hm) ??
     plannedToday.find((c) => !c.timeStart);
-  const nextCourse = courses
+  const nextCourse = planCourses
     .filter((c) => c.status === "planned" && (c.date > t || (c.date === t && c.timeStart && c.timeStart > hm)))
     .sort(byDateTime)[0];
   const selCourses = byDate.get(selDate) ?? [];
   const matName = (id: string) => materials.find((m) => m.id === id)?.name ?? id;
+  const streak = sched?.streak ?? { days: 0, best: 0, lastDay: "" };
+  const curPlan = plans.find((p) => p.id === planId);
 
   const shiftMonth = (delta: number) => {
     setCursor(({ y, m }) => {
@@ -286,10 +434,55 @@ export default function StudyPage() {
         <div className="page-intro">
           <h2>学习计划</h2>
           <p>
-            真实日期的课程表 · 没完成的课自动顺延到下一个空位 · 学完点「出题测验」，她出题她判分
+            真实日期的课程表 · 没完成的课自动顺延 · 学完出题判分 · 错题自动收进错题本
             {saving && " · 保存中…"}
             {error && <span className="sys-err">（{error}）</span>}
           </p>
+        </div>
+
+        {/* 计划条：多计划并行 + 打卡 + 期末考 */}
+        <div className="study-planbar">
+          <div className="plan-chips">
+            {plans.map((p) => {
+              const n = courses.filter((c) => (c.planId ?? DEFAULT_PLAN) === p.id).length;
+              return (
+                <span key={p.id} className={`plan-chip${p.id === planId ? " on" : ""}`}>
+                  <button type="button" className="pc-btn" onClick={() => setPlanId(p.id)}>
+                    {p.name} <i>{n}</i>
+                  </button>
+                  {p.id !== DEFAULT_PLAN && n === 0 && (
+                    <button type="button" className="pc-del" title="删掉空计划" onClick={() => delPlan(p)}>
+                      ✕
+                    </button>
+                  )}
+                </span>
+              );
+            })}
+            <span className="plan-chip add">
+              <input
+                className="pc-input"
+                placeholder="新计划名…"
+                value={newPlan}
+                onChange={(e) => setNewPlan(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addPlan()}
+              />
+              <button type="button" className="pc-btn" onClick={addPlan} title="新增并行计划">
+                ＋
+              </button>
+            </span>
+          </div>
+          <div className="plan-right">
+            <span className="chip green" title={`历史最长 ${streak.best} 天`}>
+              🔥 连续打卡 {streak.days} 天
+            </span>
+            <button
+              className="btn ghost sm"
+              onClick={() => setQuizMode({ kind: "final", planId, title: curPlan?.name ?? "期末考" })}
+              title="综合整个计划的资料出一张 10 题大卷"
+            >
+              🎓 期末考{curPlan?.lastFinal ? `（上次 ${curPlan.lastFinal.score} 分）` : ""}
+            </button>
+          </div>
         </div>
 
         {/* 现在该学什么 */}
@@ -307,14 +500,23 @@ export default function StudyPage() {
                 <b>现在没安排{nextCourse ? `，下一节 ${nextCourse.date} ${nextCourse.timeStart ?? ""}` : ""}</b>
               )}
             </div>
+            <button className="btn ghost sm" onClick={lazyToday} title="把今天（当前计划）没学的课全部顺延到后面的空位">
+              😴 今天不想学
+            </button>
             <button
               className={`btn ghost sm${notifyOn ? " notify-on" : ""}`}
               onClick={() => void toggleNotify()}
               title="到点的课弹一条浏览器通知（只提醒设了时段的课；网页开着才有效）"
             >
-              {notifyOn ? "🔔 到点弹窗：开" : "🔔 到点弹窗：关"}
+              {notifyOn ? "🔔 弹窗：开" : "🔔 弹窗：关"}
             </button>
           </div>
+          {lazyDay && <p className="plan-result">{lazyDay}</p>}
+          {streak.comment && streak.commentDay === t && (
+            <p className="plan-result" title={`连续 ${streak.days} 天`}>
+              「{streak.comment}」
+            </p>
+          )}
           <div className="st-grid">
             <div className="st-cell">
               <div className="k">接下来</div>
@@ -333,14 +535,14 @@ export default function StudyPage() {
             <div className="st-cell">
               <div className="k">进度</div>
               <div className="v">
-                {doneCount}/{courses.length} <small>学完</small>
+                {doneCount}/{planCourses.length} <small>学完</small>
               </div>
             </div>
           </div>
         </div>
 
         <div className="study-layout">
-          {/* 月历 */}
+          {/* 月历（含负荷视图） */}
           <div className="card study-cal">
             <div className="cal-nav">
               <button className="btn ghost sm" onClick={() => shiftMonth(-1)}>
@@ -373,6 +575,7 @@ export default function StudyPage() {
             <div className="cal-grid">
               {monthCells(cursor.y, cursor.m).map((cell) => {
                 const cs = byDate.get(cell.date) ?? [];
+                const load = dayLoad(cs);
                 const hasLate = cs.some((c) => c.status === "planned" && cell.date < t);
                 const show = cs.slice(0, 2);
                 return (
@@ -384,6 +587,7 @@ export default function StudyPage() {
                       cell.inMonth ? "" : "other",
                       cell.date === t ? "today" : "",
                       cell.date === selDate ? "sel" : "",
+                      load.heavy ? "heavy" : "",
                     ]
                       .filter(Boolean)
                       .join(" ")}
@@ -392,6 +596,7 @@ export default function StudyPage() {
                     <span className="cd">
                       {Number(cell.date.slice(8))}
                       {hasLate && <i className="late-dot" title="有逾期未完成的课" />}
+                      {load.count > 0 && load.minutes > 0 && <i className="load-min">≈{fmtMin(load.minutes)}</i>}
                     </span>
                     {show.map((c) => (
                       <span
@@ -407,6 +612,7 @@ export default function StudyPage() {
                 );
               })}
             </div>
+            <p className="cal-legend">格子右上 ≈ 时长是当天预估总负荷；偏红 = 超载（多于 3 节或超过 3 小时），找她重排吧。</p>
           </div>
 
           <div className="study-side">
@@ -420,16 +626,24 @@ export default function StudyPage() {
               </h3>
               {selCourses.map((c) => {
                 const late = c.status === "planned" && c.date < t;
+                const blocked = blockedOf(c);
                 const mats = (c.materialIds ?? []).filter((id) => materials.some((m) => m.id === id));
                 return (
                   <article key={c.id} className={`course-card ${c.status}${late ? " late" : ""}`}>
                     <div className="cc-head">
                       <b>{c.title}</b>
                       <span className="chip">{c.timeStart ? `${c.timeStart}${c.timeEnd ? `~${c.timeEnd}` : ""}` : "全天可学"}</span>
+                      {c.kind === "review" && <span className="chip">🔁 复习+{c.reviewGap}天</span>}
+                      {c.estMin ? <span className="chip">≈{c.estMin}分钟</span> : null}
                       {c.status === "done" && <span className="chip green">✓ 学完</span>}
                       {late && <span className="chip warn">逾期</span>}
                       {(c.postponedCount ?? 0) > 0 && <span className="chip">顺延×{c.postponedCount}</span>}
                     </div>
+                    {blocked.length > 0 && (
+                      <p className="cc-block">
+                        ⛔ 等前置：{blocked.map((id) => courses.find((x) => x.id === id)?.title ?? id).join("、")}
+                      </p>
+                    )}
                     {c.note && <p className="cc-note">{c.note}</p>}
                     {mats.length > 0 && (
                       <div className="cc-mats">
@@ -448,7 +662,12 @@ export default function StudyPage() {
                     <div className="cc-acts">
                       {c.status === "planned" && (
                         <>
-                          <button className="btn sm" onClick={() => markDone(c)}>
+                          <button
+                            className="btn sm"
+                            onClick={() => markDone(c)}
+                            disabled={blocked.length > 0}
+                            title={blocked.length ? "前置课没完成，先学前置" : "标记学完，自动安排复习课"}
+                          >
                             ✅ 学完了
                           </button>
                           <button className="btn ghost sm" onClick={() => postpone(c)} title={`顺延到 ${nextFreeDate(courses, t)}`}>
@@ -457,8 +676,11 @@ export default function StudyPage() {
                         </>
                       )}
                       {c.status === "done" && c.quiz?.status !== "done" && (
-                        <button className="btn sm" onClick={() => setQuizId(quizId === c.id ? null : c.id)}>
-                          📝 {c.quiz?.status === "pending" ? "出题测验" : "再考一次"}
+                        <button
+                          className="btn sm"
+                          onClick={() => setQuizMode(quizMode?.kind === "course" && quizMode.courseId === c.id ? null : { kind: "course", courseId: c.id, title: c.title })}
+                        >
+                          📝 {c.quiz?.status === "pending" ? (c.kind === "review" ? "复习测验" : "出题测验") : "再考一次"}
                         </button>
                       )}
                       <label className="cc-date">
@@ -473,8 +695,8 @@ export default function StudyPage() {
                         🗑
                       </button>
                     </div>
-                    {quizId === c.id && (
-                      <StudyQuiz courseId={c.id} onClose={() => setQuizId(null)} onGraded={() => void load()} />
+                    {quizMode?.kind === "course" && quizMode.courseId === c.id && (
+                      <StudyQuiz mode={quizMode} model={pickModel || undefined} onClose={() => setQuizMode(null)} onGraded={() => void load()} />
                     )}
                   </article>
                 );
@@ -520,6 +742,32 @@ export default function StudyPage() {
                       onChange={(e) => setAddForm({ ...addForm, timeEnd: e.target.value })}
                     />
                   </div>
+                  <div className="sf-row">
+                    <input
+                      className="set-input"
+                      type="number"
+                      min={5}
+                      max={600}
+                      placeholder="预计几分钟（可选）"
+                      value={addForm.estMin}
+                      onChange={(e) => setAddForm({ ...addForm, estMin: e.target.value })}
+                    />
+                    <select
+                      className="set-input"
+                      value={addDep}
+                      onChange={(e) => setAddDep(e.target.value)}
+                      title="这节课要等哪节课学完才能学（可选）"
+                    >
+                      <option value="">不等前置课</option>
+                      {planCourses
+                        .filter((c) => c.status === "planned")
+                        .map((c) => (
+                          <option key={c.id} value={c.id}>
+                            等前置：{c.title}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
                   <input
                     className="set-input"
                     placeholder="笔记（可选）：这节课要掌握什么"
@@ -550,6 +798,87 @@ export default function StudyPage() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+
+        {/* 期末考面板 */}
+        {quizMode?.kind === "final" && (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <h3>🎓 期末考 · {curPlan?.name}</h3>
+            <StudyQuiz mode={quizMode} model={pickModel || undefined} onClose={() => setQuizMode(null)} onGraded={() => void load()} />
+          </div>
+        )}
+
+        {/* 错题重考面板 */}
+        {quizMode?.kind === "drill" && (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <h3>🔁 错题重考</h3>
+            <StudyQuiz mode={quizMode} model={pickModel || undefined} onClose={() => setQuizMode(null)} onGraded={() => void load()} />
+          </div>
+        )}
+
+        {/* 错题本 */}
+        <div className="card study-mistakes" style={{ marginBottom: 16 }}>
+          <h3>
+            ❌ 错题本 <small>测验里答错/半对的题自动收进来，重考答对自动销账</small>
+          </h3>
+          {openMistakes.length === 0 ? (
+            <p className="pending-text">
+              {mistakes.length > 0 ? `没有未解决的错题（累计收过 ${mistakes.length} 道，都销账了）。` : "还没收过错题——考砸了才会有。"}
+            </p>
+          ) : (
+            <>
+              <div className="cc-acts" style={{ marginTop: 0, marginBottom: 10 }}>
+                <button
+                  className="btn sm"
+                  onClick={() => setQuizMode({ kind: "drill", mistakeIds: openMistakes.slice(0, 10).map((m) => m.id), title: `${openMistakes.length} 道错题` })}
+                >
+                  🔁 再考这些错题（{Math.min(openMistakes.length, 10)}）
+                </button>
+              </div>
+              {openMistakes.map((m) => (
+                <div key={m.id} className="mis-row">
+                  <div className="mis-q">{m.q}</div>
+                  <div className="mis-meta">
+                    <span>{m.courseTitle}</span>
+                    <span>你答过：{m.myAnswer || "（空）"}</span>
+                    {m.review && <span>她说：{m.review}</span>}
+                    <span>{new Date(m.addedAt).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+
+        {/* 契约 + 周报 双栏 */}
+        <div className="study-duo">
+          <div className="card study-contract">
+            <h3>🤝 学习契约 <small>立个约，她睡前小结和周报都会对照着说进度</small></h3>
+            <textarea
+              className="set-input"
+              style={{ minHeight: 64 }}
+              placeholder="例：本周学完机器学习入门全部课程，没完成周末不许碰游戏"
+              value={contractText ?? ""}
+              onChange={(e) => setContractText(e.target.value)}
+            />
+            <div className="cc-acts">
+              <button className="btn sm" onClick={() => void save({ contract: { text: contractText ?? "" } })}>
+                立约
+              </button>
+              <span className="tune-hint">在聊天里跟她说"立个约：…"也一样</span>
+            </div>
+          </div>
+          <div className="card study-report">
+            <h3>📋 学习周报 <small>每周日 21:00 她写一篇并推给你</small></h3>
+            {latestReport ? (
+              <>
+                <div className="rp-title">{latestReport.title}</div>
+                <p className="rp-text">{latestReport.text}</p>
+              </>
+            ) : (
+              <p className="pending-text">还没有周报，等第一个周日。</p>
+            )}
           </div>
         </div>
 
@@ -587,15 +916,34 @@ export default function StudyPage() {
 
           <div className="plan-box">
             <h3>
-              🗓 让 Rana 排课 <small>她读上面的资料，把课排进日历（每天几节、哪天休息，写清楚）</small>
+              🗓 让 Rana 排课 <small>她读上面的资料，把课排进日历（估时、超90分钟自动拆分、每天不超3节）</small>
             </h3>
             <textarea
               className="set-input plan-req"
-              placeholder="例：从明天开始，每天 2 节，晚上学，周日休息，10 月 1 号前学完"
+              placeholder="例：从明天开始，每天 2 节，晚上学，周日休息，10 月 1 号前学完，有依赖的课标前置"
               value={planReq}
               onChange={(e) => setPlanReq(e.target.value)}
             />
             <div className="cc-acts" style={{ marginTop: 8 }}>
+              <select
+                className="set-input study-model"
+                value={pickModel || studySession?.model || ""}
+                onChange={(e) => changeModel(e.target.value)}
+                title="排课/出题/判分用哪个脑子（作用于「📚 学习计划」专用会话，选完立即生效）"
+              >
+                <option value="">
+                  跟随会话{studySession?.model ? `（${modelSuffix(studySession.model)}）` : "（她的默认）"}
+                </option>
+                {modelGroups.map(([provider, items]) => (
+                  <optgroup key={provider} label={provider}>
+                    {items.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name || modelSuffix(m.id)}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
               <button className="btn" onClick={() => void runPlan()} disabled={planning}>
                 {planning ? "她在看资料排课……可能一两分钟" : "让Rana排课"}
               </button>
