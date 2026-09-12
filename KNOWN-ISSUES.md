@@ -246,3 +246,16 @@
 - 附带事故：网页保存模型条目时不填 name 就不写 name，runtime 校验 name 必填 → 整个 openclaw.json 被判 invalid（CLI 全挂）。已手工给 qwenanliang 补 name（备份 .bak-qwenanliang-fix）。
 - 解决方案（vite.config.ts）：①模型条目 name 一律兜底=id；②拉取三路分发——本机地址免 key 直连 / 明文 key 直连 / SecretRef 走 `openclaw models list --all --provider X --json` 运行时目录（**目录行的模型标识在 key 字段**（"provider/model"），不是 id；目录为空先 `models refresh`）；③providerId 与 baseUrl 合并取缺省。实测：本地 6 个、aliyun 8 个、glm 2 个、qwenanliang 明文 249 个，全通。
 - 教训：SecretRef 时代网页要做 provider 级操作，借运行时 CLI 是正路（它自己解析密钥库），别想着读明文。
+
+## [已解决] .env 方案：密钥库时代网页直连 provider 的正路（2026-09-12）
+
+- 需求：密钥被 doctor 迁进密钥库（只写）后，网页「从接口拉取」拿不到明文，只能走运行时目录（仅返回已配置模型）。
+- 方案：`rana-web/.env`（已 gitignore）可给 provider 配明文 key，键名 = provider id 转大写下划线 + `_API_KEY`（如 `BAILIAN_API_KEY=`）。中间件**每次现读 .env**（改完即生效，不用重启 vite；别用 loadEnv——它只在启动时读一次）。解析顺序：手填 key → 配置明文 → .env → SecretRef 走运行时目录。
+- 两个实现坑：①追加 .env 前确认文件以换行结尾，否则 key 会粘到上一行注释上（踩过）；②面板走 runtime 兜底时会提示去 .env 填 key 可拉全量。
+- 实测：bailian 配 .env 后直连拉到 249 个全量模型；aliyun 不配 .env 走运行时返回 8 个已配置模型。
+
+## [已解决] 记忆桥直读 apiKey 被 SecretRef 迁移打断 + glm 思考吃满 max_tokens（2026-09-14）
+
+- 症状：memory-bridge 的 main 侧提炼静默产出 0 条（不报错）；偶发群聊腿也 0 条。
+- 根因一：桥脚本直读 `openclaw.json` 的 `aliyun-maas.apiKey`，SecretRef 迁移后读到 `{source:"store",...}` 对象当 Bearer 用。根因二：glm-5.3-flash 是思考型模型，推理就花几百 token，`max_tokens:500` 时正文经常被挤空（finish_reason 还是 stop，更迷惑）。
+- 解决方案：`resolveApiKey()` 兼容 SecretRef（读 state SQLite 的 secret_store_entries 表）；云端提炼统一走 glm 且 `max_tokens:1500`；云端腿产出 0 条时把被拒原文写进 .bridge.log 排障。旁路脚本凡直读 apiKey 都要过 resolveApiKey 这关。

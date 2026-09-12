@@ -148,11 +148,15 @@ export default function CloudConfigModal() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ baseUrl: baseUrl.trim() || undefined, apiKey: apiKey.trim() || undefined, providerId: isNew ? undefined : selId }),
       });
-      const d = (await res.json()) as { ok?: boolean; models?: string[]; error?: string };
+      const d = (await res.json()) as { ok?: boolean; models?: string[]; source?: string; error?: string };
       if (!res.ok || !d.ok) throw new Error(d.error ?? "拉取失败");
       setFetched(d.models ?? []);
       setFetchPick({});
-      setMsg(`拉取到 ${(d.models ?? []).length} 个模型，勾选后点“添加勾选”`);
+      const envHint =
+        d.source === "runtime" && selId
+          ? `（密钥库托管，只含已配置模型；想拉全量目录：在 rana-web/.env 填 ${selId.toUpperCase().replace(/-/g, "_")}_API_KEY=明文）`
+          : "";
+      setMsg(`拉取到 ${(d.models ?? []).length} 个模型${envHint}，勾选后点“添加勾选”`);
     } catch (e) {
       setErr("拉取模型列表失败：" + (e as Error).message);
     } finally {

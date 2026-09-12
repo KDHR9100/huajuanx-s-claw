@@ -1,8 +1,66 @@
 // 玄学核心计算层：万年历/八字（lunar-javascript）、紫微斗数（iztro）、六爻铜钱摇卦。
 // 全部在浏览器本地计算，不联网；个人档案只在问卦时由中间件附加发给云端（用户已知情拍板）。
-import { Solar } from "lunar-javascript";
+import { Solar, LunarUtil } from "lunar-javascript";
 import { astro } from "iztro";
 import hexagrams from "./hexagrams.json";
+
+/** 任意干支的完整柱信息（流年列/大运列复用四柱同款口径） */
+const GANS = ["甲", "乙", "丙", "丁", "戊", "己", "庚", "辛", "壬", "癸"];
+const ZHIS = ["子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥"];
+/** 六十甲子纳音（每柱一行的两柱一组） */
+const NA_YIN = [
+  "海中金", "炉中火", "大林木", "路旁土", "剑锋金",
+  "山头火", "涧下水", "城头土", "白蜡金", "杨柳木",
+  "泉中水", "屋上土", "霹雳火", "松柏木", "长流水",
+  "沙中金", "山下火", "平地木", "壁上土", "金箔金",
+  "覆灯火", "天河水", "大驿土", "钗钏金", "桑柘木",
+  "大溪水", "沙中土", "天上火", "石榴木", "大海水",
+];
+
+/** 干支在六十甲子中的序号（0=甲子） */
+function gzIndex60(gz: string): number {
+  const g = GANS.indexOf(gz[0]);
+  const z = ZHIS.indexOf(gz[1]);
+  if (g < 0 || z < 0) return -1;
+  for (let k = 0; k < 6; k++) {
+    const n = g + 10 * k;
+    if (n % 12 === z) return n;
+  }
+  return -1;
+}
+
+export interface GzPillarInfo {
+  shiShenGan: string;
+  hideGan: string[];
+  hideShiShen: string[];
+  xingYun: string;
+  ziZuo: string;
+  xunKong: string;
+  xunShou: string;
+  naYin: string;
+}
+
+/** 从干支算全套柱信息：藏干（LunarUtil 同口径）、十神、星运/自坐、空亡、旬首、纳音 */
+export function gzPillarInfo(gz: string, dayMaster: string): GzPillarInfo {
+  const gan = gz[0];
+  const zhi = gz[1];
+  const hideGan: string[] = (LunarUtil.ZHI_HIDE_GAN as Record<string, string[]>)[zhi] ?? [];
+  const n = gzIndex60(gz);
+  const xunStart = n >= 0 ? n - (n % 10) : -1;
+  const xunKong = xunStart >= 0 ? ZHIS[(xunStart + 10) % 12] + ZHIS[(xunStart + 11) % 12] : "";
+  const xunShou = xunStart >= 0 ? `甲${ZHIS[xunStart % 12]}` : "";
+  const naYin = n >= 0 ? NA_YIN[Math.floor(n / 2)] : "";
+  return {
+    shiShenGan: ganShiShen(dayMaster, gan),
+    hideGan,
+    hideShiShen: hideGan.map((hg) => ganShiShen(dayMaster, hg)),
+    xingYun: stage12(dayMaster, zhi),
+    ziZuo: stage12(gan, zhi),
+    xunKong,
+    xunShou,
+    naYin,
+  };
+}
 
 export interface HexInfo {
   n: number;
@@ -290,6 +348,8 @@ export interface ZiweiResult {
   sign: string;
   lunarDate: string;
   chineseDate: string;
+  /** 今天的大限/流年盘（运限四化飞星、流曜、命宫落宫） */
+  yun: { decadal: YunScope | null; yearly: YunScope | null };
 }
 
 /** 紫微命盘：经典 4×4 布局（巳午未申/辰…酉/卯…戌/寅丑子亥，中间 2×2 放命主信息） */
@@ -312,6 +372,66 @@ export function sanFangSiZheng(zhi: string): { dui: string; san1: string; san2: 
   const i = ZHI_IDX[zhi] ?? 0;
   const at = (d: number) => Object.keys(ZHI_IDX).find((k) => ZHI_IDX[k] === ((i + d) % 12 + 12) % 12)!;
   return { dui: at(6), san1: at(4), san2: at(8) };
+}
+
+/** 某公历年的流年干支（年中取样避开立春边界） */
+export function yearGanZhi(y: number): string {
+  return String(Solar.fromYmd(y, 6, 30).getLunar().getYearInGanZhi());
+}
+
+/** 一段年份区间内每年的流年：干支 + 十神（年中取样避开立春边界）+ 是否今年 */
+export function liuNianOfRange(startYear: number, endYear: number, dayMaster: string): Array<{ year: number; gz: string; shiShen: string; now: boolean }> {
+  const thisYear = new Date().getFullYear();
+  const out: Array<{ year: number; gz: string; shiShen: string; now: boolean }> = [];
+  for (let y = startYear; y <= endYear && out.length < 12; y++) {
+    const gz = String(Solar.fromYmd(y, 6, 30).getLunar().getYearInGanZhi());
+    out.push({ year: y, gz, shiShen: ganShiShen(dayMaster, gz[0]), now: y === thisYear });
+  }
+  return out;
+}
+
+/** 大运/流年盘的运限数据（取某天的 horoscope） */
+export interface YunScope {
+  kind: "decadal" | "yearly";
+  label: string;
+  /** 运限命宫落在本命哪个地支宫 */
+  zhi: string;
+  gz: string;
+  /** 四化：禄权科忌四颗星的名字 */
+  mutagen: string[];
+  /** 运限四化星各自落在本命哪个宫（按地支） */
+  mutagenAt: Array<{ star: string; tag: string; zhi: string }>;
+  /** 每宫的流耀（运X/流X），按地支 */
+  flowStars: Record<string, string[]>;
+  /** 小限虚岁（decadal 时附带） */
+  nominalAge?: number;
+}
+
+function yunScopeOf(h: any, palaces: ZwPalace[], kind: "decadal" | "yearly"): YunScope | null {
+  const seg = h?.[kind];
+  if (!seg) return null;
+  const tags = ["禄", "权", "科", "忌"];
+  const mutagen: string[] = (seg.mutagen ?? []).map(String);
+  // 四化星落宫：找本命盘里含这颗星的宫
+  const mutagenAt = mutagen.map((star, i) => {
+    const p = palaces.find((x) => x.majorList.some((s) => s.name === star) || x.minorList.includes(star));
+    return { star, tag: tags[i] ?? "?", zhi: p?.zhi ?? "" };
+  });
+  const flowStars: Record<string, string[]> = {};
+  (seg.stars ?? []).forEach((arr: any[], idx: number) => {
+    const zhi = palaces[idx]?.zhi;
+    if (zhi && arr?.length) flowStars[zhi] = arr.map((s) => String(s.name ?? "")).filter(Boolean);
+  });
+  return {
+    kind,
+    label: kind === "decadal" ? "大限" : "流年",
+    zhi: palaces[seg.index]?.zhi ?? "",
+    gz: `${seg.heavenlyStem ?? ""}${seg.earthlyBranch ?? ""}`,
+    mutagen,
+    mutagenAt,
+    flowStars,
+    ...(kind === "decadal" && h?.age ? { nominalAge: Number(h.age.nominalAge) } : {}),
+  };
 }
 
 export function ziwei(ymd: string, timeIndex: number, gender: "男" | "女"): ZiweiResult {
@@ -350,6 +470,19 @@ export function ziwei(ymd: string, timeIndex: number, gender: "男" | "女"): Zi
     sign: String(a.sign ?? ""),
     lunarDate: String(a.lunarDate ?? ""),
     chineseDate: String(a.chineseDate ?? ""),
+    // 今天的大限/流年盘数据（horoscope 自带四化飞星与流耀）
+    yun: (() => {
+      try {
+        const now = new Date();
+        const h = a.horoscope?.(`${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`);
+        return {
+          decadal: yunScopeOf(h, palaces, "decadal"),
+          yearly: yunScopeOf(h, palaces, "yearly"),
+        };
+      } catch {
+        return { decadal: null, yearly: null };
+      }
+    })(),
   };
 }
 
