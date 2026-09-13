@@ -16,6 +16,7 @@ import NewsPage from "./components/NewsPage";
 import StudyPage from "./components/StudyPage";
 import AppsPage from "./components/AppsPage";
 import GroupsPage from "./components/GroupsPage";
+import DshPage from "./components/DshPage";
 import SettingsModal from "./components/SettingsModal";
 import LmStudioModal from "./components/LmStudioModal";
 import CloudConfigModal from "./components/CloudConfigModal";
@@ -88,6 +89,12 @@ export default function App() {
             <main className="main">
               {connError && <div className="err-banner">⚠ {connError}</div>}
               <GroupsPage />
+            </main>
+          )}
+          {view === "dsh" && (
+            <main className="main">
+              {connError && <div className="err-banner">⚠ {connError}</div>}
+              <DshPage />
             </main>
           )}
         </div>

@@ -21,6 +21,28 @@
 
 ## 登记区
 
+## [未解决] QQ 机器人渠道 secret 校验失败循环重连 + QClaw 桌面版双实例隐患（2026-09-13）
+
+- 症状：网关日志每 60s 刷 `[qqbot:<appId已移除>] Connection failed: ... {"code":100016,"message":"invalid appid or secret"}`，attempt 一直涨；QQ 私聊/群聊全部离线。
+- 根因：openclaw.json 里 `channels.qqbot.clientSecret` 与开放平台当前值不匹配（期间另发现 QClaw 桌面版 `K:\QClaw\v0.2.33.617` 内置 OpenClaw 也在跑同一渠道，同 appId 双实例存在互踢隐患，2026-09-13 用户已卸载 QClaw）。
+- 解决方案：待用户从 q.qq.com 开放平台取有效 AppSecret 写回 openclaw.json 后重启网关验证（本文待补终态）。
+- 状态：未解决（secret 等用户提供）。
+
+## [已解决·等用户重启] WSL2 无法启动——HCS_E_HYPERV_NOT_INSTALLED（2026-09-13）
+
+- 症状：任何启动 Ubuntu-22.04 的命令报 `Wsl/Service/CreateInstance/CreateVm/HCS/HCS_E_HYPERV_NOT_INSTALLED`，持续性故障非瞬时；桌面 HTA 与 rana-web 状态页的「WSL 模式」按钮切了两次都打不开。
+- 根因：**切换器本身有缺陷**——「游戏模式」一口气关四样（hypervisorlaunchtype off + VBS + HVCI + 凭据守护），「WSL 模式」却只开 `bcdedit hypervisorlaunchtype auto` 一样，**从不装回「虚拟机平台」（VirtualMachinePlatform）功能**；反复开关后该功能层被卸（WSL2 靠它），于是 auto 也救不回来。
+- 解决方案（2026-09-14 已修两处切换器，等用户点一次 + 重启）：「WSL 模式」路径补 `dism /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart`（幂等，功能在就秒过）+ `Microsoft-Windows-Subsystem-Linux` 同理。修的是 `G:\Desktop\傻逼tx关我wsl.hta`（GBK 编码原样保留）与 `rana-web/vite.config.ts` 的 `switchVirt("auto")` 分支。「游戏模式」分支未动。
+- 预防：以后凡「切回 WSL」的动作都必须走 dism 补功能层，只开 hypervisor 是欠账。
+- 状态：已解决（代码层）；等用户点「WSL 模式」→ UAC → 重启后实测 WSL 起 → 补 DSH 冒烟。
+
+## [已解决] openclaw plugins install 走 npm 不带代理 → termination timeout（2026-09-13）
+
+- 症状：`openclaw plugins install @openclaw/acpx` 命令 exit 0 但实际 `npm install failed: termination timeout (no output from npm)`，npm/projects 留空壳目录；版本解析正常（`Resolved @openclaw/acpx@2026.9.4 ... incompatible ... using 2026.9.2`）说明 CLI 本身通了，是 npm 下载阶段挂死。
+- 根因：registry.npmjs.org 直连超时；本机网络惯例是走 Clash 代理（127.0.0.1:7897），但 CLI 内部调 npm 不继承 git 的代理配置。
+- 解决方案：安装命令带 npm 环境变量：`npm_config_proxy=http://127.0.0.1:7897 npm_config_https_proxy=http://127.0.0.1:7897 openclaw plugins install <包名>`；失败残留的 `npm/projects/openclaw-<pkg>-*` 空目录先删再装。
+- 状态：已解决（acpx 2026.9.2 装成，兼容当前运行时）。
+
 ## [已解决] 右上角「⚡测连通」全灭——下拉发裸模型名，服务端误当接口名解析（2026-09-13）
 
 - 症状：模型选择器里点任何模型的 ⚡ 都显示「✗不通」（悬停提示：`找不到 provider：<模型名>`），怀疑 apiKey 被密钥库藏坏了。

@@ -632,7 +632,9 @@ function ranaSysStatusMiddleware(): Plugin {
           "reg add 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa' /v LsaCfgFlags /t REG_DWORD /d 0 /f; " +
           "Write-Host '== 虚拟化已全部关闭，重启后进入游戏模式 =='"
         : "bcdedit /set hypervisorlaunchtype auto; " +
-          "Write-Host '== 已切回 WSL 模式，重启后生效 =='";
+          "dism /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart; " +
+          "dism /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart; " +
+          "Write-Host '== 已切回 WSL 模式（上方 DISM 若报错请截图给 Rana），重启后生效 =='";
     // 内层命令走 -EncodedCommand（UTF-16LE base64），避免多层引号转义
     const b64 = Buffer.from(inner, "utf16le").toString("base64");
     // Start-Process -Verb RunAs 弹 UAC；-Wait 等执行完；用户点取消则外层 exit 1
@@ -1119,7 +1121,15 @@ function ranaStudyMiddleware(): Plugin {
     return cut || "material";
   };
 
-  const materialAbs = (m: StudyMaterial) => path.join(materialsDir, m.file);
+  const materialAbs = (m: StudyMaterial) => {
+    // fail-closed：file 字段只允许纯文件名（上传时 safeFilename 的产物）。
+    // schedule.json 若被写坏（分隔符/..），宁可炸掉出题请求，也不能把 materialsDir
+    // 之外的路径喂给 agent 的 read 工具。
+    if (typeof m.file !== "string" || !m.file || /[\\/]|\.\./.test(m.file)) {
+      throw new Error(`资料文件名非法：${String(m.file)}`);
+    }
+    return path.join(materialsDir, m.file);
+  };
 
   /** 唤醒 Rana：子进程跑 study-agent.mjs，解析它 stdout 的最后一行 JSON；model 可选（页面选的模型） */
   const spawnAgent = async (message: string, model?: string): Promise<{ ok: boolean; reply?: string; data?: Record<string, unknown>; error?: string }> => {
