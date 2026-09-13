@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { AppView, ChatMessage, ConnState, ModelInfo, SessionRow, ThemeSettings } from "../lib/types";
+import { NAV_TABS } from "../lib/types";
 import { applySettings, loadSettings, saveSettings, DEFAULT_SETTINGS } from "../lib/theme";
 
 interface StreamingRun {
@@ -73,8 +74,8 @@ export const PINNED_STORAGE_KEY = "rana-web.pinned";
 const REASONING_KEY = "rana-web.show-reasoning";
 export const TAB_ORDER_KEY = "rana-web.tab-order";
 
-/** 全部合法页签（顺序即默认顺序；新增页签往这里加，已存的旧顺序会自动补上它） */
-export const ALL_VIEWS: AppView[] = ["chat", "sys", "cron", "news", "study", "apps"];
+/** 全部合法页签（顺序即默认顺序；单一来源是 types.ts 的 NAV_TABS，新增页签只改那里） */
+export const ALL_VIEWS: AppView[] = NAV_TABS.map((t) => t.id);
 
 function loadTabOrder(): AppView[] {
   try {

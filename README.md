@@ -13,16 +13,16 @@
 | 维度 | 选型 |
 | --- | --- |
 | 运行时底座 | OpenClaw gateway（Node，WebSocket `127.0.0.1:18789`，协议 v4，SQLite 存会话/定时任务，`openclaw.json` 改完即热重载） |
-| 智能体 | 双 agent：`main`（云端模型，干活力，接微信渠道）+ `rana-rp`（本地 LM Studio 微调 14B，陪伴力），`ownership=explicit` 显式路由 |
-| 前端 | React 18 + TypeScript + Vite 6 + zustand，无 UI 框架、全手写 CSS（约 3400 行源码） |
+| 智能体 | 三 agent：`main`（云端模型，干活力，接 QQ 私聊 + rana-web 控制台）+ `rana-rp`（本地 LM Studio 微调 14B，陪伴力，接微信）+ `rana-qq-public`（云端，QQ 群公共号，物理隔离无私货），`ownership=explicit` 显式路由 |
+| 前端 | React 18 + TypeScript + Vite 6 + zustand，无 UI 框架、全手写 CSS（约 10,200 行源码） |
 | 连接方式 | 浏览器 WebCrypto 生成 **Ed25519 设备身份**，挑战-签名握手 + token 鉴权；直连失败自动回退同源 `/gateway` 代理 |
 | 「后端」 | **没有独立后端进程**——Vite dev/preview 插件挂了一组 loopback-only 中间件（`/__rana/*`）充当本地后端 |
-| 边车自动化 | 独立 Node 脚本 + OpenClaw cron 驱动：记忆桥（30 分钟）、早报生成、Git 活动统计、学习睡前小结（每日 22:30）与学习周报（周日 21:00） |
+| 边车自动化 | 独立 Node 脚本 + OpenClaw cron 驱动：记忆桥（每小时）、私密记忆桥（每小时）、早报生成、Git 活动统计、学习睡前小结（每日 22:30）与学习周报（周日 21:00） |
 | 本地模型 | LM Studio `:1234`，`rana-rp-14b` 显式常驻（ctx 49152 / parallel 2 / KV 卸载到内存），embedding 用 qwen3-0.6b |
 | 硬件约束 | RTX 4070 Ti 12GB + 48GB 内存——所有显存决策都围绕这张卡 |
 | 工程方法 | `KNOWN-ISSUES.md` 问题台账（症状/根因/方案/状态）、两层 AGENTS.md（人机共读规范）、公开镜像的 gitignore 隐私纪律 |
 
-代码量：前端 + 边车脚本合计约 8000 行。下面从零讲起。
+代码量：前端 + 边车脚本合计约 14,300 行。下面从零讲起。
 
 ---
 
@@ -160,8 +160,8 @@ K:\OpenClaw
 └── rana-web/              ← ★ 自建 Web 前端 + 边车脚本
     ├── index.html / vite.config.ts / tsconfig.json
     ├── src/
-    │   ├── App.tsx            根组件：四个页面视图的装配
-    │   ├── styles.css         全部样式（1300+ 行，房间场景/主题变量都在这）
+    │   ├── App.tsx            根组件：八个页面视图的装配（每页套 ErrorBoundary 兜底）
+    │   ├── styles.css         全部样式（2,000+ 行，房间场景/主题变量都在这）
     │   ├── lib/
     │   │   ├── gateway.ts     ★ 网关连接层：握手/请求/事件/重连/乐观UI（750 行，核心）
     │   │   ├── identity.ts    浏览器 Ed25519 设备身份的生成与签名
@@ -172,11 +172,12 @@ K:\OpenClaw
     │   ├── store/useAppStore.ts  zustand 全局状态（会话/消息/运行态/未读/置顶）
     │   └── components/           每个界面一块：Sidebar/ChatStream/Composer/Topbar/
     │                             TopNav/Room(她的房间)/SysPage/CronPage/NewsPage/
-    │                             UsagePanel/SettingsModal/LmStudioModal/CloudConfigModal…
-    ├── vite.config.ts        ★ 七组中间件：token/云端provider配置/电脑状态/头像/早报/学习计划/问卜
+    │                             StudyPage/StudyQuiz/AppsPage/GroupsPage/DshPage(派活)/
+    │                             UsagePanel/ErrorBoundary/SettingsModal/LmStudioModal/CloudConfigModal…
+    ├── vite.config.ts        ★ 十一组中间件：token/云端provider配置/电脑状态/头像/早报/学习计划/问卜/模型测试/技能与MCP卡/群画像
     ├── start-rana.cmd        一键启动（网关+vite+浏览器）
     ├── start-gateway.cmd     网关启动器（状态目录 + TLS 兼容参数）
-    ├── memory-bridge.mjs     共享记忆桥（cron 每 30 分钟）
+    ├── memory-bridge.mjs     共享记忆桥（cron 每小时；真名/化名映射在 gitignore 的 identity 文件里）
     ├── news-report.mjs       早报生成器（联播抓取 + 博查搜索 + flash 总结）
     ├── git-activity.mjs      Git 活动统计（日报/周报/月报口径）
     ├── e2e-chat.mjs          无头端到端验证（配合 window.gw 调试钩子）
@@ -188,7 +189,7 @@ K:\OpenClaw
 
 ## 🖥️ 界面功能总览
 
-四个页签 + 三层弹窗，全部功能都长在界面上，**命令行只做兜底**（这是本项目的铁律，详见 §13 亮点 6）。
+八个页签 + 三层弹窗，全部功能都长在界面上，**命令行只做兜底**（这是本项目的铁律，详见 §13 亮点 6）。
 
 ### 💬 会话（主页）
 - 流式输出气泡，带「准备工作区…启动模型…」的**状态行**（run 生命周期可视化）；
@@ -268,7 +269,7 @@ K:\OpenClaw
 
 ## 🧩 深入：没有后端的全栈——Vite 中间件当后端
 
-「网页要读电脑状态、要改配置文件，后端呢？」——**没有独立后端进程**。`vite.config.ts`（约 1000 行）里写了六组 Vite 插件，直接把接口挂到开发服务器上；`configurePreviewServer` 把同样的中间件挂到生产预览服务上，所以 `npm run dev` 和 `npm run preview` 行为一致，始终是单进程。
+「网页要读电脑状态、要改配置文件，后端呢？」——**没有独立后端进程**。`vite.config.ts`（约 2,300 行）里写了十一组 Vite 插件，直接把接口挂到开发服务器上；`configurePreviewServer` 把同样的中间件挂到生产预览服务上，所以 `npm run dev` 和 `npm run preview` 行为一致，始终是单进程。
 
 > 给新手的一句话：Vite 的开发服务器本质是个 Node 程序，允许你往它身上挂自己的接口。请求不进打包产物，只在本地服务器这一层就被拦下处理了。这对「纯本地自用」的工具来说是零成本的架构简化。
 

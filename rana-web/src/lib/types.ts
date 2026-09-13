@@ -51,6 +51,18 @@ export type ConnState = "connecting" | "connected" | "error" | "closed";
 /** 顶部导航的页面视图 */
 export type AppView = "chat" | "sys" | "cron" | "news" | "study" | "apps" | "groups" | "dsh";
 
+/** 顶部导航页签（单一来源：TopNav 渲染与 store 的 ALL_VIEWS 校验都引用这份，新增页签只改这里） */
+export const NAV_TABS: Array<{ id: AppView; label: string }> = [
+  { id: "chat", label: "💬 会话" },
+  { id: "sys", label: "💠 Rana 的状态" },
+  { id: "cron", label: "⏰ 定时任务" },
+  { id: "news", label: "📰 早报" },
+  { id: "study", label: "📚 学习计划" },
+  { id: "apps", label: "🧰 程序" },
+  { id: "groups", label: "👥 群画像" },
+  { id: "dsh", label: "🔨 派活" },
+];
+
 /** 外观设置（持久化在 localStorage） */
 export interface ThemeSettings {
   /** 主题强调色（绿/粉/蓝…），驱动按钮、气泡、进度条等 */

@@ -13,6 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveApiKey } from "./lib/rana-config.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(HERE, ".news");
@@ -128,7 +129,8 @@ async function fetchSections() {
 async function ranaSummary(xwlb, sections) {
   try {
     const p = CFG?.models?.providers?.["aliyun-maas"];
-    if (!p?.baseUrl || !p?.apiKey) throw new Error("aliyun-maas provider 未配置");
+    const apiKey = resolveApiKey(p?.apiKey); // SecretRef（密钥库引用）在此解析成真 key
+    if (!p?.baseUrl || !apiKey) throw new Error("aliyun-maas provider 未配置或密钥库不可读");
     const titles = [
       ...xwlb.items.slice(0, 15).map((x) => `- ${x.title}`),
       ...sections.flatMap((s) => s.items.slice(0, 4).map((i) => `- ${i.title}`)),
@@ -136,7 +138,7 @@ async function ranaSummary(xwlb, sections) {
     const sys = "你是 Rana，猫系少女，话少、句子短、不用感叹号堆砌。根据新闻标题列表，用你自己的口吻总结今天世界上主要发生了什么：先一句话总起，再挑最重要的 3-5 件事各一句说明白（谁/哪里/发生了什么/意味着什么的程度），结尾一句短评。全文 180 字以内，口语自然，不列标题不复述清单。";
     const res = await fetch(p.baseUrl.replace(/\/+$/, "") + "/chat/completions", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${p.apiKey}` },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model: "qwen3.8-flash",
         messages: [
@@ -151,10 +153,10 @@ async function ranaSummary(xwlb, sections) {
     const j = await res.json();
     const text = j?.choices?.[0]?.message?.content?.trim();
     if (!text) throw new Error(`flash 返回空（HTTP ${res.status}）`);
-    return text;
+    return { summary: text, error: "" };
   } catch (e) {
-    log(`乐奈总结失败（跳过）：${e.message}`);
-    return "";
+    log(`乐奈总结失败：${e.message}`);
+    return { summary: "", error: e.message }; // 错误随 report 落盘，前端显式显示，不再静默留空
   }
 }
 
@@ -162,7 +164,7 @@ async function ranaSummary(xwlb, sections) {
 const xwlb = await fetchXwlb();
 log(`新闻联播 ${xwlb.day}：${xwlb.items.length} 条`);
 const sections = await fetchSections();
-const summary = await ranaSummary(xwlb, sections);
+const { summary, error: summaryError } = await ranaSummary(xwlb, sections);
 // 本地时区日期（toISOString 是 UTC，凌晨跑会差一天）
 const now = new Date();
 const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -174,6 +176,7 @@ const report = {
   xwlb: xwlb.items,
   sections,
   summary,
+  summaryError,
   queries: SECTIONS.length, // 本次博查搜索调用次数（额度意识）
 };
 fs.mkdirSync(OUT_DIR, { recursive: true });

@@ -21,14 +21,30 @@
 
 ## 登记区
 
+## [已解决] 心跳 30 分钟整会话唤醒、94% NO_REPLY 空转 ≈500 万 token/天 + 记忆桥降频 + 私密桥复活（2026-09-14）
+
+- 症状（诊断口径）：heartbeat 每 30 分钟在 `agent:main:main` 整会话跑一轮（9-13 实跑 33 次、31 次 NO_REPLY），每次携带 ~15 万 token 上下文（cacheRead），折 ~5M tokens/天；心跳 turn 实测 11-72s，与用户消息在主会话互斥排队（"说话等好一会"的贡献者之一）。另：main 主会话自 9-8 无压缩滚到 151,762/262,144（58%）。
+- 根因：心跳默认无 isolatedSession/lightContext，每轮带全量主会话；30m 间隔过密；`agents.defaults.heartbeat` 旧块（`{agentId, target}`）在启动日志反复报 Invalid input（strict schema，字段集不全时整块拒收但任务仍按默认跑）。
+- 解决方案（2026-09-14 落地）：①心跳块补全合法字段集：`every:"60m"` + `isolatedSession:true`（每次全新小会话，官方口径 ~100K→2-5K tokens/次）+ `lightContext:true` + `activeHours:{start:"10:00",end:"01:00",timezone:"user"}`（深夜静默）+ 自定义 prompt（自己读日记判断，没事只回 NO_REPLY）；②主会话瘦身：顶层 `session.reset:{mode:"daily",atHour:6}` 每日翻新 + 立即归档一次（chat.send "/new" 会排队 216-530s 才回包，别急着判失败；`openclaw sessions compact --max-lines 60` 是无模型依赖的即时截断路，但要求无 active run）；③记忆桥 `*/30`→`0 * * * *`。
+- ⚠️ 附带挖出真 bug：**private-memory-bridge 任务是孤儿**——cron_jobs 表里它的 store_key 是小写 `K:\openclaw\...`，网关只调度大写 `K:\OpenClaw\...` store（历史大小写双 store 遗留），即**私密记忆桥从 9-12 18:07 起就没被网关跑过**（private-memory/ 目录停更两天）。解法：`openclaw cron add --name private-memory-bridge --cron "17 * * * *" --exact --command-argv '["G:/node/node.exe","K:/OpenClaw/rana-web/private-memory-bridge.mjs"]' --no-deliver --agent main` 重建进网关 store。孤儿行与 memory-bridge 的小写残留行留给 `openclaw doctor --fix`。
+- 状态：已解决（重启网关后 heartbeat 显示 every 1h 且 Invalid input 警告消失；两桥任务在列；主会话 total 归零）。
+
+## [已解决] 新页签四处注册漏一处 → groups/dsh 页签 UI 永不可达（2026-09-14）
+
+- 症状：群画像页（195 行）与派活页（108 行）代码完整、路由分支齐全、git 也提交了，但顶部导航永远不显示这两个页签。
+- 根因：页签注册有**四处**——`types.ts` 的 `AppView`、`TopNav.tsx` 的 `TABS`、`App.tsx` 的渲染分支、`store/useAppStore.ts` 的 `ALL_VIEWS`（TopNav 只渲染 `tabOrder`，而 `loadTabOrder()` 按 ALL_VIEWS 过滤补齐）—— GroupsPage/DshPage 两次提交都改了前三处，**唯独漏了 ALL_VIEWS**。tsc 与运行时都不报错，纯逻辑性遗漏。
+- 解决方案：单一来源化——`NAV_TABS` 常量上移到 `lib/types.ts`（8 个页签），TopNav 渲染与 store 的 `ALL_VIEWS = NAV_TABS.map(t=>t.id)` 都引用它；**以后新增页签只改 types.ts 一处 + App.tsx 一个分支**。
+- 教训：涉及"清单两处维护"的注册点，要么合并为单一来源，要么在台账里记全注册点清单。
+- 状态：已解决（tsc 过；页签 8 个）。
+
 ## [未解决] QQ 机器人渠道 secret 校验失败循环重连 + QClaw 桌面版双实例隐患（2026-09-13）
 
 - 症状：网关日志每 60s 刷 `[qqbot:<appId已移除>] Connection failed: ... {"code":100016,"message":"invalid appid or secret"}`，attempt 一直涨；QQ 私聊/群聊全部离线。
 - 根因：openclaw.json 里 `channels.qqbot.clientSecret` 与开放平台当前值不匹配（期间另发现 QClaw 桌面版 `K:\QClaw\v0.2.33.617` 内置 OpenClaw 也在跑同一渠道，同 appId 双实例存在互踢隐患，2026-09-13 用户已卸载 QClaw）。
-- 解决方案：待用户从 q.qq.com 开放平台取有效 AppSecret 写回 openclaw.json 后重启网关验证（本文待补终态）。
-- 状态：未解决（secret 等用户提供）。
+- 解决方案：用户提供有效 AppSecret → 写回 openclaw.json（先备份）→ 重启网关。
+- 状态：**已解决（2026-09-14）**——secret 已写入，重启后日志 `✅ Access token obtained` + `[qqbot] gateway READY`，无 100016。
 
-## [已解决·等用户重启] WSL2 无法启动——HCS_E_HYPERV_NOT_INSTALLED（2026-09-13）
+## [已解决·等用户实测] WSL2 无法启动——HCS_E_HYPERV_NOT_INSTALLED（2026-09-13）
 
 - 症状：任何启动 Ubuntu-22.04 的命令报 `Wsl/Service/CreateInstance/CreateVm/HCS/HCS_E_HYPERV_NOT_INSTALLED`，持续性故障非瞬时；桌面 HTA 与 rana-web 状态页的「WSL 模式」按钮切了两次都打不开。
 - 根因：**切换器本身有缺陷**——「游戏模式」一口气关四样（hypervisorlaunchtype off + VBS + HVCI + 凭据守护），「WSL 模式」却只开 `bcdedit hypervisorlaunchtype auto` 一样，**从不装回「虚拟机平台」（VirtualMachinePlatform）功能**；反复开关后该功能层被卸（WSL2 靠它），于是 auto 也救不回来。
@@ -289,3 +305,4 @@
 - 症状：memory-bridge 的 main 侧提炼静默产出 0 条（不报错）；偶发群聊腿也 0 条。
 - 根因一：桥脚本直读 `openclaw.json` 的 `aliyun-maas.apiKey`，SecretRef 迁移后读到 `{source:"store",...}` 对象当 Bearer 用。根因二：glm-5.3-flash 是思考型模型，推理就花几百 token，`max_tokens:500` 时正文经常被挤空（finish_reason 还是 stop，更迷惑）。
 - 解决方案：`resolveApiKey()` 兼容 SecretRef（读 state SQLite 的 secret_store_entries 表）；云端提炼统一走 glm 且 `max_tokens:1500`；云端腿产出 0 条时把被拒原文写进 .bridge.log 排障。旁路脚本凡直读 apiKey 都要过 resolveApiKey 这关。
+- ⚠️ 第三处（2026-09-14 补刀）：`news-report.mjs` 同样直读 `p.apiKey` 当字符串，早报「乐奈的总结」自密钥迁移起静默失效（`Bearer [object Object]` → 401 被 catch 吞掉，页面只见总结卡空着）。已修：新建 `lib/rana-config.mjs` 共享模块统一 resolveApiKey，早报接入；report.json 新增 `summaryError` 字段、前端显式显示失败原因——同类静默失败不再藏。实测总结出字。

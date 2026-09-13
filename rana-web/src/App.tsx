@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import { gateway } from "./lib/gateway";
 import { useAppStore } from "./store/useAppStore";
 import { applySettings } from "./lib/theme";
@@ -17,9 +17,13 @@ import StudyPage from "./components/StudyPage";
 import AppsPage from "./components/AppsPage";
 import GroupsPage from "./components/GroupsPage";
 import DshPage from "./components/DshPage";
+import ErrorBoundary from "./components/ErrorBoundary";
 import SettingsModal from "./components/SettingsModal";
 import LmStudioModal from "./components/LmStudioModal";
 import CloudConfigModal from "./components/CloudConfigModal";
+
+// 页面级兜底：单页渲染崩了只挂那一页，导航与其余页面照常
+const page = (label: string, node: ReactNode) => <ErrorBoundary label={label}>{node}</ErrorBoundary>;
 
 export default function App() {
   const connError = useAppStore((s) => s.connError);
@@ -49,8 +53,7 @@ export default function App() {
               <main className="main">
                 <Topbar />
                 {connError && <div className="err-banner">⚠ {connError}</div>}
-                <ChatStream />
-                <Composer />
+                {page("会话", <><ChatStream /><Composer /></>)}
               </main>
               {panelOpen && <UsagePanel />}
             </div>
@@ -58,43 +61,43 @@ export default function App() {
           {view === "sys" && (
             <main className="main">
               {connError && <div className="err-banner">⚠ {connError}</div>}
-              <SysPage />
+              {page("Rana 的状态", <SysPage />)}
             </main>
           )}
           {view === "cron" && (
             <main className="main">
               {connError && <div className="err-banner">⚠ {connError}</div>}
-              <CronPage />
+              {page("定时任务", <CronPage />)}
             </main>
           )}
           {view === "news" && (
             <main className="main">
               {connError && <div className="err-banner">⚠ {connError}</div>}
-              <NewsPage />
+              {page("早报", <NewsPage />)}
             </main>
           )}
           {view === "study" && (
             <main className="main">
               {connError && <div className="err-banner">⚠ {connError}</div>}
-              <StudyPage />
+              {page("学习计划", <StudyPage />)}
             </main>
           )}
           {view === "apps" && (
             <main className="main">
               {connError && <div className="err-banner">⚠ {connError}</div>}
-              <AppsPage />
+              {page("程序", <AppsPage />)}
             </main>
           )}
           {view === "groups" && (
             <main className="main">
               {connError && <div className="err-banner">⚠ {connError}</div>}
-              <GroupsPage />
+              {page("群画像", <GroupsPage />)}
             </main>
           )}
           {view === "dsh" && (
             <main className="main">
               {connError && <div className="err-banner">⚠ {connError}</div>}
-              <DshPage />
+              {page("派活", <DshPage />)}
             </main>
           )}
         </div>

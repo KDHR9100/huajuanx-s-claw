@@ -6,18 +6,8 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "../store/useAppStore";
 import type { AppView } from "../lib/types";
+import { NAV_TABS } from "../lib/types";
 import { Bell } from "./RanaArt";
-
-const TABS: Array<{ id: AppView; label: string }> = [
-  { id: "chat", label: "💬 会话" },
-  { id: "sys", label: "💠 Rana 的状态" },
-  { id: "cron", label: "⏰ 定时任务" },
-  { id: "news", label: "📰 早报" },
-  { id: "study", label: "📚 学习计划" },
-  { id: "apps", label: "🧰 程序" },
-  { id: "groups", label: "👥 群画像" },
-  { id: "dsh", label: "🔨 派活" },
-];
 
 const CLICK_SLOP = 4; // 位移小于此值视为点击而非拖拽
 const FLIP_MS = 230;
@@ -33,7 +23,7 @@ export default function TopNav() {
   const setTabOrder = useAppStore((s) => s.setTabOrder);
 
   const ordered = useMemo(
-    () => tabOrder.map((id) => TABS.find((t) => t.id === id)).filter((t): t is { id: AppView; label: string } => Boolean(t)),
+    () => NAV_TABS.filter((t) => tabOrder.includes(t.id)).sort((a, b) => tabOrder.indexOf(a.id) - tabOrder.indexOf(b.id)),
     [tabOrder],
   );
 

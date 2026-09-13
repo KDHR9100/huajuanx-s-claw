@@ -22,6 +22,7 @@ interface Report {
   xwlb: Array<{ title: string; url: string }>;
   sections: Section[];
   summary?: string;
+  summaryError?: string;
   queries?: number;
 }
 
@@ -153,6 +154,8 @@ export default function NewsPage() {
                 </div>
                 {data.summary ? (
                   <p className="summary-text">{data.summary}</p>
+                ) : data.summaryError ? (
+                  <p className="pending-text">这次没写出来：{data.summaryError}</p>
                 ) : (
                   <p className="pending-text">这次没写出来（flash 偶尔偷懒）。</p>
                 )}

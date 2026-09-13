@@ -32,6 +32,12 @@ const LOCAL_FILTERS = (() => {
     return JSON.parse(fs.readFileSync(new URL('./memory-bridge.privacy-patterns.json', import.meta.url), 'utf8'));
   } catch { return {}; }
 })();
+// 主人对内称呼与群内化名外置（identity 文件不入公开仓库；缺文件回退中性称呼，不影响桥运行）
+const IDENTITY = (() => {
+  try { return JSON.parse(fs.readFileSync(new URL('./memory-bridge.identity.json', import.meta.url), 'utf8')); } catch { return {}; }
+})();
+const OWNER_NAME = IDENTITY.realName || '主人';
+const OWNER_ALIAS = IDENTITY.groupAlias || '群主';
 
 /** apiKey 现在可能是明文串，也可能是 SecretRef 对象（{source:"store",id}）——后者去 state SQLite 解析 */
 function resolveApiKey(raw) {
@@ -133,7 +139,7 @@ function readNewEvents(agentId, sinceMs, capChars, opts = {}) {
       text = text.replace(/^\[[^\]]*\]\s*/, '').trim(); // 去掉 [名字 (id)] 前缀行
       if (!text) continue;
     } else {
-      speaker = role === 'user' ? '<真名已移除>' : 'Rana';
+      speaker = role === 'user' ? OWNER_NAME : 'Rana';
     }
     const gTag = opts.qqSpeaker ? ` [${groupAlias(key)}]` : '';
     const line = `[${new Date(r.created_at).toTimeString().slice(0, 5)}]${gTag} ${speaker}: ${text.replace(/\s+/g, ' ').slice(0, 500)}`;
@@ -144,11 +150,11 @@ function readNewEvents(agentId, sinceMs, capChars, opts = {}) {
   return out;
 }
 
-/** QQ 群消息的发言者：从正文里的 [名字 (OPENID)] 抠；主人 openid → <真名已移除> */
+/** QQ 群消息的发言者：从正文里的 [名字 (OPENID)] 抠；主人 openid → 群内化名（identity 文件） */
 function qqSpeakerOf(text) {
   const m = text.match(/\[([^\](]{1,24}?)\s*\(([0-9A-F]{32})\)\]/);
   if (!m) return '群友';
-  if (QQ_LOCAL.ownerOpenId && m[2].toUpperCase() === QQ_LOCAL.ownerOpenId.toUpperCase()) return '青散';
+  if (QQ_LOCAL.ownerOpenId && m[2].toUpperCase() === QQ_LOCAL.ownerOpenId.toUpperCase()) return OWNER_ALIAS;
   return m[1].trim();
 }
 
@@ -171,9 +177,9 @@ function promptFor(side, tag, dialog) {
   // RP 侧私密内容一律不进共享记忆（云端可见）——由 private-memory-bridge 负责保管
   const privacy = tag === 'RP' ? '\n私密、亲密、身体相关的内容一律跳过不记（由私密记忆单独负责，共享记忆绝不收录）。' : '';
   // 工作侧心跳/备份等运维自活动对陪伴侧毫无价值（heartbeat target=last 直接混在主会话里）
-  const ops = tag === '工作' ? '\n跳过 Rana 自己的运维活动（心跳检查、备份、git/推送、巡检、监控、排障、重启重载、定时任务）——除非<真名已移除>本人有明显情绪或做了决定，否则一律不记。' : '';
-  const qq = tag === '群聊' ? '\n这是 QQ 群里公共版 Rana 的聊天，群用 群A/群B 区分。跳过纯表情包、图片、寒暄刷屏；重点记：有人聊了有意思的话题、群友（点名）说了什么值得记的、青散在群里的动态（青散=<真名已移除>在群里的称呼，群聊纪要一律写青散）、公共号 Rana 的表现。涉隐私的私事不记。' : '';
-  return `【${side}侧对话片段】\n${dialog}\n---\n从上面对话提炼 1-3 条纪要（合并相似内容；${tag === '群聊' ? '群里有互动就至少记一条' : '陪伴对话哪怕小事也至少记一条'}；实在没有才输出：空）。\n每条一行，格式：HH:MM [${tag}] 内容\n时间必须照抄对话行首的 [HH:MM] 标记，禁止自己编时间。\n示例：09:30 [${tag}] <真名已移除>修完微信bug后疲惫，Rana 陪他休息了一会儿\n规则：内容≤60字；记一起做的事、聊的话题、${tag === '群聊' ? '谁（用群友名字）' : '<真名已移除>'}的状态情绪、重要事实；陈述句。${privacy}${ops}${qq}`;
+  const ops = tag === '工作' ? `\n跳过 Rana 自己的运维活动（心跳检查、备份、git/推送、巡检、监控、排障、重启重载、定时任务）——除非${OWNER_NAME}本人有明显情绪或做了决定，否则一律不记。` : '';
+  const qq = tag === '群聊' ? `\n这是 QQ 群里公共版 Rana 的聊天，群用 群A/群B 区分。跳过纯表情包、图片、寒暄刷屏；重点记：有人聊了有意思的话题、群友（点名）说了什么值得记的、${OWNER_ALIAS}在群里的动态（群主在群里叫${OWNER_ALIAS}，群聊纪要一律写${OWNER_ALIAS}）、公共号 Rana 的表现。涉隐私的私事不记。` : '';
+  return `【${side}侧对话片段】\n${dialog}\n---\n从上面对话提炼 1-3 条纪要（合并相似内容；${tag === '群聊' ? '群里有互动就至少记一条' : '陪伴对话哪怕小事也至少记一条'}；实在没有才输出：空）。\n每条一行，格式：HH:MM [${tag}] 内容\n时间必须照抄对话行首的 [HH:MM] 标记，禁止自己编时间。\n示例：09:30 [${tag}] ${OWNER_NAME}修完微信bug后疲惫，Rana 陪他休息了一会儿\n规则：内容≤60字；记一起做的事、聊的话题、${tag === '群聊' ? '谁（用群友名字）' : OWNER_NAME}的状态情绪、重要事实；陈述句。${privacy}${ops}${qq}`;
 }
 
 function parseEntries(raw, tag, fallbackTs) {
@@ -184,11 +190,11 @@ function parseEntries(raw, tag, fallbackTs) {
     if (!ln || /^(空|无)/.test(ln)) continue;
     // 防模型复述任务/角色扮演/舞台指令/照抄对话（本地 7B 常见毛病）
     if (/记忆提炼器|共享记忆纪要|禁止复述|```|坐姿[:：]|^\*?\*?-(坐姿|状态|行为)/.test(ln)) continue;
-    if (/<真名已移除>:|Rana:|\[\d{1,2}:\d{2}\]/.test(ln)) continue; // 原文回声
+    if (new RegExp(`${OWNER_NAME}:|Rana:|\\[\\d{1,2}:\\d{2}\\]`).test(ln)) continue; // 原文回声
     // 隐私兜底/运维噪音兜底：正则表放本地 privacy-patterns 文件（不入公开仓库），缺文件时跳过
     if (tag === 'RP' && LOCAL_FILTERS.rpPrivacy && new RegExp(LOCAL_FILTERS.rpPrivacy).test(ln)) continue;
     if (tag === '工作' && LOCAL_FILTERS.opsNoise && new RegExp(LOCAL_FILTERS.opsNoise, 'i').test(ln)) continue;
-    if (tag !== '群聊' && !/青散|<真名已移除>|Rana/.test(ln)) continue; // 纪要必须提到他们俩之一（群聊侧人名不限；<真名已移除>兼容历史条目）
+    if (tag !== '群聊' && !new RegExp(`${OWNER_ALIAS}|${OWNER_NAME}|Rana`).test(ln)) continue; // 纪要必须提到主人或 Rana（群聊侧人名不限）
     if (tag === '群聊' && !/[\u4e00-\u9fa5]/.test(ln)) continue; // 群聊纪要至少得有中文
     ln = ln.replace(/刘南|刘娜/g, 'Rana'); // 7B 微调残留的错误自称，入库前统一改回
     const m = ln.match(/^(\d{1,2}:\d{2})\s*\[/);
