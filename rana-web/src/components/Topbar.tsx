@@ -15,7 +15,7 @@ function ModelPicker() {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   // 连通测试结果：modelId → {busy, ok, ms, error}
-  const [tests, setTests] = useState<Record<string, { busy?: boolean; ok?: boolean; ms?: number; error?: string }>>({});
+  const [tests, setTests] = useState<Record<string, { busy?: boolean; ok?: boolean; ms?: number; error?: string; note?: string }>>({});
   const ref = useRef<HTMLDivElement>(null);
 
   const current = sessions.find((s) => s.key === currentKey)?.model;
@@ -42,18 +42,19 @@ function ModelPicker() {
     }
   };
 
-  /** 测一个模型能不能通：一条最小消息，key 只在服务端配置里读 */
-  const test = async (modelId: string) => {
+  /** 测一个模型能不能通：一条最小消息，key 只在服务端配置里读。gateway 目录的 id 是裸名，须带 providerId 帮服务端定位接口 */
+  const test = async (m: { id: string; provider?: string }) => {
+    const modelId = m.id;
     if (tests[modelId]?.busy) return;
     setTests((t) => ({ ...t, [modelId]: { busy: true } }));
     try {
       const r = await fetch("/__rana/model-test", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ modelId }),
+        body: JSON.stringify({ modelId, providerId: m.provider }),
       });
-      const j = (await r.json()) as { ok?: boolean; ms?: number; error?: string };
-      setTests((t) => ({ ...t, [modelId]: { ok: Boolean(j.ok), ms: j.ms, error: j.error } }));
+      const j = (await r.json()) as { ok?: boolean; ms?: number; error?: string; note?: string };
+      setTests((t) => ({ ...t, [modelId]: { ok: Boolean(j.ok), ms: j.ms, error: j.error, note: j.note } }));
     } catch (e) {
       setTests((t) => ({ ...t, [modelId]: { ok: false, error: (e as Error).message } }));
     }
@@ -63,7 +64,7 @@ function ModelPicker() {
     const t = tests[modelId];
     if (!t) return { text: "⚡", cls: "", title: "测试这个模型能不能连通" };
     if (t.busy) return { text: "…", cls: "", title: "测试中" };
-    if (t.ok) return { text: `✓${t.ms ?? "?"}ms`, cls: "ok", title: `连通，延迟 ${t.ms}ms` };
+    if (t.ok) return { text: `✓${t.ms ?? "?"}ms${t.note ? "💭" : ""}`, cls: "ok", title: `连通，延迟 ${t.ms}ms${t.note ? " · " + t.note : ""}` };
     return { text: "✗不通", cls: "bad", title: t.error ?? "不通" };
   };
 
@@ -104,7 +105,7 @@ function ModelPicker() {
                     <button
                       className={`mp-test${badge.cls ? " " + badge.cls : ""}`}
                       title={badge.title}
-                      onClick={() => void test(m.id)}
+                      onClick={() => void test(m)}
                     >
                       {badge.text}
                     </button>

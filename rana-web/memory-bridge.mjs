@@ -148,7 +148,7 @@ function readNewEvents(agentId, sinceMs, capChars, opts = {}) {
 function qqSpeakerOf(text) {
   const m = text.match(/\[([^\](]{1,24}?)\s*\(([0-9A-F]{32})\)\]/);
   if (!m) return '群友';
-  if (QQ_LOCAL.ownerOpenId && m[2].toUpperCase() === QQ_LOCAL.ownerOpenId.toUpperCase()) return '<真名已移除>';
+  if (QQ_LOCAL.ownerOpenId && m[2].toUpperCase() === QQ_LOCAL.ownerOpenId.toUpperCase()) return '青散';
   return m[1].trim();
 }
 
@@ -172,7 +172,7 @@ function promptFor(side, tag, dialog) {
   const privacy = tag === 'RP' ? '\n私密、亲密、身体相关的内容一律跳过不记（由私密记忆单独负责，共享记忆绝不收录）。' : '';
   // 工作侧心跳/备份等运维自活动对陪伴侧毫无价值（heartbeat target=last 直接混在主会话里）
   const ops = tag === '工作' ? '\n跳过 Rana 自己的运维活动（心跳检查、备份、git/推送、巡检、监控、排障、重启重载、定时任务）——除非<真名已移除>本人有明显情绪或做了决定，否则一律不记。' : '';
-  const qq = tag === '群聊' ? '\n这是 QQ 群里公共版 Rana 的聊天，群用 群A/群B 区分。跳过纯表情包、图片、寒暄刷屏；重点记：有人聊了有意思的话题、群友（点名）说了什么值得记的、<真名已移除>在群里的动态、公共号 Rana 的表现。涉隐私的私事不记。' : '';
+  const qq = tag === '群聊' ? '\n这是 QQ 群里公共版 Rana 的聊天，群用 群A/群B 区分。跳过纯表情包、图片、寒暄刷屏；重点记：有人聊了有意思的话题、群友（点名）说了什么值得记的、青散在群里的动态（青散=<真名已移除>在群里的称呼，群聊纪要一律写青散）、公共号 Rana 的表现。涉隐私的私事不记。' : '';
   return `【${side}侧对话片段】\n${dialog}\n---\n从上面对话提炼 1-3 条纪要（合并相似内容；${tag === '群聊' ? '群里有互动就至少记一条' : '陪伴对话哪怕小事也至少记一条'}；实在没有才输出：空）。\n每条一行，格式：HH:MM [${tag}] 内容\n时间必须照抄对话行首的 [HH:MM] 标记，禁止自己编时间。\n示例：09:30 [${tag}] <真名已移除>修完微信bug后疲惫，Rana 陪他休息了一会儿\n规则：内容≤60字；记一起做的事、聊的话题、${tag === '群聊' ? '谁（用群友名字）' : '<真名已移除>'}的状态情绪、重要事实；陈述句。${privacy}${ops}${qq}`;
 }
 
@@ -188,7 +188,7 @@ function parseEntries(raw, tag, fallbackTs) {
     // 隐私兜底/运维噪音兜底：正则表放本地 privacy-patterns 文件（不入公开仓库），缺文件时跳过
     if (tag === 'RP' && LOCAL_FILTERS.rpPrivacy && new RegExp(LOCAL_FILTERS.rpPrivacy).test(ln)) continue;
     if (tag === '工作' && LOCAL_FILTERS.opsNoise && new RegExp(LOCAL_FILTERS.opsNoise, 'i').test(ln)) continue;
-    if (tag !== '群聊' && !/<真名已移除>|Rana/.test(ln)) continue; // 纪要必须提到他们俩之一（群聊侧人名不限）
+    if (tag !== '群聊' && !/青散|<真名已移除>|Rana/.test(ln)) continue; // 纪要必须提到他们俩之一（群聊侧人名不限；<真名已移除>兼容历史条目）
     if (tag === '群聊' && !/[\u4e00-\u9fa5]/.test(ln)) continue; // 群聊纪要至少得有中文
     ln = ln.replace(/刘南|刘娜/g, 'Rana'); // 7B 微调残留的错误自称，入库前统一改回
     const m = ln.match(/^(\d{1,2}:\d{2})\s*\[/);

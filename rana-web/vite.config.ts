@@ -1969,9 +1969,7 @@ function ranaModelTestMiddleware(): Plugin {
     res.statusCode = code;
     res.end(JSON.stringify(out));
   };
-  const testModel = async (modelId: string) => {
-    const providerId = modelId.split("/")[0] ?? "";
-    const model = modelId.split("/").slice(1).join("/") || modelId;
+  const testOne = async (providerId: string, model: string) => {
     const p = readFullConfig().models?.providers?.[providerId];
     if (!p?.baseUrl) throw new Error(`找不到 provider：${providerId || "(空)"}`);
     // apiKey 可能是明文串，也可能已是 SecretRef 对象（{source:"store",id}）——后者去 state SQLite 的 secrets 表里解析
@@ -1993,8 +1991,9 @@ function ranaModelTestMiddleware(): Plugin {
       }
     }
     const ctrl = new AbortController();
-    // 本地大模型冷加载可能要几十秒，手动测试按钮宁可多等
-    const timer = setTimeout(() => ctrl.abort(), 45000);
+    // 思考型模型要把 512 token 推理跑完、本地大模型冷加载也要几十秒，手动测试按钮宁可多等
+    const TEST_TIMEOUT_MS = 75_000;
+    const timer = setTimeout(() => ctrl.abort(), TEST_TIMEOUT_MS);
     const t0 = Date.now();
     try {
       const r = await fetch(p.baseUrl.replace(/\/+$/, "") + "/chat/completions", {
@@ -2003,21 +2002,55 @@ function ranaModelTestMiddleware(): Plugin {
           "content-type": "application/json",
           ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
         },
-        body: JSON.stringify({ model, messages: [{ role: "user", content: "连通测试：请只回复两个字：好的" }], max_tokens: 16, stream: false }),
+        body: JSON.stringify({ model, messages: [{ role: "user", content: "连通测试：请只回复两个字：好的" }], max_tokens: 512, stream: false }),
         signal: ctrl.signal,
       });
       const ms = Date.now() - t0;
       if (!r.ok) {
         const body = (await r.text()).slice(0, 200);
-        throw new Error(`HTTP ${r.status}${body ? "：" + body : ""}`);
+        // 429/403 多是额度问题，key 其实有效——翻译成人话，避免误判成「key 被藏坏了」
+        const hint =
+          r.status === 429 ? "额度用完/限流（key 有效，等重置或充值）"
+          : r.status === 401 ? "key 无效或没权限"
+          : r.status === 403 && body.includes("Free quota") ? "免费额度用完（key 有效，充值或关「仅免费」模式）"
+          : r.status === 403 ? "没权限（key 受限或免费额度用完）"
+          : "";
+        throw new Error(`${hint ? hint + " ｜ " : ""}HTTP ${r.status}${body ? "：" + body : ""}`);
       }
       const j = (await r.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
       const content = j.choices?.[0]?.message?.content;
       const reply = typeof content === "string" ? content.slice(0, 40) : Array.isArray(content) ? String(content[0]?.text ?? "").slice(0, 40) : "";
-      return { ok: true as const, ms, reply };
+      // 思考型模型可能把 512 也花光在推理上：链路是通的，回复为空要说明白
+      return { ok: true as const, ms, reply, ...(reply ? {} : { note: "链路通；回复为空——思考型模型把输出额度花在推理上了" }) };
     } finally {
       clearTimeout(timer);
     }
+  };
+
+  // 前端下拉发的是「裸模型名 + providerId」（gateway 目录的 id 不带 provider 前缀）；也兼容手写完整 provider/model。
+  // 裸名在多家接口都有（如 qwen3.8-max 三家都配了）且没带 providerId 时，挨个试，谁先通算谁。
+  const testModel = async (modelId: string, providerHint?: string) => {
+    const provs = readFullConfig().models?.providers ?? {};
+    let candidates: Array<{ providerId: string; model: string }>;
+    if (modelId.includes("/")) {
+      candidates = [{ providerId: modelId.split("/")[0] ?? "", model: modelId.split("/").slice(1).join("/") || modelId }];
+    } else if (providerHint && provs[providerHint]) {
+      candidates = [{ providerId: providerHint, model: modelId }];
+    } else {
+      candidates = Object.entries(provs)
+        .filter(([, p]) => (p.models ?? []).some((mm) => mm.id === modelId))
+        .map(([providerId]) => ({ providerId, model: modelId }));
+    }
+    if (!candidates.length) throw new Error(`找不到模型：${modelId}（没有任何接口配置过它）`);
+    const errs: string[] = [];
+    for (const c of candidates) {
+      try {
+        return { ...(await testOne(c.providerId, c.model)), providerId: c.providerId };
+      } catch (e) {
+        errs.push(`${c.providerId || "(?)"}：${(e as Error).message.slice(0, 120)}`);
+      }
+    }
+    throw new Error(errs.join(" ｜ ").slice(0, 300));
   };
   const handler = (
     req: { method?: string; socket?: { remoteAddress?: string }; headers?: Record<string, unknown>; on: (ev: string, cb: (c?: string) => void) => void },
@@ -2037,16 +2070,19 @@ function ranaModelTestMiddleware(): Plugin {
     req.on("data", (c?: string) => { body += c ?? ""; });
     req.on("end", () => {
       let modelId = "";
+      let providerId = "";
       try {
-        modelId = String((JSON.parse(body || "{}") as { modelId?: string }).modelId ?? "");
+        const b = JSON.parse(body || "{}") as { modelId?: string; providerId?: string };
+        modelId = String(b.modelId ?? "");
+        providerId = String(b.providerId ?? "");
       } catch { /* 坏 body 按空处理 */ }
       if (!modelId) {
         json(res, 400, { error: "缺 modelId" });
         return;
       }
-      testModel(modelId)
+      testModel(modelId, providerId || undefined)
         .then((out) => json(res, 200, out))
-        .catch((e: Error) => json(res, 200, { ok: false, error: e.message.includes("aborted") ? "45 秒超时（本地模型冷加载也超了？）" : e.message.slice(0, 200) }));
+        .catch((e: Error) => json(res, 200, { ok: false, error: e.message.includes("aborted") ? "75 秒超时（本地冷加载或思考型慢生成都算）" : e.message.slice(0, 200) }));
     });
   };
   return {
@@ -2157,6 +2193,92 @@ function ranaAgentInfoMiddleware(): Plugin {
   };
 }
 
+/**
+ * 群画像端点（纯只读展示）：GET /__rana/qq-profile
+ * 读公共号工作区 memory/ 下的群画像/群友画像/周报 md + 群别名表（shared-memory/qq-bridge.json）。
+ * 画像文件由 rana-qq-public 自己写（group-analyst skill），这里零写入；总结模型的切换走网关 WS RPC cron.update，不经过这里。
+ */
+function ranaQqProfileMiddleware(): Plugin {
+  const HOME = "K:/openclaw/.openclaw/.openclaw";
+  const memDir = `${HOME}/workspace-rana-qq-public/memory`;
+  const aliasFile = `${HOME}/shared-memory/qq-bridge.json`;
+
+  const json = (res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void }, code: number, out: unknown) => {
+    res.setHeader("content-type", "application/json");
+    res.statusCode = code;
+    res.end(JSON.stringify(out));
+  };
+
+  const aliases = (): Record<string, string> => {
+    try {
+      return (JSON.parse(fs.readFileSync(aliasFile, "utf8")) as { groups?: Record<string, string> }).groups ?? {};
+    } catch {
+      return {};
+    }
+  };
+
+  interface MdFile {
+    key: string;
+    title: string;
+    updated: string;
+    names?: string;
+    mtime: number;
+    md: string;
+  }
+  const listMd = (prefix: string): MdFile[] => {
+    let files: string[] = [];
+    try {
+      files = fs.readdirSync(memDir).filter((f) => f.startsWith(prefix) && f.endsWith(".md"));
+    } catch {
+      return [];
+    }
+    return files
+      .map((f) => {
+        const md = fs.readFileSync(path.join(memDir, f), "utf8");
+        const key = f.slice(prefix.length, -3);
+        return {
+          key,
+          title: (md.match(/^#\s+(.+)$/m) ?? [])[1] ?? key,
+          updated: (md.match(/^已整理至:\s*(.+)$/m) ?? [])[1] ?? "",
+          names: (md.match(/^名片名:\s*(.+)$/m) ?? [])[1],
+          mtime: fs.statSync(path.join(memDir, f)).mtimeMs,
+          md,
+        };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+  };
+
+  const handler = (
+    req: { method?: string; url?: string },
+    res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void },
+  ) => {
+    const u = new URL(req.url ?? "/", "http://x");
+    const route = u.pathname.replace(/\/+$/, "") || "/";
+
+    if (req.method === "GET" && route === "/") {
+      const al = aliases();
+      json(res, 200, {
+        groups: listMd("group-").map((g) => ({ ...g, alias: al[g.key] ?? "" })),
+        members: listMd("member-"),
+        reports: listMd("report-"),
+        generatedAt: Date.now(),
+      });
+      return;
+    }
+    json(res, 405, { error: "method not allowed" });
+  };
+
+  return {
+    name: "rana-qq-profile",
+    configureServer(server) {
+      server.middlewares.use("/__rana/qq-profile", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use("/__rana/qq-profile", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+  };
+}
+
 function ranaDevConfig(): Plugin {
   return {
     name: "rana-dev-config",
@@ -2173,7 +2295,7 @@ function ranaDevConfig(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), ranaDevConfig(), ranaProviderConfigMiddleware(), ranaSysStatusMiddleware(), ranaAvatarMiddleware(), ranaNewsMiddleware(), ranaStudyMiddleware(), ranaFateMiddleware(), ranaAgentInfoMiddleware(), ranaModelTestMiddleware(), ranaModelParamsMiddleware()],
+  plugins: [react(), ranaDevConfig(), ranaProviderConfigMiddleware(), ranaSysStatusMiddleware(), ranaAvatarMiddleware(), ranaNewsMiddleware(), ranaStudyMiddleware(), ranaFateMiddleware(), ranaAgentInfoMiddleware(), ranaQqProfileMiddleware(), ranaModelTestMiddleware(), ranaModelParamsMiddleware()],
   server: {
     port: 5173,
     proxy: {

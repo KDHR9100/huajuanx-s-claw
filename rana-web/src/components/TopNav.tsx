@@ -15,6 +15,7 @@ const TABS: Array<{ id: AppView; label: string }> = [
   { id: "news", label: "📰 早报" },
   { id: "study", label: "📚 学习计划" },
   { id: "apps", label: "🧰 程序" },
+  { id: "groups", label: "👥 群画像" },
 ];
 
 const CLICK_SLOP = 4; // 位移小于此值视为点击而非拖拽

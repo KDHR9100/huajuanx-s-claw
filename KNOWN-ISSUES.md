@@ -21,6 +21,14 @@
 
 ## 登记区
 
+## [已解决] 右上角「⚡测连通」全灭——下拉发裸模型名，服务端误当接口名解析（2026-09-13）
+
+- 症状：模型选择器里点任何模型的 ⚡ 都显示「✗不通」（悬停提示：`找不到 provider：<模型名>`），怀疑 apiKey 被密钥库藏坏了。
+- 根因（主犯）：gateway `models.list` 目录的 id 是**裸模型名**（如 `qwen3.8-flash`），provider 是独立字段；前端 Topbar 只把裸名 POST 给 `/__rana/model-test`，端点却按「`/` 前第一段=providerId」解析——没有斜杠时整个名字被当成 provider，必然报「找不到 provider」。**排查时 curl 手写完整 `provider/model` 能测通，把真凶掩盖了**（第一轮误判成「额度+旧标签页」）。真实叠加项：aliyun-maas 8 个 429=token-plan 周配额尽（09-13 15:01 北京时间重置）、bailian deepseek-v4-flash-0731 403=免费额度尽——429/403 恰说明 key 有效（401 才是 key 坏）；另有思考型模型 max_tokens=16 回复必空（推理就要几百 token）。
+- 解决方案：①端点三路解析：完整 `provider/model` → 裸名+显式 providerId（前端 test() 现在会带）→ 裸名全配置唯一匹配，撞车（qwen3.8-max 三家都有）就挨个试、谁先通算谁；②附带优化：max_tokens 16→512、超时 45s→75s、429/401/403 报错加人话前缀（额度用完≠key 坏）、空回复带 note（前端 ✓ 后缀 💭）。
+- 教训：**测带参接口必须用调用方的真实请求形状**（从页面 store/DOM 抠出来），手写"标准"参数会造出全绿的假阳性；IAB 点击注入失灵时，`playwright.evaluate(fetch...)` 是等价的用户视角验证路。
+- 状态：已解决（页面内实测 glm/bailian/lmstudio/qwenanliang 全 ✓，aliyun 按设计回人话 429；22 个模型 13 通、9 个不通全为账号侧额度问题）。
+
 ## [已解决] QQ 机器人接入三连环坑：私聊默认全拦 / 多 agent 必须显式绑定 / 通道会话混入主窗口（2026-09-12）
 
 - 症状：`openclaw channels add --channel qqbot` 成功、日志 `gateway READY`，但 QQ 私聊无回复。日志三种形态依次出现：`[access] blocked c2c from <openid>: not in allowFrom`（权限拦）→ 修权限后 `dispatch error: AgentSelectionRequiredError: ... no explicit owner`（路由缺）→ 修路由后消息落入 `agent:main:main` 主会话（与微信/网页三个入口混一个上下文）。

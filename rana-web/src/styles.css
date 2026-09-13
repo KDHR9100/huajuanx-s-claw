@@ -1989,3 +1989,35 @@ body.has-bg .room { display: none; }
 .ln-cell.sel { border-color: #5aa9e6; box-shadow: 0 0 0 1.5px color-mix(in srgb, #5aa9e6 45%, transparent) inset; }
 /* 表头流年/大运列副标（干支） */
 .bazi-table thead th .col-sub { display: block; font-size: 10px; font-weight: 400; margin-top: 1px; }
+
+/* ========== 群画像页 ========== */
+.profile-fold {
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: color-mix(in srgb, var(--bg-panel) 55%, transparent);
+}
+.profile-fold summary {
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13.5px;
+  user-select: none;
+  list-style: revert;
+}
+.profile-fold summary b { color: var(--accent-strong); }
+.profile-fold .pf-meta { margin-left: auto; font-size: 11px; color: var(--text-dim); }
+.profile-md {
+  margin: 8px 0 2px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border-radius: 10px;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
