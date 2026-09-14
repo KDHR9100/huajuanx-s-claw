@@ -49,7 +49,7 @@ export interface ModelInfo {
 export type ConnState = "connecting" | "connected" | "error" | "closed";
 
 /** 顶部导航的页面视图 */
-export type AppView = "chat" | "sys" | "cron" | "news" | "study" | "apps" | "groups" | "dsh";
+export type AppView = "chat" | "sys" | "cron" | "news" | "study" | "goals" | "apps" | "groups" | "dsh";
 
 /** 顶部导航页签（单一来源：TopNav 渲染与 store 的 ALL_VIEWS 校验都引用这份，新增页签只改这里） */
 export const NAV_TABS: Array<{ id: AppView; label: string }> = [
@@ -58,6 +58,7 @@ export const NAV_TABS: Array<{ id: AppView; label: string }> = [
   { id: "cron", label: "⏰ 定时任务" },
   { id: "news", label: "📰 早报" },
   { id: "study", label: "📚 学习计划" },
+  { id: "goals", label: "📝 待办" },
   { id: "apps", label: "🧰 程序" },
   { id: "groups", label: "👥 群画像" },
   { id: "dsh", label: "🔨 派活" },
@@ -69,7 +70,7 @@ export interface ThemeSettings {
   accent: string;
   /** 背景图片（dataURL 或 URL），空串表示未启用 */
   bgImage: string;
-  /** 背景图不透明度 0-1 */
+  /** 背景图片不透明度 0-1 */
   bgOpacity: number;
   /** 浅色 / 夜间模式 */
   mode: "light" | "dark";
@@ -77,6 +78,8 @@ export interface ThemeSettings {
   accentHistory: string[];
   /** 乐奈头像 URL（/__rana/avatar?…，空串=手绘默认脸）；带时间戳参数防缓存 */
   avatarUrl?: string;
+  /** 聊天字体缩放 0.85~1.6（只放大消息气泡/代码块/思考块/输入框，代替浏览器整页缩放） */
+  fontScale?: number;
 }
 
 /** 模型 id 归一化：去掉 provider 前缀（aliyun-maas/qwen3.8-flash → qwen3.8-flash） */

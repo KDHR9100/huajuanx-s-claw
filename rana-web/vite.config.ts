@@ -877,12 +877,18 @@ function ranaNewsMiddleware(): Plugin {
  * - POST   /__rana/study/plan             排课（Rana 按 study-planner skill 直接改 schedule.json）
  * - POST   /__rana/study/quiz-gen         出题：{courseId} | {mistakeIds:错题重考} | {planId, final:期末考}
  * - POST   /__rana/study/quiz-grade       判分；错题自动回收、错题重考自动销账、期末考成绩记到计划
+ * - GET    /__rana/study/goals            读待办 goals.json（大方向学习目标，独立文件不与课程表互扰）
+ * - POST   /__rana/study/goals            新增待办 {text}
+ * - DELETE /__rana/study/goals?id=        删除待办（已排入的课程不受影响）
+ * - POST   /__rana/study/goals/parse      大方向拆解（Rana 按 study-goal skill 只出方案，不写文件）
+ * - POST   /__rana/study/goals/push       方案确认后写入课程表：生成课程 id、挂默认计划、过期日期自动顺延
  * 服务端还负责：done 课自动排复习课（+1/+7/+16 天）、连续打卡计算、打卡里程碑评语（异步）。
  */
 function ranaStudyMiddleware(): Plugin {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const studyDir = path.join(here, ".study");
   const scheduleFile = path.join(studyDir, "schedule.json");
+  const goalsFile = path.join(studyDir, "goals.json");
   const materialsDir = path.join(studyDir, "materials");
   let agentBusy = false;
 
@@ -952,6 +958,29 @@ function ranaStudyMiddleware(): Plugin {
     contract?: { text: string; updatedAt: number };
     updatedAt: number;
   }
+  /** 待办页：大方向学习目标。plan 是她拆解出的方案（未确认），push 后课程才进 schedule.json */
+  interface GoalPlanCourse {
+    title: string;
+    date: string;
+    timeStart?: string;
+    timeEnd?: string;
+    estMin?: number;
+    note?: string;
+  }
+  interface StudyGoal {
+    id: string;
+    text: string;
+    createdAt: number;
+    status: "open" | "planned";
+    plan?: { analysis: string; summary: string; courses: GoalPlanCourse[] } | null;
+    pushedCourseIds?: string[];
+    pushedAt?: number;
+  }
+  interface StudyGoalsFile {
+    version: number;
+    goals: StudyGoal[];
+    updatedAt: number;
+  }
 
   const DEFAULT_PLAN_ID = "p-default";
   /** 学完一节正课自动安排的复习间隔（天）：1 / 7 / 16 */
@@ -1003,6 +1032,28 @@ function ranaStudyMiddleware(): Plugin {
     } catch {
       return emptySchedule();
     }
+  };
+
+  const readGoals = (): StudyGoalsFile => {
+    try {
+      const g = JSON.parse(fs.readFileSync(goalsFile, "utf8")) as StudyGoalsFile;
+      if (!Array.isArray(g.goals)) g.goals = [];
+      g.version = 1;
+      return g;
+    } catch {
+      return { version: 1, goals: [], updatedAt: 0 };
+    }
+  };
+
+  const writeGoals = (g: StudyGoalsFile) => {
+    fs.mkdirSync(studyDir, { recursive: true });
+    try {
+      fs.copyFileSync(goalsFile, goalsFile + ".bak");
+    } catch {
+      // 首次写入没有旧文件
+    }
+    g.updatedAt = Date.now();
+    fs.writeFileSync(goalsFile, JSON.stringify(g, null, 2), "utf8");
   };
 
   /** 连续打卡：按 doneAt 的本地日期，从最近一天（今天或昨天）往前数连续有完成的天数 */
@@ -1276,6 +1327,62 @@ function ranaStudyMiddleware(): Plugin {
     ].join("\n\n");
   };
 
+  /** 给她的现状摘要：未来 14 天课密度 + 逾期/打卡 + 资料库（拆解大方向时"结合他的情况"用） */
+  const goalContext = (s: StudySchedule) => {
+    const t = todayStr();
+    const load: string[] = [];
+    for (let i = 0; i < 14; i++) {
+      const d = addDays(t, i);
+      const n = s.courses.filter((c) => c.date === d && c.status === "planned").length;
+      if (n) load.push(`${d}=${n}节`);
+    }
+    const overdue = s.courses.filter((c) => c.status === "planned" && c.date < t).length;
+    return [
+      `今天日期：${t}`,
+      `未来 14 天已有课：${load.length ? load.join("、") : "全空"}`,
+      `逾期未完成：${overdue} 节；连续打卡：${s.streak.days} 天（最佳 ${s.streak.best}）`,
+      `进行中的计划：${s.plans.map((p) => p.name).join("、") || "无"}`,
+      `资料库（可用 read 工具读的绝对路径）：\n${matLines(s)}`,
+    ].join("\n");
+  };
+
+  /** 大方向拆解消息：她只出方案不改表，写入由页面确认后走 /goals/push */
+  const goalParseMessage = (goal: StudyGoal) =>
+    [
+      "【待办拆解·页面触发】用户在待办页面写下了一个大方向学习目标，点了「让Rana拆解」。",
+      `大方向原文：${goal.text}`,
+      `他的现状：\n${goalContext(readSchedule())}`,
+      "按 study-goal skill 拆解：结合他的现状把大方向拆成具体课程方案（只出方案，绝不改 schedule.json/goals.json）。",
+      '回复的最后必须是一个 ```json 代码块：{"analysis":"两三句话：学什么、为什么这么拆、结合他现状的考虑","summary":"一句话方案","courses":[{"title":"具体课名","date":"YYYY-MM-DD","timeStart":"HH:MM","timeEnd":"HH:MM","estMin":60,"note":"这节课要掌握什么"}]}（timeStart/timeEnd/estMin/note 可选）。失败则 {"ok":false,"summary":"原因"}。',
+    ].join("\n\n");
+
+  /** 校验她拆解出的方案：标题+真实日期必须，字段收窄限长 */
+  const cleanGoalPlan = (data: Record<string, unknown> | undefined): { analysis: string; summary: string; courses: GoalPlanCourse[] } => {
+    if (!data) throw new Error("没解析到方案 JSON");
+    const coursesRaw = Array.isArray(data.courses) ? data.courses : [];
+    if (!coursesRaw.length) throw new Error(String(data.summary ?? "她说没法拆").slice(0, 200));
+    if (coursesRaw.length > 60) throw new Error("一次拆超过 60 节，超出上限");
+    const courses = coursesRaw.map((raw, i) => {
+      const c = raw as Partial<GoalPlanCourse>;
+      const title = String(c?.title ?? "").trim();
+      const date = String(c?.date ?? "");
+      if (!title || !DATE_RE.test(date)) throw new Error(`第 ${i + 1} 节课缺标题，或日期不是 YYYY-MM-DD`);
+      return {
+        title: title.slice(0, 120),
+        date,
+        ...(typeof c?.timeStart === "string" && TIME_RE.test(c.timeStart) ? { timeStart: c.timeStart } : {}),
+        ...(typeof c?.timeEnd === "string" && TIME_RE.test(c.timeEnd) ? { timeEnd: c.timeEnd } : {}),
+        ...(typeof c?.estMin === "number" && c.estMin > 0 ? { estMin: Math.round(c.estMin) } : {}),
+        ...(typeof c?.note === "string" && c.note.trim() ? { note: c.note.trim().slice(0, 300) } : {}),
+      };
+    });
+    return {
+      analysis: String(data.analysis ?? "").slice(0, 1000),
+      summary: String(data.summary ?? "").slice(0, 200),
+      courses,
+    };
+  };
+
   const quizGenMessage = (course: StudyCourse, s: StudySchedule, requirements: string) =>
     [
       `【出题·页面触发】用户学完了课程「${course.title}」（${course.date}${course.kind === "review" ? "，这是复习课，题目要综合一点" : ""}），点了「出题测验」。`,
@@ -1362,6 +1469,10 @@ function ranaStudyMiddleware(): Plugin {
 
     if (req.method === "GET" && route === "/") {
       json(res, 200, readSchedule());
+      return;
+    }
+    if (req.method === "GET" && route === "/goals") {
+      json(res, 200, readGoals());
       return;
     }
     if (!isLoopback(req)) {
@@ -1455,6 +1566,129 @@ function ranaStudyMiddleware(): Plugin {
       } catch (e) {
         json(res, 400, { error: (e as Error).message });
       }
+      return;
+    }
+
+    // ---- 待办（大方向学习目标）：goals.json 独立存档；parse 走她出方案，push 才写课程表 ----
+    if (req.method === "POST" && route === "/goals") {
+      readBody(req).then((body) => {
+        try {
+          const { text } = JSON.parse(body || "{}") as { text?: string };
+          const t = String(text ?? "").trim();
+          if (!t) throw new Error("写点什么再记");
+          if (t.length > 500) throw new Error("大方向 500 字以内就行，细节让她拆的时候聊");
+          const g = readGoals();
+          if (g.goals.length >= 50) throw new Error("待办太多啦（上限 50），先清清已排的");
+          const goal: StudyGoal = {
+            id: `g-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+            text: t,
+            createdAt: Date.now(),
+            status: "open",
+            plan: null,
+            pushedCourseIds: [],
+          };
+          g.goals.unshift(goal);
+          writeGoals(g);
+          json(res, 200, { ok: true, goal, updatedAt: g.updatedAt });
+        } catch (e) {
+          json(res, 400, { error: (e as Error).message });
+        }
+      });
+      return;
+    }
+
+    if (req.method === "DELETE" && route === "/goals") {
+      const id = u.searchParams.get("id") ?? "";
+      try {
+        const g = readGoals();
+        const hit = g.goals.find((x) => x.id === id);
+        if (!hit) throw new Error(`待办不存在：${id || "(空id)"}`);
+        g.goals = g.goals.filter((x) => x.id !== id);
+        writeGoals(g);
+        json(res, 200, { ok: true, deleted: id });
+      } catch (e) {
+        json(res, 400, { error: (e as Error).message });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && route === "/goals/parse") {
+      readBody(req)
+        .then(async (body) => {
+          const parsed = JSON.parse(body || "{}") as { goalId?: string; model?: string };
+          const g = readGoals();
+          const goal = g.goals.find((x) => x.id === parsed.goalId);
+          if (!goal) {
+            json(res, 400, { error: `待办不存在：${parsed.goalId || "(空id)"}` });
+            return;
+          }
+          const model = typeof parsed.model === "string" && parsed.model ? parsed.model : undefined;
+          const r = await runAgent(goalParseMessage(goal), model);
+          try {
+            goal.plan = cleanGoalPlan(r.data);
+            goal.status = "open";
+            writeGoals(g);
+            json(res, 200, { ok: true, goal, updatedAt: g.updatedAt });
+          } catch (e) {
+            json(res, 500, {
+              ok: false,
+              error: "她没按契约拆：" + ((e as Error).message || r.error || (r.reply ?? "").slice(0, 200)),
+            });
+          }
+        })
+        .catch((e: Error) => {
+          json(res, 500, { error: e.message });
+        });
+      return;
+    }
+
+    if (req.method === "POST" && route === "/goals/push") {
+      readBody(req).then((body) => {
+        try {
+          const { goalId } = JSON.parse(body || "{}") as { goalId?: string };
+          const g = readGoals();
+          const goal = g.goals.find((x) => x.id === goalId);
+          if (!goal) throw new Error(`待办不存在：${goalId || "(空id)"}`);
+          if (!goal.plan?.courses.length) throw new Error("这条待办还没有拆解方案，先「让Rana拆解」");
+          const s = readSchedule();
+          const t = todayStr();
+          let shifted = 0;
+          const added: StudyCourse[] = goal.plan.courses.map((c) => {
+            let date = c.date;
+            let note = c.note;
+            if (date < t) {
+              // 拆完放了几天日期过期了：挪到明天起第一个没课的日子，note 里留痕
+              date = nextFreeDay(s, t);
+              shifted++;
+              note = [note, `（原定 ${c.date}，排入时已过期自动顺延）`].filter(Boolean).join(" ");
+            }
+            const course: StudyCourse = {
+              id: `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+              title: c.title,
+              date,
+              status: "planned",
+              kind: "lesson",
+              planId: DEFAULT_PLAN_ID,
+              ...(c.timeStart ? { timeStart: c.timeStart } : {}),
+              ...(c.timeEnd ? { timeEnd: c.timeEnd } : {}),
+              ...(c.estMin && c.estMin > 0 ? { estMin: c.estMin } : {}),
+              ...(note ? { note } : {}),
+              postponedCount: 0,
+              quiz: { status: "none" },
+            };
+            s.courses.push(course);
+            return course;
+          });
+          writeSchedule(s);
+          goal.status = "planned";
+          goal.pushedCourseIds = added.map((c) => c.id);
+          goal.pushedAt = Date.now();
+          writeGoals(g);
+          json(res, 200, { ok: true, added: added.length, shifted, goals: g, updatedAt: s.updatedAt });
+        } catch (e) {
+          json(res, 400, { error: (e as Error).message });
+        }
+      });
       return;
     }
 
@@ -2289,6 +2523,87 @@ function ranaQqProfileMiddleware(): Plugin {
   };
 }
 
+/**
+ * DSH 模型清单端点（纯只读）：GET /__rana/dsh-models
+ * 读 WSL 里 DSH 的 settings.yaml（deepseek/百炼路线 + 自定义 pi-ai 路线），供派活页下拉。
+ * 路径为常量字面量且只读；WSL 未开/文件缺失时返回空清单，前端退回自由填写。
+ */
+function ranaDshModelsMiddleware(): Plugin {
+  const SETTINGS = "//wsl.localhost/Ubuntu-22.04/home/<user>/DSH/.dsh-home/settings.yaml";
+
+  const parseModels = (): Array<{ provider: string; full: string; name?: string }> => {
+    let raw = "";
+    try {
+      raw = fs.readFileSync(SETTINGS, "utf8");
+    } catch {
+      return [];
+    }
+    const out: Array<{ provider: string; full: string; name?: string }> = [];
+    const lines = raw.split("\n");
+    let current = "";
+    const bodyBySection = new Map<string, string[]>();
+    for (const ln of lines) {
+      const top = ln.match(/^(\S+):\s*$/);
+      if (top) {
+        current = top[1];
+        if (!bodyBySection.has(current)) bodyBySection.set(current, []);
+        continue;
+      }
+      if (current && (ln.startsWith("  ") || ln.trim() === "")) bodyBySection.get(current)!.push(ln);
+    }
+    for (const [name, body] of bodyBySection) {      if (name === "llm-deepseek") {
+        for (const ln of body) {
+          const id = ln.match(/^\s{4}- id:\s*(\S+)/);
+          if (id) out.push({ provider: "deepseek-official", full: `deepseek-official/${id[1]}`, name: undefined });
+          const nm = ln.match(/^\s+name:\s*(.+)/);
+          if (nm && out.length) out[out.length - 1].name = nm[1].trim();
+        }
+      } else if (name === "llm-pi-ai") {
+        // providers: <key>: 下缩进的 models 列表
+        let prov = "";
+        for (const ln of body) {
+          const pk = ln.match(/^\s{4}(\S+):\s*$/);
+          if (pk) {
+            prov = pk[1];
+            continue;
+          }
+          const id = ln.match(/^\s{8}- id:\s*(\S+)/);
+          if (id && prov) out.push({ provider: prov, full: `${prov}/${id[1]}`, name: undefined });
+          const nm = ln.match(/^\s{10}name:\s*(.+)/);
+          if (nm && out.length) out[out.length - 1].name = nm[1].trim();
+        }
+      }
+    }
+    return out;
+  };
+
+  const handler = (
+    req: { method?: string; url?: string },
+    res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void },
+  ) => {
+    if (req.method === "GET") {
+      const models = parseModels();
+      res.setHeader("content-type", "application/json");
+      res.statusCode = 200;
+      res.end(JSON.stringify({ models, updatedAt: Date.now() }));
+      return;
+    }
+    res.setHeader("content-type", "application/json");
+    res.statusCode = 405;
+    res.end(JSON.stringify({ error: "method not allowed" }));
+  };
+
+  return {
+    name: "rana-dsh-models",
+    configureServer(server) {
+      server.middlewares.use("/__rana/dsh-models", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use("/__rana/dsh-models", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+  };
+}
+
 function ranaDevConfig(): Plugin {
   return {
     name: "rana-dev-config",
@@ -2305,7 +2620,7 @@ function ranaDevConfig(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), ranaDevConfig(), ranaProviderConfigMiddleware(), ranaSysStatusMiddleware(), ranaAvatarMiddleware(), ranaNewsMiddleware(), ranaStudyMiddleware(), ranaFateMiddleware(), ranaAgentInfoMiddleware(), ranaQqProfileMiddleware(), ranaModelTestMiddleware(), ranaModelParamsMiddleware()],
+  plugins: [react(), ranaDevConfig(), ranaProviderConfigMiddleware(), ranaSysStatusMiddleware(), ranaAvatarMiddleware(), ranaNewsMiddleware(), ranaStudyMiddleware(), ranaFateMiddleware(), ranaAgentInfoMiddleware(), ranaQqProfileMiddleware(), ranaDshModelsMiddleware(), ranaModelTestMiddleware(), ranaModelParamsMiddleware()],
   server: {
     port: 5173,
     proxy: {

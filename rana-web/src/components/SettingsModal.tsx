@@ -197,6 +197,29 @@ export default function SettingsModal() {
         </section>
 
         <section className="set-section">
+          <h4>
+            消息字体大小 <em>{Math.round((settings.fontScale ?? 1) * 100)}%</em>
+          </h4>
+          <input
+            className="set-range"
+            type="range"
+            min={85}
+            max={160}
+            step={5}
+            value={Math.round((settings.fontScale ?? 1) * 100)}
+            onChange={(e) => update({ fontScale: Number(e.target.value) / 100 })}
+          />
+          <div className="set-row" style={{ marginTop: 6 }}>
+            <span className="set-hint">只放大聊天消息和输入框的文字，界面其他部分不动（想看大字用这个，别用浏览器缩放）</span>
+            {(settings.fontScale ?? 1) !== 1 && (
+              <button className="btn ghost sm" onClick={() => update({ fontScale: 1 })}>
+                恢复 100%
+              </button>
+            )}
+          </div>
+        </section>
+
+        <section className="set-section">
           <h4>背景图片</h4>
           <div className="set-row">
             <button className="btn ghost" onClick={() => fileRef.current?.click()}>

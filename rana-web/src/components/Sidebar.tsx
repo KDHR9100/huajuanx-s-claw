@@ -18,6 +18,9 @@ function fmtTokens(n?: number) {
   return String(n);
 }
 
+/** cron/系统会话开关的持久化 key（默认隐藏：这些会话由定时任务产生，多数还删不掉） */
+const SHOW_SYSTEM_KEY = "rana-web.show-system-sessions";
+
 /** 服务端禁止删除的会话：global 与 agent 主会话（isMain），删除会被 gateway 拒绝 */
 const isProtectedSession = (key: string, isMain?: boolean) => isMain === true || key === "global";
 
@@ -53,6 +56,19 @@ export default function Sidebar() {
     };
     return [...sessions].sort((a, b) => rank(a.key) - rank(b.key));
   }, [sessions, pinned]);
+
+  // cron 系统会话（定时任务产生，含 Memory Dream、heartbeat 等的 Automation 会话）默认隐藏
+  const [showSystem, setShowSystem] = useState(() => localStorage.getItem(SHOW_SYSTEM_KEY) === "1");
+  const toggleSystem = () => {
+    setShowSystem((v) => {
+      localStorage.setItem(SHOW_SYSTEM_KEY, v ? "0" : "1");
+      return !v;
+    });
+  };
+  const visible = useMemo(
+    () => (showSystem ? ordered : ordered.filter((s) => !s.key.includes(":cron:"))),
+    [ordered, showSystem],
+  );
 
   // 右键菜单：点击任意处 / 窗口失焦 / Esc 关闭
   useEffect(() => {
@@ -143,8 +159,17 @@ export default function Sidebar() {
           🌸 Rana·RP
         </button>
       </div>
+      <div className="sys-toggle-row">
+        <button
+          className={`btn ghost sm${showSystem ? " on" : ""}`}
+          onClick={toggleSystem}
+          title="定时任务产生的系统会话（Memory Dream、心跳等 Automation 会话）。默认隐藏；部分 run 会话受 gateway 限制删不掉。"
+        >
+          {showSystem ? "🙈" : "👁"} 系统会话{showSystem ? "：显示中" : "：已隐藏"}
+        </button>
+      </div>
       <div className="session-list">
-        {ordered.map((s) => (
+        {visible.map((s) => (
           <div
             key={s.key}
             className={`session-item${s.key === currentKey ? " active" : ""}${unread[s.key] && s.key !== currentKey ? " unread" : ""}`}
@@ -207,7 +232,11 @@ export default function Sidebar() {
             </span>
           </div>
         ))}
-        {sessions.length === 0 && <div className="s-meta" style={{ padding: "8px 10px" }}>暂无会话</div>}
+        {visible.length === 0 && (
+          <div className="s-meta" style={{ padding: "8px 10px" }}>
+            {showSystem ? "暂无会话" : "暂无会话（系统会话已隐藏，点上方按钮可显示）"}
+          </div>
+        )}
       </div>
       <button className="btn ghost" onClick={() => setCloudOpen(true)}>
         ☁ 云端模型

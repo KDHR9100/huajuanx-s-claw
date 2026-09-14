@@ -27,6 +27,15 @@ interface CronJobLite {
   agentId?: string;
   payload?: { model?: string } & Record<string, unknown>;
 }
+/** /__rana/provider-config 返回的 provider 条目（含 baseUrl 与 key 状态，模型是配置文件全量） */
+interface ProviderLite {
+  id: string;
+  baseUrl: string;
+  apiKeyMasked: string;
+  hasKey: boolean;
+  local: boolean;
+  models: Array<{ id: string; name?: string; contextWindow?: number }>;
+}
 
 const PROFILE_JOBS = ["群画像每日增量", "群画像周报"];
 const fmtTime = (ms: number) => {
@@ -39,8 +48,11 @@ export default function GroupsPage() {
   const [data, setData] = useState<ProfileData | null>(null);
   const [error, setError] = useState("");
   const [jobs, setJobs] = useState<CronJobLite[]>([]);
+  const [providers, setProviders] = useState<ProviderLite[]>([]);
   const [savingModel, setSavingModel] = useState(false);
   const [modelMsg, setModelMsg] = useState("");
+  const [running, setRunning] = useState(false);
+  const [runMsg, setRunMsg] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -50,6 +62,18 @@ export default function GroupsPage() {
       setError("");
     } catch (e) {
       setError((e as Error).message);
+    }
+  }, []);
+
+  // provider 全量（含 baseUrl + key 状态）用于把同名模型按"哪家 URL 哪把 KEY"分组
+  const loadProviders = useCallback(async () => {
+    try {
+      const r = await fetch("/__rana/provider-config");
+      if (!r.ok) return;
+      const d = (await r.json()) as { providers?: ProviderLite[] };
+      setProviders(d.providers ?? []);
+    } catch {
+      // 拉不到就退回平铺展示（不挡画像）
     }
   }, []);
 
@@ -65,10 +89,43 @@ export default function GroupsPage() {
   useEffect(() => {
     void load();
     void loadJobs();
-  }, [load, loadJobs]);
+    void loadProviders();
+  }, [load, loadJobs, loadProviders]);
 
   const cronModel = jobs[0]?.payload?.model ?? "";
   const allPinned = jobs.length > 0 && jobs.every((j) => j.payload?.model === cronModel && Boolean(cronModel));
+
+  /** 手动补跑每日增量：cron.run 入队，然后轮询画像目录，generatedAt 变了即她写完档（约 12×30s 封顶） */
+  const runNow = async () => {
+    const daily = jobs.find((j) => j.name === PROFILE_JOBS[0]);
+    if (!daily || running) return;
+    setRunning(true);
+    setRunMsg("已排队，她开始翻增量了……");
+    try {
+      const res = await gateway.request<{ runId?: string }>("cron.run", { jobId: daily.id });
+      setRunMsg(`已排队${res.runId ? `（run ${res.runId.slice(0, 8)}…）` : ""}，她翻完增量写完档，这里会自动刷新。`);
+      const before = data?.generatedAt ?? 0;
+      for (let i = 0; i < 12; i++) {
+        await new Promise((r) => setTimeout(r, 30000));
+        try {
+          const r = await fetch("/__rana/qq-profile");
+          if (!r.ok) continue;
+          const d = (await r.json()) as ProfileData;
+          setData(d);
+          if (d.generatedAt !== before) {
+            setRunMsg("画像已更新 ✓");
+            break;
+          }
+        } catch {
+          // 单次拉取失败就等下一轮
+        }
+      }
+    } catch (e) {
+      setRunMsg(`运行失败：${(e as Error).message}`);
+    } finally {
+      setRunning(false);
+    }
+  };
 
   const setModel = async (model: string) => {
     if (savingModel) return;
@@ -93,6 +150,14 @@ export default function GroupsPage() {
   const groups = data?.groups ?? [];
   const members = data?.members ?? [];
   const reports = data?.reports ?? [];
+  // provider 分组：有 provider-config 数据就按「哪家 URL 哪把 KEY」分组展示，退回平铺
+  const hostOf = (url: string) => {
+    try {
+      return new URL(url).host;
+    } catch {
+      return url;
+    }
+  };
 
   return (
     <div className="wallboard">
@@ -105,6 +170,19 @@ export default function GroupsPage() {
           </p>
         </div>
 
+        {/* 手动补跑（4:30 电脑没开就错过了） */}
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3>
+            🔄 画像更新 <small>每天 4:30 自动跑；电脑没开着就点这里补</small>
+          </h3>
+          <div className="dsh-actions">
+            <button className="btn" disabled={running || !jobs.length} onClick={() => void runNow()} title={jobs.length ? "立刻跑一次每日增量" : "网关未连接"}>
+              {running ? "更新中……" : "立即更新一次"}
+            </button>
+            {runMsg && <span className="dsh-ok">{runMsg}</span>}
+          </div>
+        </div>
+
         {/* 总结模型选择器 */}
         <div className="card" style={{ marginBottom: 16 }}>
           <h3>
@@ -114,19 +192,50 @@ export default function GroupsPage() {
             <button className={`plan${!allPinned ? " on" : ""}`} disabled={savingModel || !jobs.length} onClick={() => void setModel("")} title="画像任务跟随 rana-qq-public 的主力模型">
               跟随主力
             </button>
-            {models.map((m) => (
-              <button
-                key={m.id}
-                className={`plan${allPinned && modelSuffix(cronModel) === modelSuffix(m.id) ? " on" : ""}`}
-                disabled={savingModel || !jobs.length}
-                onClick={() => void setModel(m.id)}
-              >
-                {modelSuffix(m.id)}
-              </button>
-            ))}
           </div>
+          {providers.length > 0 ? (
+            providers.map((p) => (
+              <div key={p.id} className="prov-group">
+                <div className="prov-head" title={`${p.id} · ${p.baseUrl || "（未配 URL）"} · ${p.hasKey ? p.apiKeyMasked : "无 KEY"}`}>
+                  <b>{p.id}</b>
+                  {p.baseUrl && <span className="prov-url">{hostOf(p.baseUrl)}</span>}
+                  <span className="prov-key">{p.local ? "本机" : p.hasKey ? `🔒 ${p.apiKeyMasked}` : "⚠ 无 KEY"}</span>
+                </div>
+                <div className="plans">
+                  {p.models.length === 0 && <span className="plan-hint">（该 provider 未配模型）</span>}
+                  {p.models.map((m) => {
+                    const full = `${p.id}/${m.id}`;
+                    return (
+                      <button
+                        key={full}
+                        className={`plan${cronModel && (cronModel === full || cronModel.endsWith(`/${m.id}`)) ? " on" : ""}`}
+                        disabled={savingModel || !jobs.length}
+                        onClick={() => void setModel(full)}
+                        title={`${full}${m.contextWindow ? ` · 上下文 ${m.contextWindow}` : ""}`}
+                      >
+                        {m.id}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="plans">
+              {models.map((m) => (
+                <button
+                  key={m.id}
+                  className={`plan${allPinned && modelSuffix(cronModel) === modelSuffix(m.id) ? " on" : ""}`}
+                  disabled={savingModel || !jobs.length}
+                  onClick={() => void setModel(m.id)}
+                >
+                  {modelSuffix(m.id)}
+                </button>
+              ))}
+            </div>
+          )}
           {modelMsg && <div className="plan-hint">{modelMsg}</div>}
-          <div className="plan-hint">文字模型看不懂群里的图（只会记「谁发了图」）；想让她看懂，把多模态模型（qwen-vl / glm-4.5v 类）配进云端模型后在这里选它。</div>
+          <div className="plan-hint">qwen3.8-flash 自带看图（多模态）——钉在它上面，她就能把群里的图看懂、记进画像；换成纯文字模型就只会记「谁发了图」。</div>
         </div>
 
         {groups.length === 0 && members.length === 0 && (

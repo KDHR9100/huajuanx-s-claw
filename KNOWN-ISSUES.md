@@ -21,6 +21,30 @@
 
 ## 登记区
 
+## [已缓解·根因待查] 隔离类 turn 全被 qwen3.8-flash 400 拒绝——心跳/画像 cron 弹 "LLM request failed: provider rejected"（2026-09-14）
+
+- 症状：QQ 私聊弹 "LLM request failed: provider rejected the request schema or tool payload"；当天日志 10 起同指纹失败（rawErrorHash sha256:341298593183，failoverReason=format，`400: [Malformed diagnostic JSON redacted]`）。中招的全是**隔离会话 turn**：每小时心跳（xx:52-57 分）、4:38 画像 cron、dashboard 会话；主会话聊天 turn 无失败记录。9-13 全天零报错。
+- 根因（待实锤）：时间线与 0:24 网关重启首次加载 acpx 插件吻合，头号嫌疑是 acpx 给工具列表新增 `acp_sessions` 等 schema 后 token-plan 的 qwen3.8-flash 端点拒绝整包 payload（400 非 JSON 网关页）。旁证：glm 系全天全绿、无工具的 model-test 全绿、问题仅在"带工具的请求"。已排除：deny acp_sessions 无效（实验 A）；画像 cron payload 未改过也中招（排除心跳 prompt 写错）。
+- 解决方案（实验 B，已生效）：隔离类 turn 换 glm 路线绕开——①`agents.defaults.heartbeat.model: "glm/glm-5.3-flash"`；②画像 cron `openclaw cron edit 854405fc... --model "glm/glm-5.3-flash"`。**⚠️ heartbeat.model 对运行中心跳不热生效（同 bindings 热重载坑），必须重启网关**。验证：重启后心跳/画像 cron 的 glm 调用全 200（[model-fetch] status=200），心跳结果正常投递 QQ。
+- 遗留风险：`main.model` 仍是 qwen3.8-flash——今天主会话 turn 未复现失败，但若 QQ 聊天也弹同款错误，一行 `agents.entries.main.model: "glm/glm-5.3-flash"` 即可绕开。真正根因（acpx schema vs token-plan 网关策略）待上游观察或禁 acpx 对照实验（会影响 DSH 派活，做前需用户确认）。
+- 教训：①"弹了两次"≠只发生两次——先 grep 指纹再数；②失败时间分布（xx:52-57）直接暴露触发源是心跳；③cron/heartbeat 的模型覆盖改动**不热生效**，验证前先重启网关。
+- 状态：已缓解（glm 路线全绿）；qwen+acpx 根因待查。
+
+## [已解决] 微信通道静默死亡——网关进程丢 OPENCLAW_STATE_DIR，微信插件回落主目录找不到账号（2026-09-14）
+
+- 症状：微信发消息无回复（RP 侧），但网页端聊天正常、QQ 正常。`openclaw channels status` 的列表里**微信整个消失**（只剩 QQ），`status --json` 显示 `openclaw-weixin: {configured:false}` 且 `channelAccounts` 为空数组；网关日志里微信插件除 `[compat] OK` 外零输出（无 `starting weixin provider`、无报错）。微信插件的真实活动停在出事那次网关重启（同步游标文件 `openclaw-weixin/accounts/*sync.json` 的 mtime）。
+- 根因：微信插件的凭据不在 openclaw.json（那里只有 `channelConfigUpdatedAt` 一个字段，属常态），而在 **state 目录** `openclaw-weixin/accounts/` 下。插件找 state 目录的顺序是 `OPENCLAW_STATE_DIR` → `CLAWDBOT_STATE_DIR` → `~/主目录/.openclaw`，**不认 `OPENCLAW_HOME`**；而网关核心只认 `OPENCLAW_HOME`（用户级变量，指向 `K:\OpenClaw\.openclaw`）。网关进程的 `OPENCLAW_STATE_DIR` 丢失（启动脚本 `start-gateway.cmd` 里明明 `set` 了，但进程环境块里没有——openclaw 启动器/agent-exec 有多处「保存-恢复该变量」的代码，存在弄丢路径；用 psutil 读进程环境实证缺失），插件于是回落到 `C:\Users\Administrator\.openclaw` 找账号 → 空列表 → 通道从不启动且不报任何错。QQ 无恙是因为其凭据直接写在 openclaw.json。诊断时的迷惑点：CLI 侧 `channels list` 说「configured」（CLI 进程里有变量），网关侧说没配置——同一文件两个进程结论相反即此病。
+- 解决方案（2026-09-14 落地）：①`setx OPENCLAW_STATE_DIR K:\OpenClaw\.openclaw\.openclaw` 写成**用户级永久环境变量**（与 OPENCLAW_HOME 同址，以后任何方式启动网关都带）；②按标准流程重启网关（taskkill + start-gateway.cmd，启动时再在父进程显式注入一次双保险）。验证：`channels status` 出现 `openclaw-weixin ... running, in:1m ago`，日志出现 inbound + `outbound: text sent OK`，微信实测收发全通。
+- 排障抓手：①`channels status --json` 看 `channelAccounts.<通道>` 是否为空数组（空=插件没找到账号）；②对比 `channels list`（CLI 本地视角）与 `channels status`（网关视角）对同一通道的结论；③`python -c "import psutil; print(psutil.Process(<网关PID>).environ().get('OPENCLAW_STATE_DIR'))"` 直接验尸进程环境；④微信插件代码在 `.openclaw/.openclaw/npm/projects/tencent-weixin-openclaw-weixin-*/`，其 `src/storage/state-dir.js` 即目录解析逻辑。
+- 状态：已解决（setx 永久变量 + 重启后全链路实测通）。
+
+## [已解决·部分上游限制] "Automation" 会话删不掉——run 会话 gateway 不认 + 父会话被 placement 残留卡死（2026-09-14）
+
+- 症状：会话列表里一批 cron 产生的会话（前端显示 Automation 开头）删不掉；点 ✕ 或 CLI `sessions delete` 报错。两类症状：①`agent:main:cron:<jobId>:run:<runId>` 的 **run 级会话** → `Session not found`（gateway 的 delete 接口不认 run 级 key，哪怕 `sessions list` 能列出来）；②`agent:main:cron:<jobId>` 的**父会话** → `could not safely stop ... cloud worker placement identity changed`（state 主库 `worker_session_placements` 里 13 行 run 级残留 `terminal_reason=NULL`，"删除前安全停止"校验永远不过）。`sessions cleanup` 只是常规维护，不清这些。
+- 根因：cron 每次执行产生 run 会话；run 的 placement 在任务结束后不清（残留），父/子删除路径都被它卡死或排除。多数涉事 job id 已不在现役 cron 表（死任务遗骸）。
+- 解决方案（09-09 手术法的 2026 复用+扩展）：①停网关 → 备份 `state/openclaw.sqlite` 与 `agents/main/agent/openclaw-agent.sqlite` → `DELETE FROM worker_session_placements WHERE session_key LIKE '%:cron:%'`（**只删 cron 类，main/群聊等活跃 placement 别动**）→ 重启网关；②父会话 `openclaw sessions delete <key> --agent main --yes` 逐个删（会级联归档；删除确认必须 --yes，且**全局 key 必须带 --agent**，否则误报 Session not found）；③**run 级会话 delete 依旧 not found（gateway 不认，上游限制）**——placement 已清、不再占用，列表残留交给前端「系统会话」隐藏开关（Sidebar 默认隐藏 `:cron:`）。残留小写 store_key 行（09-14 已登记）留给 doctor --fix。
+- 状态：已解决（13 行 placement 清除、5 个父会话删除、19→6 条；run 级残留 4 条为上游限制，UI 已默认隐藏）。
+
 ## [已解决] 心跳 30 分钟整会话唤醒、94% NO_REPLY 空转 ≈500 万 token/天 + 记忆桥降频 + 私密桥复活（2026-09-14）
 
 - 症状（诊断口径）：heartbeat 每 30 分钟在 `agent:main:main` 整会话跑一轮（9-13 实跑 33 次、31 次 NO_REPLY），每次携带 ~15 万 token 上下文（cacheRead），折 ~5M tokens/天；心跳 turn 实测 11-72s，与用户消息在主会话互斥排队（"说话等好一会"的贡献者之一）。另：main 主会话自 9-8 无压缩滚到 151,762/262,144（58%）。
@@ -306,3 +330,8 @@
 - 根因一：桥脚本直读 `openclaw.json` 的 `aliyun-maas.apiKey`，SecretRef 迁移后读到 `{source:"store",...}` 对象当 Bearer 用。根因二：glm-5.3-flash 是思考型模型，推理就花几百 token，`max_tokens:500` 时正文经常被挤空（finish_reason 还是 stop，更迷惑）。
 - 解决方案：`resolveApiKey()` 兼容 SecretRef（读 state SQLite 的 secret_store_entries 表）；云端提炼统一走 glm 且 `max_tokens:1500`；云端腿产出 0 条时把被拒原文写进 .bridge.log 排障。旁路脚本凡直读 apiKey 都要过 resolveApiKey 这关。
 - ⚠️ 第三处（2026-09-14 补刀）：`news-report.mjs` 同样直读 `p.apiKey` 当字符串，早报「乐奈的总结」自密钥迁移起静默失效（`Bearer [object Object]` → 401 被 catch 吞掉，页面只见总结卡空着）。已修：新建 `lib/rana-config.mjs` 共享模块统一 resolveApiKey，早报接入；report.json 新增 `summaryError` 字段、前端显式显示失败原因——同类静默失败不再藏。实测总结出字。
+
+## [缓解] IAB 自动化：window.confirm 会同步阻塞 evaluate（2026-09-14 补充）
+
+- 症状：`evaluate()` 里触发页面删除按钮（内部调 `window.confirm`）→ evaluate 挂到 32s 超时；且同一会话里 ×1.61 坐标点击时灵时不灵（9-12 能点中页签，9-14 同样打法失效）。
+- 解决方案：导航/按钮一律优先 `evaluate(() => el.click())`（最稳）；带 confirm 的操作，让 evaluate 超时后**另起一个 js 调用** `tab.getJsDialog()` 取弹窗再 accept——弹窗会一直挂着等处理，数据操作在 accept 后正常完成。

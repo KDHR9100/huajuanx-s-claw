@@ -114,7 +114,7 @@ function readNewEvents(agentId, sinceMs, capChars, opts = {}) {
   let chars = 0;
   for (const r of rows) {
     const key = keyOf.get(r.session_id) || '';
-    if (key.includes(':cron:')) continue; // 早报等系统会话不进共享记忆
+    if (key.includes(':cron:') || key.includes(':eval-')) continue; // 系统会话与 RP 评估会话不进共享记忆
     if (opts.sessionFilter && !opts.sessionFilter(key)) continue;
     let j;
     try { j = JSON.parse(r.event_json); } catch { continue; }

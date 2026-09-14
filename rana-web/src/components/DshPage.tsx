@@ -1,8 +1,15 @@
 // DshPage：🔨 派活——把编码重活委派给 DSH（WSL 里的 DeepSeek 工人，经 acpx/ACP 协议）。
 // 表单组装一条结构化委派指令发进 main 主会话，Rana 按 delegate-to-dsh 技能派后台任务；
 // 进度与结果在「会话」页聊天流里看（完成后 announce 回报）。
-import { useState } from "react";
+// 模型下拉来自 /__rana/dsh-models（读 WSL 里 DSH 的 settings.yaml）；拉不到时退回自由填写。
+import { useCallback, useEffect, useState } from "react";
 import { gateway } from "../lib/gateway";
+
+interface DshModel {
+  provider: string;
+  full: string;
+  name?: string;
+}
 
 const PRESETS: Array<{ name: string; cwd: string }> = [
   { name: "Aetheran（NPC 游戏 AI）", cwd: "K:/Aetheran" },
@@ -14,9 +21,26 @@ export default function DshPage() {
   const [cwd, setCwd] = useState(PRESETS[0].cwd);
   const [task, setTask] = useState("");
   const [accept, setAccept] = useState("");
+  const [model, setModel] = useState("");
+  const [dshModels, setDshModels] = useState<DshModel[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+
+  const loadModels = useCallback(async () => {
+    try {
+      const r = await fetch("/__rana/dsh-models");
+      if (!r.ok) return;
+      const d = (await r.json()) as { models?: DshModel[] };
+      setDshModels(d.models ?? []);
+    } catch {
+      // WSL 没开/中间件不可用：保持自由填写模式
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadModels();
+  }, [loadModels]);
 
   const send = async () => {
     const t = task.trim();
@@ -29,12 +53,14 @@ export default function DshPage() {
       `cwd：${cwd.trim() || PRESETS[0].cwd}`,
       `任务：${t}`,
       accept.trim() ? `验收：${accept.trim()}` : "验收：完成后自测并说明验了什么。",
+      model.trim() ? `模型：派活时把 model 设为 ${model.trim()}（若 DSH 不支持该模型或能力不支持设置，退回 DSH 默认并在汇报里说明）。` : "模型：用 DSH 默认模型即可。",
       "请按 delegate-to-dsh 技能派给 DSH 执行；开工前先确认 WSL 可用与 git 状态，完成后用大白话汇报改了哪、验了什么。",
     ].join("\n");
     try {
       await gateway.sendChat("agent:main:main", lines);
       setTask("");
       setAccept("");
+      setModel("");
       setNotice("已发进会话——Rana 会先检查 WSL 与 git 状态再派活。进度和结果去「💬 会话」页看。");
     } catch (e) {
       setError((e as Error).message);
@@ -83,6 +109,26 @@ export default function DshPage() {
               onChange={(e) => setAccept(e.target.value)}
               placeholder="例：pytest 全绿 + 基线哈希不变"
             />
+          </div>
+          <div className="field-row">
+            <label>DSH 模型（可空，留空用 DSH 默认）</label>
+            {dshModels.length > 0 ? (
+              <select value={model} onChange={(e) => setModel(e.target.value)}>
+                <option value="">DSH 默认（deepseek-v4-flash-0731）</option>
+                {dshModels.map((m) => (
+                  <option key={m.full} value={m.full}>
+                    {m.full}
+                    {m.name ? ` · ${m.name}` : ""}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder="例：glm/glm-5.3-flash（WSL 未开时读不到清单，手动填 provider/模型）"
+              />
+            )}
           </div>
           <div className="dsh-actions">
             <button className="btn" onClick={() => void send()} disabled={busy || !task.trim()}>

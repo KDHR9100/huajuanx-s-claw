@@ -13,6 +13,7 @@ export const DEFAULT_SETTINGS: ThemeSettings = {
   mode: "light",
   accentHistory: [],
   avatarUrl: "",
+  fontScale: 1,
 };
 
 /** 预设主题色（乐奈绿为默认主色，用户气泡固定粉不随之变化） */
@@ -49,6 +50,10 @@ export function loadSettings(): ThemeSettings {
       mode: parsed.mode === "dark" ? "dark" : "light",
       accentHistory: Array.isArray(parsed.accentHistory) ? parsed.accentHistory.filter(isHexColor).slice(0, MAX_HISTORY) : [],
       avatarUrl: typeof parsed.avatarUrl === "string" ? parsed.avatarUrl : "",
+      fontScale:
+        typeof parsed.fontScale === "number" && Number.isFinite(parsed.fontScale)
+          ? Math.min(1.6, Math.max(0.85, parsed.fontScale))
+          : 1,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -70,6 +75,7 @@ export function applySettings(settings: ThemeSettings) {
   const root = document.documentElement;
   root.style.setProperty("--accent", settings.accent);
   root.style.setProperty("--user-bg-opacity", String(settings.bgOpacity));
+  root.style.setProperty("--font-scale", String(settings.fontScale ?? 1));
   root.dataset.mode = settings.mode;
   if (settings.bgImage) {
     root.style.setProperty("--user-bg-image", `url("${settings.bgImage}")`);
