@@ -21,14 +21,23 @@
 
 ## 登记区
 
+## [已解决·本地补丁] QQ 群图片被插件降级成文字占位 → 模型永远看不到图（2026-09-14）
+
+- 症状：群里发的图片，Rana（rana-qq-public）只记「某某发了图」；钉多模态模型（qwen3.8-flash）也没用；群画像翻不到图的内容。
+- 根因（四环排查后锁定）：**@tencent-connect/openclaw-qqbot 插件 2.0.3 的入站装配只把语音接进媒体通道**。QQ 事件里的图片附件被 `attachmentProcessor` 下载到了本地（`localMediaPaths`），但 `buildCtxPayload` 组装给核心的消息时 `media:` 字段只收 `startsWith("audio/")` 的文件——图片只剩 `[image: 文件名]` 文字占位，下载的图片文件无引用。核心侧支持完好（agent-turn-attachments 会把 image 附件转成模型图像块）。上游现状：2.0.3=npm 最新；之后 7 个提交无入站图片改动；issue #300（相关：手机 QQ 把「@+图」拆成两事件、纯图事件被门控丢弃，`DEFAULT_GROUP_CONFIG.requireMention: true` 默认开）开放中零回复。
+- 解决方案：本地补丁 `dist/index.cjs`（备份 `state/backups/index.cjs.bak-20260914-imagepatch`）：①`voicePaths/voiceUrls` 过滤 audio→audio+image（新增 `mediaTypeOk`）；②`media:` 三元表达式重写为 IIFE——本地文件按 audio/image 双白名单成对取 `{contentType, localPath}`（顺带修了原代码过滤后索引与 `localMediaTypes` 错位的隐患），远端 URL 按扩展名补 image 项。`node --check` + 网关重启验证过。
+- ⚠️ 维护：**插件升级/重装会覆盖本补丁**——升级后按本条目重打（或查上游是否已修）。测纯图（无 @ 文本）仍可能被 #300 的门控丢事件：要收纯图需对具体群设 `channels.qqbot.groups.<群openid>.requireMention: false`（代价=处理群里每条消息）。另一依赖：群画像任务若钉 qwen3.8-flash 会撞上一条目（qwen3.8-flash 带工具隔离 turn 400），识图链路要通需两个问题都避开。
+- 状态：已解决（补丁落位、网关重启、渠道 READY；实际识图效果待群里实测）。
+
 ## [已缓解·根因待查] 隔离类 turn 全被 qwen3.8-flash 400 拒绝——心跳/画像 cron 弹 "LLM request failed: provider rejected"（2026-09-14）
 
-- 症状：QQ 私聊弹 "LLM request failed: provider rejected the request schema or tool payload"；当天日志 10 起同指纹失败（rawErrorHash sha256:341298593183，failoverReason=format，`400: [Malformed diagnostic JSON redacted]`）。中招的全是**隔离会话 turn**：每小时心跳（xx:52-57 分）、4:38 画像 cron、dashboard 会话；主会话聊天 turn 无失败记录。9-13 全天零报错。
-- 根因（待实锤）：时间线与 0:24 网关重启首次加载 acpx 插件吻合，头号嫌疑是 acpx 给工具列表新增 `acp_sessions` 等 schema 后 token-plan 的 qwen3.8-flash 端点拒绝整包 payload（400 非 JSON 网关页）。旁证：glm 系全天全绿、无工具的 model-test 全绿、问题仅在"带工具的请求"。已排除：deny acp_sessions 无效（实验 A）；画像 cron payload 未改过也中招（排除心跳 prompt 写错）。
+- 症状：QQ 私聊弹 "LLM request failed: provider rejected the request schema or tool payload"；当天日志 10 起同指纹失败（rawErrorHash sha256:341298593183，failoverReason=format，`400: [Malformed diagnostic JSON redacted]`）。中招的全是**隔离会话 turn**：每小时心跳（xx:52-57 分）、4:38 画像 cron、dashboard 会话；主会话聊天 turn 无失败记录。9-13 全天零报错。**补录（9-15 凌晨复盘）**：9-14 同一端点其实出了三种病——除 400 外还有 14 次 `Connection error`（实为 13:50/18:55/19:55 三波秒级重试风暴）和 3 次 `Provider returned an incomplete or malformed tool call`（14:49/22:23/22:40，HTTP 200 但生成内容残缺）；三种病 9-13 全为 0。
+- 根因（待实锤）：时间线与 0:24 网关重启首次加载 acpx 插件吻合，头号嫌疑是 acpx 给工具列表新增 `acp_sessions` 等 schema 后 token-plan 的 qwen3.8-flash 端点拒绝整包 payload（400 非 JSON 网关页）。旁证：glm 系全天全绿、无工具的 model-test 全绿、问题仅在"带工具的请求"。已排除：deny acp_sessions 无效（实验 A）；画像 cron payload 未改过也中招（排除心跳 prompt 写错）。**反证（9-15 复盘）**：0:24 加载 acpx 后 02:50 的心跳（qwen）依然成功——"架构一更新就全死"不成立；失败集中在 04:38-20:47（北京时间白天到晚间），02:50 与 21:55 之后均正常，呈**日间倾斜**，更像端点自身病了半天。
 - 解决方案（实验 B，已生效）：隔离类 turn 换 glm 路线绕开——①`agents.defaults.heartbeat.model: "glm/glm-5.3-flash"`；②画像 cron `openclaw cron edit 854405fc... --model "glm/glm-5.3-flash"`。**⚠️ heartbeat.model 对运行中心跳不热生效（同 bindings 热重载坑），必须重启网关**。验证：重启后心跳/画像 cron 的 glm 调用全 200（[model-fetch] status=200），心跳结果正常投递 QQ。
-- 遗留风险：`main.model` 仍是 qwen3.8-flash——今天主会话 turn 未复现失败，但若 QQ 聊天也弹同款错误，一行 `agents.entries.main.model: "glm/glm-5.3-flash"` 即可绕开。真正根因（acpx schema vs token-plan 网关策略）待上游观察或禁 acpx 对照实验（会影响 DSH 派活，做前需用户确认）。
-- 教训：①"弹了两次"≠只发生两次——先 grep 指纹再数；②失败时间分布（xx:52-57）直接暴露触发源是心跳；③cron/heartbeat 的模型覆盖改动**不热生效**，验证前先重启网关。
-- 状态：已缓解（glm 路线全绿）；qwen+acpx 根因待查。
+- 遗留风险：`main.model` 仍是 qwen3.8-flash——今天主会话 turn 未复现失败，但若 QQ 聊天也弹同款错误，一行 `agents.entries.main.model: "glm/glm-5.3-flash"` 即可绕开。
+- 实验 C（2026-09-15 00:04-00:24，用户批准后执行）：手动心跳 A/B 对照，各 3 次——**臂1**（acpx 开 + 心跳摘 glm 钉回落 qwen）3/3 成功（76s/60s/113s）；**臂2**（acpx 关 + 心跳 qwen）端点层面同样干净（无 400/畸形/断连，21.5s/27.5s 两次成功）。两臂全绿 = **qwen 端点当夜已自愈，acpx 载荷诱因假说无法在同一病窗内复现，悬置**。臂2 唯一失败是一次 `agent-tool-failure`：模型把消息工具目标写成 `qqbot:c2c`（漏了 openid 后缀，提示语里就有正确格式），9-13/9-14 均零发生，属 qwen 单发手滑，与端点无关——已应用户要求在 `agents.defaults.heartbeat.prompt` 末尾追加目标格式提醒（提醒对任何心跳模型都有效；prompt 热生效，9-15 00:45 验证心跳 ok）。实验全程配置动过三处（heartbeat.model、activeHours.end、acpx.enabled），结束后已还原并与实验前备份 `openclaw.json.bak-expc` 语义比对一致，还原后心跳 00:23 glm ok（199s）。
+- 教训：①"弹了两次"≠只发生两次——先 grep 指纹再数；②失败时间分布（xx:52-57）直接暴露触发源是心跳；③cron/heartbeat 的模型覆盖改动**不热生效**，验证前先重启网关；④手动触发心跳用 `openclaw cron run <heartbeat jobId>`，成败看 `openclaw cron runs <jobId>` 的 status/durationMs；heartbeat 是 system-owned 任务，`cron disable` 会被拒（"system-owned monitor jobs cannot be edited"）。
+- 状态：已缓解（glm 路线全绿）；实验 C 已做：当晚两臂全绿无法归因，acpx 诱因假说悬置，主嫌疑 = token-plan qwen3.8-flash 端点日间不健康（已自愈）。**9-15 用户拍板：心跳 glm 钉已拔**（回落 qwen3.8-flash，00:53 心跳 22.6s 绿、运行窗口 14 次调用全 qwen 全 200；术前的 glm 配置存 `openclaw.json.bak-unpin-hb` 可随时回钉）；**主人画像 cron 也已切回 `aliyun-maas/qwen3.8-flash`**（cron edit 即时生效无需重启）。⚠️ 但 9-15 01:01 画像手动验证跑暴露新问题：47 次 qwen 调用全 200、跑 468s，工具活干完却不写画像档案（停在 9-13 05:15）、"settled post-tool turn lacked a final answer"+finalization 失败（模型收尾时又去调工具）——与 9-14 晚 dashboard 同 signature，但端点健康下复现 = qwen3.8-flash 长工具链收尾问题，非端点病，待查。另：群画像（b566bd64，240s 上限）实际约每 30 分钟跑一次增量而非名单显示的每日，偶发 240s 超时后下一轮自愈。
 
 ## [已解决] 微信通道静默死亡——网关进程丢 OPENCLAW_STATE_DIR，微信插件回落主目录找不到账号（2026-09-14）
 
@@ -296,7 +305,7 @@
 ## [行为说明] rana-qq-public 装上共享记忆后的边界（2026-09-12）
 
 - 做了什么：工作区加 MEMORY.md（所有 QQ 群共享一份长期记忆）+ `memory_search/memory_get/message/skill_workshop` alsoAllow + `memory.search.rememberAcrossConversations: true`（开跨会话回忆：A 群的对话 B 群检索得到）。
-- 边界：她仍无文件读写/命令/联网能力；共享记忆只含群聊公开内容，不含主人私人档案（将来"群里认主人"= 往 MEMORY.md 写一份过滤过的主人摘要即可，无需改配置）。
+- 边界：她仍无文件读写/命令/联网能力（09-15 起解锁萌娘百科查询，见文末「群聊接入萌娘百科」条目）；共享记忆只含群聊公开内容，不含主人私人档案（将来"群里认主人"= 往 MEMORY.md 写一份过滤过的主人摘要即可，无需改配置）。
 - 注意：`rememberAcrossConversations` 的显式落点是 `agents.entries.<id>.memory.search.rememberAcrossConversations`（全局 `memory.search` 也行）；不设则默认看 dmScope——binding 带 `session.dmScope` 时默认关。
 
 ## [已解决] doctor 密钥迁移(SecretRef)后 rana-web 云端模型面板变空（2026-09-12）
@@ -335,3 +344,27 @@
 
 - 症状：`evaluate()` 里触发页面删除按钮（内部调 `window.confirm`）→ evaluate 挂到 32s 超时；且同一会话里 ×1.61 坐标点击时灵时不灵（9-12 能点中页签，9-14 同样打法失效）。
 - 解决方案：导航/按钮一律优先 `evaluate(() => el.click())`（最稳）；带 confirm 的操作，让 evaluate 超时后**另起一个 js 调用** `tab.getJsDialog()` 取弹窗再 accept——弹窗会一直挂着等处理，数据操作在 accept 后正常完成。
+
+## [已落地] 群聊幻觉对症下药：接入萌娘百科 MCP + SOUL 防幻觉条款（2026-09-15）
+
+- 症状：09-14 晚群聊连续幻觉——Love Live 趴趴玩偶硬认成《孤独摇滚》还无中生有"灰毛兜帽"；编造不存在的组合名"RSB"；有咲说成 Roselia 键盘手（实为 Poppin'Party）+ 编"养猫/去过她家"细节；编造群友没说过的旧话。群友当场抓包多次。
+- 根因：SOUL.md 只禁"编记忆"、没禁"编原作知识"，且有句"聊原作自然接、像聊自己的生活"反而鼓励不懂装懂；她手上又没有任何查询工具，不知道只剩顺嘴编一条路。
+- 方案四件套（备份均 `.bak-moegirl-20260915`）：
+  1. 自建零依赖 stdio MCP server：`.openclaw/.openclaw/mcp-servers/moegirl.mjs`（照 bocha-web-search.mjs 骨架），工具 `moegirl_search`（opensearch 搜条目名）+ `moegirl_summary`（extracts 拉开头摘要）；只访问 `zh.moegirl.org.cn`、30 分钟内存缓存、10 秒超时、摘要截断 1200 字防爆上下文、免 key。
+  2. `openclaw.json`：`mcp.servers` 挂 `moegirl`；`rana-qq-public.tools.alsoAllow` **只**追加 `"moegirl__*"`（不开 bundle-mcp 大门，隔离边界只开一条缝）。main（私聊/网页端）默认策略本就放行 MCP，自动获得。
+  3. skill：`workspace-rana-qq-public/skills/moegirl-lookup/SKILL.md`——两步查法（search 确认条目名→summary 拿摘要）、查不到到此为止不许脑补、认图只对查到的特征。
+  4. SOUL.md 追加「不懂别装」一节（原作知识/转述言行/自查口令三条），并修正"你没有网可上"旧句（否则她会拒绝用新工具）；AGENTS.md 工具边界条同步改写。
+- 验证：`openclaw mcp doctor moegirl --probe` ok；CLI 端到端（`openclaw agent --agent rana-qq-public --session-key moegirl-e2e-… -m "有咲在哪个乐队"`）transcript 显示她先读 SKILL → `moegirl__moegirl_search` → `moegirl__moegirl_summary` → 答对"Poppin'Party 键盘手"（09-14 原题翻案）。
+- 遗留观察点：没查到的外观细节仍会小脑补（实测答"银发"，有咲实为金发）——条款压制效果待真实群聊观察；JR 线路类现实交通幻觉不在本方案射程（萌娘百科管不着）。
+- 排障抓手：MCP 手测 `printf '{"jsonrpc":"2.0",…,"method":"tools/call",…}' | node moegirl.mjs`；工具全名带双前缀（`moegirl__moegirl_search`）；`minimal` profile 的 agent 配了 MCP server 也不会自动可见，**必须 alsoAllow 加 `服务器名__*` 或具体工具名**；改 openclaw.json 后要重启网关（taskkill PID + start-gateway.cmd）。
+
+## [已落地] 角色档案二次升级：禁脑补铁律 + 本地条目档案 + 关系网策略（2026-09-15）
+
+- 背景：首轮实测发现她答对乐队位置但仍脑补没查到的外观细节（答"银发"，有咲实为金发且摘要没写发色）；用户要求"绝对百科事实，不能脑补"+ 查完建本地档案。
+- 机制（全部落在 skill/SOUL 提示词层，moegirl.mjs 和配置零改动）：
+  1. **先档案后上网**：`read memory/characters/<名>.md`（外号试 1-2 变体）→ 猜不中 `memory_search` 向量兜底（工作区文件本就在记忆索引内）→ 都没有才 `moegirl_search`+`moegirl_summary` → `write` 建档。档案超一个月且群里争论细节才重查。
+  2. **禁脑补铁律**：百科和档案里写到的才能说；发色/身高/声优/关系深浅摘要没写就直说「百科简介里没写」——她连"没写"本身都会记进档案（"百科摘要未记载发色…"）。
+  3. **关系网不预铺**：同团/同校/同企划由两条身份行对照即得（不用存）；「关系」行只记推不出且查证过的（前队友、跨团 CP）；亲疏排名题查到什么说什么，查不到明说；聚合问题（队内谁跟谁好）直接查乐队/作品条目建档复用。BanG Dream 自企划是她自己的生活不走百科（SOUL 原有边界）。
+- 三轮实测全过：①问矢泽妮可+发色陷阱→查百科+建档+答"百科没写不乱说"；②新会话外号"妮可"→memory_search 兜底翻档案，**零网络调用**；③"妮可和真姬什么关系"→读档案+补建真姬档+CP 专页搜不到如实说+拒绝评价亲疏。
+- 检索选型结论（用户问过）：直读最快最准不可能认错人 > 向量兜底（现成 memory_search，零新代码）> 中文正则（她无文件搜索权限，为它开新工具不值，弃用）。聊天场景检索速度不是瓶颈（一轮回答 10-20s，大头在模型）。
+- **索引与去重（同日三次升级）**：`memory/characters/INDEX.md`（一行一个：`名字 | 别名 | 文件名`）是档案单一入口——查档先读索引把外号对到正式文件名，从源头杜绝"外号档"；建档/更新同步写索引；group-analyst 每日增量顺手维护（明显重复合并成正式名一份、被并文件留一行指路墓碑、死行删除、别名补齐，拿不准不动）。实测：星空凛建档自动写索引（且她自发区分了"百科直陈"与"对照企划条目推出"两种事实来源）；人工造重复档妮可.md 触发合并，别名并归+墓碑+要点并集全部正确。sed 改竖线分隔的索引文件会撞分隔符，用 Edit/python 改。
