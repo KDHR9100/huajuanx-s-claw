@@ -27,6 +27,8 @@ rana-web/fix-ws-path.mjs
 rana-web/private-memory-bridge.mjs
 # RP 评估脚手架与语料/转写（含私人向素材与生成对话，整体本地化）
 rp-eval/
+# RP 微调：数据管线、数据集（含真实 NSFW RP 日志）、训练配置与产物，全部本地
+rp-tune/
 
 # LM Studio 控制台（本地模型加载管理，node_modules 不入库）
 node_modules/

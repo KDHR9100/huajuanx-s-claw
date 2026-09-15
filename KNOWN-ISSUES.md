@@ -52,7 +52,10 @@
 - 症状：会话列表里一批 cron 产生的会话（前端显示 Automation 开头）删不掉；点 ✕ 或 CLI `sessions delete` 报错。两类症状：①`agent:main:cron:<jobId>:run:<runId>` 的 **run 级会话** → `Session not found`（gateway 的 delete 接口不认 run 级 key，哪怕 `sessions list` 能列出来）；②`agent:main:cron:<jobId>` 的**父会话** → `could not safely stop ... cloud worker placement identity changed`（state 主库 `worker_session_placements` 里 13 行 run 级残留 `terminal_reason=NULL`，"删除前安全停止"校验永远不过）。`sessions cleanup` 只是常规维护，不清这些。
 - 根因：cron 每次执行产生 run 会话；run 的 placement 在任务结束后不清（残留），父/子删除路径都被它卡死或排除。多数涉事 job id 已不在现役 cron 表（死任务遗骸）。
 - 解决方案（09-09 手术法的 2026 复用+扩展）：①停网关 → 备份 `state/openclaw.sqlite` 与 `agents/main/agent/openclaw-agent.sqlite` → `DELETE FROM worker_session_placements WHERE session_key LIKE '%:cron:%'`（**只删 cron 类，main/群聊等活跃 placement 别动**）→ 重启网关；②父会话 `openclaw sessions delete <key> --agent main --yes` 逐个删（会级联归档；删除确认必须 --yes，且**全局 key 必须带 --agent**，否则误报 Session not found）；③**run 级会话 delete 依旧 not found（gateway 不认，上游限制）**——placement 已清、不再占用，列表残留交给前端「系统会话」隐藏开关（Sidebar 默认隐藏 `:cron:`）。残留小写 store_key 行（09-14 已登记）留给 doctor --fix。
-- 状态：已解决（13 行 placement 清除、5 个父会话删除、19→6 条；run 级残留 4 条为上游限制，UI 已默认隐藏）。
+- 一键化（2026-09-15 落地）：上述手术流程脚本化为 `rana-web/cron-session-cleanup.mjs`（自动停网关→备份含 -wal/-shm→清 placement→重启网关→按 agent 枚举删 cron/heartbeat 父会话；`--dry-run` 只盘点不动刀），进度落盘 `%TEMP%\openclaw\cron-session-cleanup.json`；界面入口在会话页左下角「🧹 清理系统会话」（`/__rana/sessions-cleanup` 中间件拉起+轮询）。**脚本会短暂停止网关（约 30-60 秒），微信/QQ 通道期间暂停**。上游 bug（run 级 delete 不认 + placement 不清）拟向上游报 issue，已登记进 OPEN-SOURCE-ROADMAP.md 阶段一。
+  - 首日两 bug 修复实录（都可复用）：①`node:sqlite` 的 DatabaseSync **没有顶层 `db.run()`**，增删改必须 `db.prepare(sql).run(params)`（参数绑定）；②JS **正则字面量不做变量插值**——`/:${PORT}\s/` 匹配的是字面文本 `${PORT}`，端口拼接必须 `new RegExp()` 或改用 `includes(":18789 ")`。②的副作用曾让"停网关"静默失效（手术在 WAL 模式下热做居然也成功，说明该 DELETE 对运行中的库也安全，但流程仍按先停后做设计）；taskkill 失败已从静默 catch 改为写进进度日志。
+  - 已知常态：`agent:main:main:heartbeat` 会话节点删后会被心跳系统自动重建（实测 10 分钟内回来），属上游行为非故障；真正占列表的大头是梦境/cron 积累，清理后增长缓慢，随手点一下即可。
+- 状态：已解决（13 行 placement 清除、5 个父会话删除、19→6 条；run 级残留 4 条为上游限制，UI 已默认隐藏；术后可用一键脚本随时重清——09-15 dry-run 实测又攒了 6 个父会话、9 行残留）。
 
 ## [已解决] 心跳 30 分钟整会话唤醒、94% NO_REPLY 空转 ≈500 万 token/天 + 记忆桥降频 + 私密桥复活（2026-09-14）
 
@@ -368,3 +371,11 @@
 - 三轮实测全过：①问矢泽妮可+发色陷阱→查百科+建档+答"百科没写不乱说"；②新会话外号"妮可"→memory_search 兜底翻档案，**零网络调用**；③"妮可和真姬什么关系"→读档案+补建真姬档+CP 专页搜不到如实说+拒绝评价亲疏。
 - 检索选型结论（用户问过）：直读最快最准不可能认错人 > 向量兜底（现成 memory_search，零新代码）> 中文正则（她无文件搜索权限，为它开新工具不值，弃用）。聊天场景检索速度不是瓶颈（一轮回答 10-20s，大头在模型）。
 - **索引与去重（同日三次升级）**：`memory/characters/INDEX.md`（一行一个：`名字 | 别名 | 文件名`）是档案单一入口——查档先读索引把外号对到正式文件名，从源头杜绝"外号档"；建档/更新同步写索引；group-analyst 每日增量顺手维护（明显重复合并成正式名一份、被并文件留一行指路墓碑、死行删除、别名补齐，拿不准不动）。实测：星空凛建档自动写索引（且她自发区分了"百科直陈"与"对照企划条目推出"两种事实来源）；人工造重复档妮可.md 触发合并，别名并归+墓碑+要点并集全部正确。sed 改竖线分隔的索引文件会撞分隔符，用 Edit/python 改。
+- **正文 detail 工具（同日四次升级，群友反馈"只能看一段"后）**：`moegirl.mjs` 新增第三个工具 `moegirl_detail(title, section?)`——extracts 全文纯文本自带 `== 章节名 ==` 标题行，脚本按标题切片：不带 section 返回章节目录（含各章字数，省上下文），带 section 返回该章正文（含小节，3000 字封顶）；错章节名返回现有章节列表提示。SKILL/SOUL 措辞同步从"百科简介里没写"升级为"简介和正文章节都查过才算没写"。实测问妮可发色/声优：她走 detail 拿到声优（德井青空）+发型设定，发色百科正文真没写（只写发型，信息框不在 extracts 里——已知边界），照实说"没写不编"，档案更新并记下"正文未记载发色"的查证结论。
+- **转写型小错仍会出**：detail 实测 10 处细节 9 处与原文一致，1 处抄错人名（贫乳组写成花阳，原文是海未）——模型从正文向档案转写时的低频笔误，属"事实在但抄歪"型，与凭空脑补不同类；已修正档案并在行内标注原文防再错。治理手段=对照原文抽查，无法靠提示词根除。
+
+## [行为说明] 后台拉起的网关被手动重启替掉 → 会话后台任务报"failed exit 1"（2026-09-15）
+
+- 症状：agent 会话里后台启动的网关（`cmd //c start-gateway.cmd > .gateway.log`）运行约 1 小时后报 failed exit 1，日志尾无崩溃堆栈。
+- 根因（已实锤）：不是崩溃——是**另一会话做会话清理手术**（脚本删心跳等系统会话占用的会话窗口，需停网关），按"停旧→启新"流程替掉了 agent 会话拉起的实例。辨别特征：①旧进程"无声退出"（被杀，非崩溃）；②TEMP 日志出现 `Another gateway (pid …) already owns this state directory; refusing…`（重启者在杀旧实例前先跑了一次脚本，被占用保护拦下）；③随后新实例经 cmd 父进程正常接管，QQ/微信/webchat 全重连，且启动后紧跟着 `sessions.delete` WS 调用（=清理脚本收尾）。
+- 处置：无需任何动作。看到"后台网关任务 failed"先查 `netstat :18789 LISTENING` + TEMP 日志的 owns-state-dir 记录再下结论——网关活着就别重复重启。

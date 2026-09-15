@@ -22,6 +22,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import SettingsModal from "./components/SettingsModal";
 import LmStudioModal from "./components/LmStudioModal";
 import CloudConfigModal from "./components/CloudConfigModal";
+import SystemCleanupModal from "./components/SystemCleanupModal";
 
 // 页面级兜底：单页渲染崩了只挂那一页，导航与其余页面照常
 const page = (label: string, node: ReactNode) => <ErrorBoundary label={label}>{node}</ErrorBoundary>;
@@ -112,6 +113,7 @@ export default function App() {
       <SettingsModal />
       <LmStudioModal />
       <CloudConfigModal />
+      <SystemCleanupModal />
     </>
   );
 }

@@ -42,6 +42,7 @@ export default function Sidebar() {
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
   const setLmOpen = useAppStore((s) => s.setLmOpen);
   const setCloudOpen = useAppStore((s) => s.setCloudOpen);
+  const setCleanupOpen = useAppStore((s) => s.setCleanupOpen);
   const [creating, setCreating] = useState(false);
   const [menu, setMenu] = useState<CtxMenuState | null>(null);
   const [renamingKey, setRenamingKey] = useState<string | null>(null);
@@ -238,6 +239,13 @@ export default function Sidebar() {
           </div>
         )}
       </div>
+      <button
+        className="btn ghost"
+        onClick={() => setCleanupOpen(true)}
+        title="一键清理心跳/梦境等定时任务留下的、网关限制删不掉的系统会话（过程会重启网关，约 30-60 秒）"
+      >
+        🧹 清理系统会话
+      </button>
       <button className="btn ghost" onClick={() => setCloudOpen(true)}>
         ☁ 云端模型
       </button>

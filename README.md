@@ -16,7 +16,7 @@
 | 智能体 | 三 agent：`main`（云端模型，干活力，接 QQ 私聊 + rana-web 控制台）+ `rana-rp`（本地 LM Studio 微调 14B，陪伴力，接微信）+ `rana-qq-public`（云端，QQ 群公共号，物理隔离无私货），`ownership=explicit` 显式路由 |
 | 前端 | React 18 + TypeScript + Vite 6 + zustand，无 UI 框架、全手写 CSS（约 10,200 行源码） |
 | 连接方式 | 浏览器 WebCrypto 生成 **Ed25519 设备身份**，挑战-签名握手 + token 鉴权；直连失败自动回退同源 `/gateway` 代理 |
-| 「后端」 | **没有独立后端进程**——Vite dev/preview 插件挂了十二组 loopback-only 中间件（`/__rana/*`）充当本地后端 |
+| 「后端」 | **没有独立后端进程**——Vite dev/preview 插件挂了十三组 loopback-only 中间件（`/__rana/*`）充当本地后端 |
 | 编码外包 | acpx（ACP 协议）→ **DSH**：WSL 里的 DeepSeek 编码工人。「🔨派活」页发单，算力走 DSH 自己的云端 key，不占本地显存 |
 | 边车自动化 | 独立 Node 脚本：记忆桥（30 分钟，三腿）、私密记忆桥（每小时）、早报、Git 活动统计、学习睡前小结/周报（cron 驱动）；学习排课与问卜解卦走「专用会话桥」（页面按需触发）；embedding 看门狗随网关常驻 |
 | 本地模型 | LM Studio `:1234`，`rana-rp-14b` 显式常驻（ctx 49152 / parallel 2 / KV 卸载到内存），embedding 用 qwen3-0.6b（`tools/embedding-watchdog.mjs` 看门狗锁单实例纯 CPU 常驻） |
@@ -190,15 +190,16 @@ K:\OpenClaw
     │       ├── 页面：SysPage(状态) / CronPage / NewsPage / StudyPage+StudyQuiz+StudyGoalsPage(学习家族)
     │       │        AppsPage(程序：万年历/八字紫微/摇卦，apps/ 下五个子组件) / GroupsPage(群画像) / DshPage(派活)
     │       └── 面板与弹窗：UsagePanel(用量/超参调参/快捷命令/技能与MCP卡) / SettingsModal /
-    │                LmStudioModal / CloudConfigModal / ModelTuningCard / AgentKitCard / ErrorBoundary
-    ├── vite.config.ts        ★ 十二组中间件：token/云端provider配置/电脑状态(含虚拟化切换)/头像/早报/
-    │                           学习计划(含待办)/问卜/模型超参/模型连通测试/技能与MCP卡/群画像/DSH模型清单
+    │                LmStudioModal / CloudConfigModal / SystemCleanupModal(系统会话清理) / ModelTuningCard / AgentKitCard / ErrorBoundary
+    ├── vite.config.ts        ★ 十三组中间件：token/云端provider配置/电脑状态(含虚拟化切换)/头像/早报/
+    │                           学习计划(含待办)/问卜/模型超参/模型连通测试/技能与MCP卡/群画像/DSH模型清单/系统会话清理
     ├── start-rana.cmd        一键启动（网关+看门狗+vite+浏览器）
     ├── start-gateway.cmd     网关启动器（状态目录 + TLS 兼容参数 + 顺带拉起 embedding 看门狗）
     ├── memory-bridge.mjs     三腿共享记忆桥（cron 每 30 分钟；真名/化名映射在 gitignore 的 identity 文件里）
     ├── news-report.mjs       早报生成器（联播抓取 + 博查搜索 + flash 总结；key 兼容密钥库 SecretRef）
     ├── study-agent.mjs       学习专用会话桥（排课/出题/判分 → agent:main:study-planner）
     ├── fate-agent.mjs        问卜专用会话桥（解卦 → agent:main:fate-teller）
+    ├── cron-session-cleanup.mjs 系统会话清理手术（停网关→备份→清 placement 残留→重启→删 cron 父会话；会话页左下角入口，--dry-run 只盘点）
     ├── lib/rana-config.mjs   边车共享小工具：状态目录定位 + SecretRef apiKey 解析
     ├── git-activity.mjs      Git 活动统计（日报/周报/月报口径）
     ├── e2e-chat.mjs          无头端到端验证（配合 window.gw 调试钩子）
@@ -298,7 +299,7 @@ QQ 公共号**自己养出来的**群画像：群档案、群友档案、每周�
 
 ## 🧩 深入：没有后端的全栈——Vite 中间件当后端
 
-「网页要读电脑状态、要改配置文件，后端呢？」——**没有独立后端进程**。`vite.config.ts`（约 2,300 行）里写了十二组 Vite 插件，直接把接口挂到开发服务器上；`configurePreviewServer` 把同样的中间件挂到生产预览服务上，所以 `npm run dev` 和 `npm run preview` 行为一致，始终是单进程。
+「网页要读电脑状态、要改配置文件，后端呢？」——**没有独立后端进程**。`vite.config.ts`（约 2,300 行）里写了十三组 Vite 插件，直接把接口挂到开发服务器上；`configurePreviewServer` 把同样的中间件挂到生产预览服务上，所以 `npm run dev` 和 `npm run preview` 行为一致，始终是单进程。
 
 > 给新手的一句话：Vite 的开发服务器本质是个 Node 程序，允许你往它身上挂自己的接口。请求不进打包产物，只在本地服务器这一层就被拦下处理了。这对「纯本地自用」的工具来说是零成本的架构简化。
 
