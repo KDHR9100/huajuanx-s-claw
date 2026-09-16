@@ -41,3 +41,5 @@ lmctl/
 rana-web/memory-bridge.privacy-patterns.json
 # 记忆桥主人称呼映射（真名/化名，不入公开仓库；缺文件时脚本回退中性称呼）
 rana-web/memory-bridge.identity.json
+# 本机个人路径配置（WSL 用户名/项目目录等，不入公开仓库；模板见 local-config.example.json）
+rana-web/local-config.json

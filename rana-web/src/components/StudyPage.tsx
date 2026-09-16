@@ -130,7 +130,8 @@ function dayLoad(courses: StudyCourse[]): { count: number; minutes: number; heav
 const WEEK = ["一", "二", "三", "四", "五", "六", "日"];
 const fmtMin = (m: number) => (m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? `${m % 60}m` : ""}` : `${m}m`);
 
-export default function StudyPage() {
+/** embedded：作为「🗺 规划」页的子页渲染时为 true——去掉自带的外层滚动壳，逻辑零改动 */
+export default function StudyPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [sched, setSched] = useState<Schedule | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -504,11 +505,10 @@ export default function StudyPage() {
 
   const weekCellsNow = weekCells(selDate);
 
-  return (
-    <div className="wallboard">
-      <div className="board-inner" style={{ maxWidth: 1100 }}>
-        <div className="page-intro">
-          <h2>学习计划</h2>
+  const content = (
+    <>
+      <div className="page-intro">
+        <h2>学习计划</h2>
           <p>
             真实日期的课程表 · 没完成的课自动顺延 · 学完出题判分 · 错题自动收进错题本
             {saving && " · 保存中…"}
@@ -1010,6 +1010,14 @@ export default function StudyPage() {
             {planMsg && <p className="plan-result">{planMsg}</p>}
           </div>
         </div>
+    </>
+  );
+  // 嵌入「🗺 规划」页：直接吐内容（外层壳由规划页提供）；独立渲染时保留原滚动壳
+  if (embedded) return content;
+  return (
+    <div className="wallboard">
+      <div className="board-inner" style={{ maxWidth: 1100 }}>
+        {content}
       </div>
     </div>
   );

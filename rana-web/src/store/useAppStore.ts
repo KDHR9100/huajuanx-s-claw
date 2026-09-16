@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AppView, ChatMessage, ConnState, ModelInfo, SessionRow, ThemeSettings } from "../lib/types";
+import type { AppView, ChatMessage, ConnState, ModelInfo, PlanningTab, SessionRow, ThemeSettings } from "../lib/types";
 import { NAV_TABS } from "../lib/types";
 import { applySettings, loadSettings, saveSettings, DEFAULT_SETTINGS } from "../lib/theme";
 
@@ -30,10 +30,12 @@ interface AppState {
   /** 每个会话正在进行的 run（v1：每会话同时最多一个） */
   runs: Record<string, StreamingRun | undefined>;
 
-  /** 当前页面视图（会话 / Rana的状态 / 定时任务 / 早报 / 学习计划 / 程序） */
+  /** 当前页面视图（会话 / Rana的状态 / 定时任务 / 早报 / 规划 / 程序） */
   view: AppView;
   /** 顶部页签顺序（拖拽换位，持久化在 localStorage；新增页签自动补到末尾） */
   tabOrder: AppView[];
+  /** 规划页内部的子页签（总览/课表/待办/内容库，持久化在 localStorage） */
+  planningTab: PlanningTab;
   /** 会话页右侧用量面板开关 */
   panelOpen: boolean;
   /** 显示模型思考过程（<think> 折叠块）；关闭时完全不渲染 */
@@ -63,6 +65,7 @@ interface AppState {
   markUnread: (key: string) => void;
   setView: (view: AppView) => void;
   setTabOrder: (order: AppView[]) => void;
+  setPlanningTab: (tab: PlanningTab) => void;
   togglePanel: () => void;
   setShowReasoning: (v: boolean) => void;
   updateSettings: (patch: Partial<ThemeSettings>) => void;
@@ -76,9 +79,15 @@ interface AppState {
 export const PINNED_STORAGE_KEY = "rana-web.pinned";
 const REASONING_KEY = "rana-web.show-reasoning";
 export const TAB_ORDER_KEY = "rana-web.tab-order";
+const PLANNING_TAB_KEY = "rana-web.planning-tab";
 
 /** 全部合法页签（顺序即默认顺序；单一来源是 types.ts 的 NAV_TABS，新增页签只改那里） */
 export const ALL_VIEWS: AppView[] = NAV_TABS.map((t) => t.id);
+
+function loadPlanningTab(): PlanningTab {
+  const v = localStorage.getItem(PLANNING_TAB_KEY);
+  return v === "schedule" || v === "goals" || v === "library" ? v : "overview";
+}
 
 function loadTabOrder(): AppView[] {
   try {
@@ -116,6 +125,7 @@ export const useAppStore = create<AppState>((set) => ({
   runs: {},
   view: "chat",
   tabOrder: loadTabOrder(),
+  planningTab: loadPlanningTab(),
   panelOpen: true,
   showReasoning: loadShowReasoning(),
 
@@ -163,6 +173,10 @@ export const useAppStore = create<AppState>((set) => ({
   setTabOrder: (order) => {
     localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(order));
     set({ tabOrder: order });
+  },
+  setPlanningTab: (tab) => {
+    localStorage.setItem(PLANNING_TAB_KEY, tab);
+    set({ planningTab: tab });
   },
   togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
   setShowReasoning: (showReasoning) => {

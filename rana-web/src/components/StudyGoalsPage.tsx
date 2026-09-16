@@ -19,6 +19,9 @@ export interface StudyGoal {
   plan?: { analysis: string; summary: string; courses: GoalPlanCourse[] } | null;
   pushedCourseIds?: string[];
   pushedAt?: number;
+  /** 从规划页里程碑转来时带的归属（未知字段原样保留，旧数据没有） */
+  lifeGoalId?: string;
+  milestoneId?: string;
 }
 interface GoalsFile {
   version: number;
@@ -44,7 +47,8 @@ const sortGoals = (a: StudyGoal, b: StudyGoal) => {
   return b.createdAt - a.createdAt;
 };
 
-export default function StudyGoalsPage() {
+/** embedded：作为「🗺 规划」页的子页渲染时为 true——去掉自带的外层滚动壳，逻辑零改动 */
+export default function StudyGoalsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [goals, setGoals] = useState<StudyGoal[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -136,9 +140,9 @@ export default function StudyGoalsPage() {
       if (!r.ok || !j.ok || !j.goals) throw new Error(j.error ?? `HTTP ${r.status}`);
       setGoals([...j.goals.goals].sort(sortGoals));
       setNotice(
-        `已把「${goal.text.slice(0, 16)}${goal.text.length > 16 ? "…" : ""}」的 ${j.added ?? 0} 节课排进学习计划` +
+        `已把「${goal.text.slice(0, 16)}${goal.text.length > 16 ? "…" : ""}」的 ${j.added ?? 0} 节课排进课表` +
           (j.shifted ? `（${j.shifted} 节过期日期自动顺延）` : "") +
-          "，去「📚 学习计划」页看日程。",
+          "，去「📅 课表」看日程。",
       );
     } catch (e) {
       setError(`排入失败：${(e as Error).message}`);
@@ -173,11 +177,10 @@ export default function StudyGoalsPage() {
 
   const openCount = goals.filter((g) => g.status === "open").length;
 
-  return (
-    <div className="wallboard">
-      <div className="board-inner" style={{ maxWidth: 900 }}>
-        <div className="page-intro">
-          <h2>待办</h2>
+  const content = (
+    <>
+      <div className="page-intro">
+        <h2>待办</h2>
           <p>
             大方向记这儿，她拆成具体的课，你点头才进课程表
             {goals.length > 0 && ` · 待拆 ${openCount} 条`}
@@ -221,6 +224,11 @@ export default function StudyGoalsPage() {
                 <span className={`chip${goal.status === "planned" ? " green" : ""}`}>
                   {goal.status === "planned" ? "✅ 已排进课程表" : "⏳ 待拆解"}
                 </span>
+                {goal.lifeGoalId && (
+                  <span className="chip" title="从规划页的人生目标里程碑转来的">
+                    🗺 人生目标
+                  </span>
+                )}
                 <p className="gc-text">{goal.text}</p>
                 <button className="btn ghost sm" onClick={() => void del(goal)} title="删除这条待办">
                   🗑
@@ -231,7 +239,7 @@ export default function StudyGoalsPage() {
               {goal.status === "planned" && (
                 <div className="gc-planned">
                   已排 {goal.pushedCourseIds?.length ?? 0} 节 · {goal.pushedAt ? fmtTs(goal.pushedAt) : ""}
-                  ｜课程在「📚 学习计划」页，学没学、顺延都在那边操作
+                  ｜课程在「📅 课表」，学没学、顺延都在那边操作
                 </div>
               )}
 
@@ -287,7 +295,15 @@ export default function StudyGoalsPage() {
             </article>
           );
         })}
-      </div>
+    </>
+  );
+  // 嵌入「🗺 规划」页：吐内容并保持原本的 900 宽度；独立渲染时保留原滚动壳
+  if (embedded) {
+    return <div className="board-inner" style={{ maxWidth: 900 }}>{content}</div>;
+  }
+  return (
+    <div className="wallboard">
+      <div className="board-inner" style={{ maxWidth: 900 }}>{content}</div>
     </div>
   );
 }

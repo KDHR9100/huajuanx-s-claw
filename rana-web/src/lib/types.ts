@@ -49,7 +49,10 @@ export interface ModelInfo {
 export type ConnState = "connecting" | "connected" | "error" | "closed";
 
 /** 顶部导航的页面视图 */
-export type AppView = "chat" | "sys" | "cron" | "news" | "study" | "goals" | "apps" | "groups" | "dsh";
+export type AppView = "chat" | "sys" | "cron" | "news" | "planning" | "apps" | "groups" | "dsh";
+
+/** 规划页内部的子页签（总览 / 课表 / 待办 / 内容库） */
+export type PlanningTab = "overview" | "schedule" | "goals" | "library";
 
 /** 顶部导航页签（单一来源：TopNav 渲染与 store 的 ALL_VIEWS 校验都引用这份，新增页签只改这里） */
 export const NAV_TABS: Array<{ id: AppView; label: string }> = [
@@ -57,8 +60,7 @@ export const NAV_TABS: Array<{ id: AppView; label: string }> = [
   { id: "sys", label: "💠 Rana 的状态" },
   { id: "cron", label: "⏰ 定时任务" },
   { id: "news", label: "📰 早报" },
-  { id: "study", label: "📚 学习计划" },
-  { id: "goals", label: "📝 待办" },
+  { id: "planning", label: "🗺 规划" },
   { id: "apps", label: "🧰 程序" },
   { id: "groups", label: "👥 群画像" },
   { id: "dsh", label: "🔨 派活" },

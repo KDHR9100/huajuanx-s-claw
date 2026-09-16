@@ -44,28 +44,31 @@
 | --- | --- |
 | LICENSE | **无**——严格说不算开源，别人法律上不能用 |
 | 测试 / CI / lint | 零 |
-| 个人信息入公开仓 | WSL 用户名 `<user>` 两处已跟踪（`vite.config.ts` 的 WSL 路径、`DshPage.tsx:16` 的 `K:/home/<user>/...`） |
+| 个人信息入公开仓 | WSL 用户名两处已跟踪（vite.config 的 DSH 路径常量、DshPage 派活预设）——阶段〇已清除（改走 gitignored 的 local-config.json） |
 | 本机路径写死 | `K:\OpenClaw`（vite.config / 多个边车脚本 / 启动 cmd）、`G:\node\node.exe`（start-gateway.cmd）、`C:\Users\Administrator\...\openclaw.mjs`（vite.config 里同一定义了两遍） |
 | 文档语言 | 全中文，英文圈不可见 |
 | 上游耦合 | cron 会话删除 bug、QQ 图片插件本地补丁升级即被覆盖 |
 
 **已具备的地基**（不用重做）：identity/privacy-patterns 已外置 gitignore；源码零硬编码密钥（token 全运行时读取）；页签单一来源；ErrorBoundary；早报 SecretRef 修复；（09-15 新增）cron 会话一键清理脚本 + 界面入口。
 
-## 3. 阶段〇：地基——合法开源
+## 3. 阶段〇：地基——合法开源（2026-09-15 完成）
 
 **目标**：法律上可开源，公开内容无个人信息泄露。工作量约 1 个晚上。
 
-- [ ] 添加 `LICENSE`（MIT；署名与 GitHub 账号一致）
-- [ ] 清除已跟踪文件里的个人标识：两处 WSL 用户名路径改为配置/环境变量读取（缺省回退占位值）
-- [ ] 全仓 secrets 扫描（`grep -rE "sk-|Bearer |token=" 已跟踪文件` + 一次性跑 gitleaks 类工具）；结果登记进 KNOWN-ISSUES 或本文档
-- [ ] `.gitignore` 复核：新增文件逐个过一遍「这个进了公开仓吗」
-- [ ] git 历史遗留评估：历史上已推公开的真名无法静默收回，单独拍板是否接受（重写历史影响备份链）
+- [x] 添加 `LICENSE`（MIT，署名与 GitHub 账号一致）
+- [x] 清除已跟踪文件里的个人标识：两处 WSL 用户名路径改为读 gitignored 的 `rana-web/local-config.json`（公开模板 `local-config.example.json`；派活页个人预设改由 `/__rana/dsh-models` 服务端下发）
+- [x] 全仓 secrets 扫描：2026-09-15 图样扫描（`sk-`/`Bearer`/`apiKey` 赋值）**零命中**；宽松复查命中全为代码变量引用与 CSS 假阳性，无明文密钥
+- [x] `.gitignore` 复核：新增文件进公开仓均属预期；追加 `rana-web/local-config.json`
+- [x] `OPTIMIZATION-ROADMAP.md` 去真名/化名改写（「化名=真名」的映射解释不得留在公开文档里）
+- [x] git 历史遗留评估：真名存在于 4 个历史提交（09-09~09-14）、用户名 3 个（09-14~09-15）；openid/密钥/GitHub 账号**从未进入历史**。**拍板：接受历史、只保今后（2026-09-15）**——重写需 force-push 且影响私有备份链，不值得**
 
-**验收**：LICENSE 存在；`git grep` 用户名/真名零命中（历史除外，遗留项书面记录）；扫描工具零高危。
+**验收**：LICENSE 存在 ✓；已跟踪文件用户名/真名 grep 零命中（历史里仍有，已接受）✓；图样扫描零高危 ✓。
 
 ## 4. 阶段一：可信度——让懂行的人点头
 
 **目标**：面试官/资深工程师点开仓库时看到的是工程，不是玩具。工作量约 2-3 个晚上。
+
+> 实施注记：npm 安装需带 Clash 代理 env（`HTTPS_PROXY=http://127.0.0.1:7897`），直连会超时（装 acpx 时踩过）。
 
 - [ ] vitest + 首批纯函数测试：`reasoning.ts`（脏输出清洗）、`fateCore.ts`（历法/干支）、`memory-bridge.mjs` 的 `parseEntries()`、`git-activity` 统计口径——四处边界 Case 密集、改动爆炸半径最大（= OPTIMIZATION-ROADMAP 批次三.1）
 - [ ] GitHub Actions CI：install → `tsc --noEmit` → `vitest run` → `vite build`，README 挂徽章
@@ -112,7 +115,7 @@
 
 | 阶段 | 一句话 Done 定义 |
 | --- | --- |
-| 〇 地基 | 有 LICENSE，公开仓无个人信息，扫描零高危 |
+| 〇 地基 | ✅ 2026-09-15 完成：有 LICENSE，已跟踪文件无个人信息，图样扫描零高危（历史遗留已拍板接受） |
 | 一 可信度 | CI 绿 + 四模块有测试 + vite.config 拆完 + 上游 issue 已报 |
 | 二 可移植 | 异地 clone 可跑，v0.1.0 已发 Release |
 | 三 传播 | 英文门面就绪，至少一个渠道已发布 |

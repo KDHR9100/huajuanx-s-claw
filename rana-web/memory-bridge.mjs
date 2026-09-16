@@ -56,7 +56,10 @@ function resolveApiKey(raw) {
 /** 云端提炼统一走 glm（aliyun token-plan 额度耗尽 + glm 是 main 现役主力） */
 function glmChatConfig() {
   const p = CFG.models.providers['glm'];
-  return { url: p.baseUrl, apiKey: resolveApiKey(p.apiKey), model: (CFG.agents?.entries?.['rana-qq-public']?.model || 'glm/glm-5.3-flash').split('/').pop() };
+  const m = CFG.agents?.entries?.['rana-qq-public']?.model || '';
+  // qq agent 换非 glm 模型后不能直接拿它的名字发到智谱端点（1211 模型不存在），回退到 provider 自带模型列表
+  const model = m.startsWith('glm/') ? m.split('/').pop() : (p.models?.[0]?.id || 'glm-5.3-flash');
+  return { url: p.baseUrl, apiKey: resolveApiKey(p.apiKey), model };
 }
 
 /** QQ 群别名表 + 主人 openid：存状态目录（私有），群哈希自动按首见顺序分配置 群A/群B/…，可手改成真群名 */

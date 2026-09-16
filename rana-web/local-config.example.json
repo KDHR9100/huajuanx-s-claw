@@ -1,0 +1,8 @@
+{
+  "_comment": "复制一份命名为 local-config.json（已被 .gitignore 排除，不会进公开仓库），填入本机的个人路径。dshSettingsPath：WSL 里 DSH 的 settings.yaml 的 Windows 访问路径；dshPresets：派活页的项目下拉预设，最后一项是「自定义路径」锚点，建议以主仓库目录收尾。改完需重启 vite 才生效。",
+  "dshSettingsPath": "//wsl.localhost/<发行版名>/home/<WSL用户名>/DSH/.dsh-home/settings.yaml",
+  "dshPresets": [
+    { "name": "我的项目（一句话描述）", "cwd": "K:/path/to/my-project" },
+    { "name": "OpenClaw 仓库", "cwd": "K:/OpenClaw" }
+  ]
+}

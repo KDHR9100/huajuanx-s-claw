@@ -13,8 +13,7 @@ import UsagePanel from "./components/UsagePanel";
 import SysPage from "./components/SysPage";
 import CronPage from "./components/CronPage";
 import NewsPage from "./components/NewsPage";
-import StudyPage from "./components/StudyPage";
-import StudyGoalsPage from "./components/StudyGoalsPage";
+import PlanningPage from "./components/PlanningPage";
 import AppsPage from "./components/AppsPage";
 import GroupsPage from "./components/GroupsPage";
 import DshPage from "./components/DshPage";
@@ -78,16 +77,10 @@ export default function App() {
               {page("早报", <NewsPage />)}
             </main>
           )}
-          {view === "study" && (
+          {view === "planning" && (
             <main className="main">
               {connError && <div className="err-banner">⚠ {connError}</div>}
-              {page("学习计划", <StudyPage />)}
-            </main>
-          )}
-          {view === "goals" && (
-            <main className="main">
-              {connError && <div className="err-banner">⚠ {connError}</div>}
-              {page("待办", <StudyGoalsPage />)}
+              {page("规划", <PlanningPage />)}
             </main>
           )}
           {view === "apps" && (

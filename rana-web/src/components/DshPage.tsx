@@ -1,7 +1,8 @@
 // DshPage：🔨 派活——把编码重活委派给 DSH（WSL 里的 DeepSeek 工人，经 acpx/ACP 协议）。
 // 表单组装一条结构化委派指令发进 main 主会话，Rana 按 delegate-to-dsh 技能派后台任务；
 // 进度与结果在「会话」页聊天流里看（完成后 announce 回报）。
-// 模型下拉来自 /__rana/dsh-models（读 WSL 里 DSH 的 settings.yaml）；拉不到时退回自由填写。
+// 模型下拉与个人项目预设来自 /__rana/dsh-models（读 WSL settings.yaml + gitignored 的
+// local-config.json）；拉不到时退回内置默认与自由填写。
 import { useCallback, useEffect, useState } from "react";
 import { gateway } from "../lib/gateway";
 
@@ -11,14 +12,12 @@ interface DshModel {
   name?: string;
 }
 
-const PRESETS: Array<{ name: string; cwd: string }> = [
-  { name: "Aetheran（NPC 游戏 AI）", cwd: "K:/Aetheran" },
-  { name: "Agent_feishu（飞书电商 Agent）", cwd: "K:/home/<user>/Agent_feishu" },
-  { name: "OpenClaw 仓库", cwd: "K:/OpenClaw" },
-];
+// 内置中性预设（不含个人路径）；本机的个人预设由服务端下发覆盖，最后一项是「自定义路径」锚点
+const PRESETS: Array<{ name: string; cwd: string }> = [{ name: "OpenClaw 仓库", cwd: "K:/OpenClaw" }];
 
 export default function DshPage() {
   const [cwd, setCwd] = useState(PRESETS[0].cwd);
+  const [presets, setPresets] = useState(PRESETS);
   const [task, setTask] = useState("");
   const [accept, setAccept] = useState("");
   const [model, setModel] = useState("");
@@ -31,8 +30,12 @@ export default function DshPage() {
     try {
       const r = await fetch("/__rana/dsh-models");
       if (!r.ok) return;
-      const d = (await r.json()) as { models?: DshModel[] };
+      const d = (await r.json()) as {
+        models?: DshModel[];
+        presets?: Array<{ name: string; cwd: string }>;
+      };
       setDshModels(d.models ?? []);
+      if (d.presets?.length) setPresets(d.presets);
     } catch {
       // WSL 没开/中间件不可用：保持自由填写模式
     }
@@ -50,7 +53,7 @@ export default function DshPage() {
     setNotice("");
     const lines = [
       "[DSH委派]",
-      `cwd：${cwd.trim() || PRESETS[0].cwd}`,
+      `cwd：${cwd.trim() || presets[0].cwd}`,
       `任务：${t}`,
       accept.trim() ? `验收：${accept.trim()}` : "验收：完成后自测并说明验了什么。",
       model.trim() ? `模型：派活时把 model 设为 ${model.trim()}（若 DSH 不支持该模型或能力不支持设置，退回 DSH 默认并在汇报里说明）。` : "模型：用 DSH 默认模型即可。",
@@ -82,12 +85,12 @@ export default function DshPage() {
           <div className="field-row">
             <label>项目 / 工作目录</label>
             <select value={cwd} onChange={(e) => setCwd(e.target.value)}>
-              {PRESETS.map((p) => (
+              {presets.map((p) => (
                 <option key={p.cwd} value={p.cwd}>{p.name}</option>
               ))}
             </select>
           </div>
-          {cwd === PRESETS[PRESETS.length - 1].cwd && (
+          {cwd === presets[presets.length - 1].cwd && (
             <div className="field-row">
               <label>自定义路径</label>
               <input value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="K:/项目目录" />

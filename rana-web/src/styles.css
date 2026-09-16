@@ -2135,3 +2135,54 @@ body.has-bg .room { display: none; }
 }
 .gc-course .gc-title { font-size: 13px; line-height: 1.55; min-width: 0; word-break: break-word; }
 .gc-course .gc-title small { display: block; font-size: 11.5px; font-weight: 400; color: var(--text-dim); margin-top: 2px; }
+
+/* ========== 规划页（人生目标 → 月里程碑 → 待办 → 课表 + 内容库） ========== */
+.plan-tabs { margin-bottom: 18px; }
+.plan-goal-card { margin-bottom: 16px; }
+.pg-new { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.pg-new .set-input { flex: 1; min-width: 200px; }
+.pg-head { display: flex; align-items: flex-start; gap: 10px; }
+.pg-title { flex: 1; min-width: 0; margin: 0; font-size: 15.5px; font-weight: 700; line-height: 1.55; word-break: break-word; }
+.pg-why { margin: 8px 0 0; font-size: 12.5px; color: var(--text-dim); line-height: 1.7; }
+.pg-analysis {
+  margin: 12px 0 0; padding: 9px 12px;
+  border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 8px;
+  font-size: 12.5px; line-height: 1.75; color: var(--text);
+}
+.pg-analysis small { color: var(--text-dim); }
+.plan-ms { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.plan-ms-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 8px 10px; border: 1.5px solid var(--border); border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-panel) 55%, transparent);
+}
+.plan-ms-row.done { opacity: 0.68; }
+.plan-ms-month {
+  flex: none; margin-top: 2px;
+  font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+  color: var(--accent-strong); background: var(--accent-soft);
+  border-radius: 6px; padding: 2px 8px; white-space: nowrap;
+}
+.plan-ms-main { flex: 1; min-width: 0; }
+.plan-ms-title { font-size: 13px; font-weight: 650; line-height: 1.5; word-break: break-word; }
+.plan-ms-detail { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; line-height: 1.6; }
+.plan-ms-acts { display: flex; flex-direction: column; gap: 4px; flex: none; align-items: flex-end; }
+.plan-focus-row { display: flex; align-items: center; gap: 8px; font-size: 13px; line-height: 1.6; padding: 5px 0; border-bottom: 1px dashed var(--border); }
+.plan-focus-row:last-of-type { border-bottom: none; }
+.plan-stats { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+
+/* 内容库 */
+.lib-entry { margin-bottom: 14px; }
+.lib-cand {
+  display: block; border: 1.5px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 8px; cursor: default;
+  background: color-mix(in srgb, var(--bg-panel) 55%, transparent);
+}
+.lib-cand.on { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+label.lib-cand { cursor: pointer; }
+.lib-cand-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.lib-title { font-size: 13.5px; font-weight: 700; line-height: 1.5; word-break: break-word; }
+.lib-sum { font-size: 12.5px; line-height: 1.75; margin: 6px 0 0; word-break: break-word; }
+.lib-take { font-size: 12px; color: var(--accent-strong); margin: 4px 0 0; line-height: 1.65; }
+.lib-src { font-size: 11px; color: var(--text-dim); margin-top: 6px; word-break: break-all; line-height: 1.6; }
+.lib-src a { color: var(--text-dim); text-decoration: underline dotted; }

@@ -43,9 +43,9 @@
 
 ### 2.3 隐私外置（化名行为一行不改）
 
-- 新增 `rana-web/memory-bridge.identity.json`（**加入 .gitignore**）：`{ "realName": "…", "groupAlias": "青散" }`，真实值只存本机。
+- 新增 `rana-web/memory-bridge.identity.json`（**加入 .gitignore**）：`{ "realName": "…", "groupAlias": "…" }`，真实值只存本机。
 - `memory-bridge.mjs` 6 处硬编码（136/147/151/174/175/187/191 行）改为从 identity 文件读取；缺文件回退中性占位并告警。
-- 175 行云端 prompt：删掉「青散=<真名已移除>在群里的称呼」的映射解释，只保留「群主在群里叫青散，纪要一律写青散」——云端模型不需要知道它是谁的化名。
+- 175 行云端 prompt：删掉解释化名映射关系的那句，只保留「群主在群里叫（化名），纪要一律写化名」——云端模型不需要知道它是谁的化名。**映射关系只允许存在于 identity.json，不得出现在任何公开文档里**（2026-09-15 复查：本文档历史版本曾写出映射，已改写；git 历史中的旧版本已拍板接受）。
 - `.gitignore` 加一行 `rana-web/memory-bridge.identity.json`。
 - 注记：git 历史已推公开的部分无法收回（历史重写影响备份链，需单独拍板）；本批保证今后不再暴露。
 - 验证：`git ls-files | grep memory-bridge` 后 grep 真名零命中；桥跑一次纪要仍写化名。
