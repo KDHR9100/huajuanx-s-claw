@@ -2,6 +2,7 @@
 // 数据走 /__rana/agent-info（vite 中间件跑 openclaw CLI 拿真清单，120s 缓存）；
 // main / rana-rp 两个智能体的装备不一样，切会话时自动跟着换。
 import { useCallback, useEffect, useState } from "react";
+import { fetchJsonRetry } from "../lib/fetchRetry";
 import { useAppStore } from "../store/useAppStore";
 
 interface SkillRow {
@@ -29,9 +30,9 @@ export default function AgentKitCard() {
     setLoading(true);
     setErr("");
     try {
-      const r = await fetch(`/__rana/agent-info?agent=${encodeURIComponent(agent)}${refresh ? "&refresh=1" : ""}`);
-      const j = (await r.json()) as AgentInfo & { error?: string };
-      if (!r.ok) throw new Error(j.error ?? `HTTP ${r.status}`);
+      const j = await fetchJsonRetry<AgentInfo>(
+        `/__rana/agent-info?agent=${encodeURIComponent(agent)}${refresh ? "&refresh=1" : ""}`,
+      );
       setData(j);
     } catch (e) {
       setErr((e as Error).message);

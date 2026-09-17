@@ -44,6 +44,12 @@ interface NetInfo {
   speed?: { downKBs: number; upKBs: number } | null;
   probes?: Array<{ label: string; ok: boolean; ms: number }>;
 }
+interface PatrolInfo {
+  updatedAt: number;
+  checks?: Array<{ id: string; label: string; ok: boolean; detail: string }>;
+  anomalies?: Array<{ id: string; label: string; detail: string }>;
+  sendError?: string;
+}
 interface StatusPayload {
   sys?: SysInfo;
   gpu?: GpuInfo | null;
@@ -51,6 +57,7 @@ interface StatusPayload {
   virt?: VirtInfo | null;
   services?: ServiceRow[];
   net?: NetInfo | null;
+  patrol?: PatrolInfo | null;
 }
 
 const POLL_MS = 5000;
@@ -177,6 +184,8 @@ export default function SysPage() {
   const power = data?.power;
   const services = data?.services ?? null;
   const net = data?.net ?? null;
+  const patrol = data?.patrol ?? null;
+  const patrolAgeMin = patrol ? Math.max(1, Math.round((Date.now() - patrol.updatedAt) / 60000)) : 0;
   const memUsed = sys ? sys.memTotalGB - sys.memFreeGB : 0;
   const memPct = sys && sys.memTotalGB > 0 ? (memUsed / sys.memTotalGB) * 100 : 0;
   const uptimeText = sys
@@ -377,6 +386,32 @@ export default function SysPage() {
               <p className="pending-text">……看不见了。</p>
             )}
           </div>
+
+          {/* 巡检：零成本脚本 health-patrol 每 30 分钟一趟，异常会主动 QQ 私聊 */}
+          {patrol && (
+            <div className="card">
+              <h3>
+                <span className="ic">🩺</span>巡检
+                <small>
+                  {patrolAgeMin <= 90 ? `${patrolAgeMin} 分钟前` : `⚠ ${patrolAgeMin} 分钟没更新了`}
+                </small>
+              </h3>
+              {(patrol.checks ?? []).map((c) => (
+                <div className="svc-row" key={c.id} title={c.detail}>
+                  <span className={`svc-dot${c.ok ? " ok" : ""}`} />
+                  <span className="svc-name">{c.label}</span>
+                  <span className="svc-meta">{c.detail}</span>
+                </div>
+              ))}
+              {(patrol.anomalies ?? []).map((a) => (
+                <div className="net-line" key={a.id}>
+                  <span className="k">⚠ {a.label}</span>
+                  <span className="v">{a.detail}</span>
+                </div>
+              ))}
+              {patrol.sendError && <div className="plan-hint">上次 QQ 报警没发出去：{patrol.sendError}</div>}
+            </div>
+          )}
 
           {/* 网络：实时网速 + 外网连通性 */}
           <div className="card">

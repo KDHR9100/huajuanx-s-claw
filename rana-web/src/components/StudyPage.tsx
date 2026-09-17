@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import StudyQuiz, { type QuizMode } from "./StudyQuiz";
 import { getNotifyPref, setNotifyPref, requestNotifyPermission, notifyPermission } from "../lib/studyNotify";
+import { fetchJsonRetry } from "../lib/fetchRetry";
 import { gateway } from "../lib/gateway";
 import { useAppStore } from "../store/useAppStore";
 import { modelSuffix } from "../lib/types";
@@ -251,9 +252,7 @@ export default function StudyPage({ embedded = false }: { embedded?: boolean } =
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch("/__rana/study");
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const j = (await r.json()) as Schedule;
+      const j = await fetchJsonRetry<Schedule>("/__rana/study");
       setSched(j);
       setContractText((prev) => (prev === null || prev === j.contract?.text ? j.contract?.text ?? "" : prev));
       setError("");
@@ -574,7 +573,11 @@ export default function StudyPage({ embedded = false }: { embedded?: boolean } =
           <p>
             真实日期的课程表 · 没完成的课自动顺延 · 学完出题判分 · 错题自动收进错题本
             {saving && " · 保存中…"}
-            {error && <span className="sys-err">（{error}）</span>}
+            {error && (
+              <span className="sys-err" style={{ cursor: "pointer" }} onClick={() => void load()} title="点一下重试">
+                （{error} · 点击重试）
+              </span>
+            )}
           </p>
         </div>
 

@@ -41,3 +41,6 @@ git-activity.repos.json
 
 # 问卜（玄学）本地数据：生辰档案等私人信息，不入公开仓库
 .fate/
+
+# 巡检本地数据（health-patrol 每 30 分钟写的快照，仅本地）
+.health/

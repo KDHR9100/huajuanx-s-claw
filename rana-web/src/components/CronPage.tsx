@@ -115,7 +115,13 @@ export default function CronPage() {
   useEffect(() => {
     void load();
     const off = gateway.onCronEvent(() => void load());
-    return off;
+    // 网关（重）连成功后重拉：首屏挂载比 WS 握手快时，上面那次 load 会被排队，
+    // 但重连场景（网关重启）仍需要这里兜底刷新
+    const offConn = gateway.onConnected(() => void load());
+    return () => {
+      off();
+      offConn();
+    };
   }, [load]);
 
   const toggle = async (job: CronJob) => {
@@ -150,7 +156,7 @@ export default function CronPage() {
       <div className="board-inner" style={{ maxWidth: 840 }}>
         <div className="page-intro">
           <h2>定时任务</h2>
-          <p>……都在按点干活。{error && <span className="sys-err">（{error}）</span>}</p>
+          <p>……都在按点干活。{error && <span className="sys-err" style={{ cursor: "pointer" }} onClick={() => void load()} title="点一下重试">（{error} · 点击重试）</span>}</p>
         </div>
         <div className="task-list">
           {jobs === null && !error && <div className="card pending"><p className="pending-text">……在数。</p></div>}

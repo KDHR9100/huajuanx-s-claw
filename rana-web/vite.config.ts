@@ -547,6 +547,20 @@ function ranaSysStatusMiddleware(): Plugin {
     return data;
   };
 
+  /** 巡检快照：health-patrol.mjs 每 30 分钟写的 .health/patrol.json（缺文件=巡检没跑过） */
+  const readPatrol = () => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(here, ".health", "patrol.json"), "utf8")) as {
+        updatedAt: number;
+        checks?: Array<{ id: string; label: string; ok: boolean; detail: string }>;
+        anomalies?: Array<{ id: string; label: string; detail: string }>;
+        sendError?: string;
+      };
+    } catch {
+      return null;
+    }
+  };
+
   const buildStatus = async () => {
     const [sys, gpu, power, virt, services, netSpeed, netProbes] = await Promise.all([
       querySystem(),
@@ -557,7 +571,7 @@ function ranaSysStatusMiddleware(): Plugin {
       queryNetSpeed().catch(() => null),
       queryNetProbes().catch(() => ({ probes: [] })),
     ]);
-    return { sys, gpu, power, virt, services, net: { speed: netSpeed, probes: netProbes.probes }, ts: Date.now() };
+    return { sys, gpu, power, virt, services, net: { speed: netSpeed, probes: netProbes.probes }, patrol: readPatrol(), ts: Date.now() };
   };
 
   const isLoopback = (req: { socket?: { remoteAddress?: string }; headers?: Record<string, unknown> }) => {

@@ -230,6 +230,14 @@ class GatewayConnection {
         this.reconnects = 0;
         this.hello = payload as HelloOk;
         store().setConn("connected");
+        // 广播「（重）连成功」：依赖 WS 的页面（定时任务页等）在此重拉首屏数据
+        for (const cb of this.connOpenListeners) {
+          try {
+            cb();
+          } catch {
+            /* 订阅者自己兜错 */
+          }
+        }
         const mainKey = this.hello?.snapshot?.sessionDefaults?.mainSessionKey;
         if (mainKey) store().setMainSessionKey(mainKey);
         await Promise.all([this.refreshModels(), this.refreshSessions()]);
@@ -287,17 +295,45 @@ class GatewayConnection {
 
   request<T = unknown>(method: string, params?: unknown, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        reject(new Error("gateway 未连接"));
+      const send = () => {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+          reject(new Error("gateway 未连接"));
+          return;
+        }
+        const id = String(++this.reqSeq);
+        const timer = setTimeout(() => {
+          this.pending.delete(id);
+          reject(new Error(`请求超时: ${method}`));
+        }, timeoutMs);
+        this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
+        this.ws.send(JSON.stringify({ type: "req", id, method, params: params ?? {} }));
+      };
+      // WS 还在握手中：先排队等握手完成再发（页面挂载比连接快时会在这里竞态，
+      // 直接拒绝会让首屏面板永久空白——见 KNOWN-ISSUES 前端单次取数条目）
+      const ws = this.ws;
+      if (ws && ws.readyState === WebSocket.CONNECTING) {
+        const timer = setTimeout(() => {
+          cleanup();
+          reject(new Error(`等待网关连接超时: ${method}`));
+        }, timeoutMs);
+        const onOpen = () => {
+          cleanup();
+          send();
+        };
+        const onCloseEv = () => {
+          cleanup();
+          reject(new Error("gateway 未连接"));
+        };
+        const cleanup = () => {
+          clearTimeout(timer);
+          ws.removeEventListener("open", onOpen);
+          ws.removeEventListener("close", onCloseEv);
+        };
+        ws.addEventListener("open", onOpen, { once: true });
+        ws.addEventListener("close", onCloseEv, { once: true });
         return;
       }
-      const id = String(++this.reqSeq);
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`请求超时: ${method}`));
-      }, timeoutMs);
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
-      this.ws.send(JSON.stringify({ type: "req", id, method, params: params ?? {} }));
+      send();
     });
   }
 
@@ -336,6 +372,14 @@ class GatewayConnection {
   }
 
   private cronEventListeners = new Set<(payload: unknown) => void>();
+  private connOpenListeners = new Set<() => void>();
+  /** 订阅网关（重）连接成功事件；返回取消订阅函数 */
+  onConnected(cb: () => void): () => void {
+    this.connOpenListeners.add(cb);
+    return () => {
+      this.connOpenListeners.delete(cb);
+    };
+  }
   /** 订阅网关 cron 事件（任务运行/变更时触发）；返回取消订阅函数 */
   onCronEvent(cb: (payload: unknown) => void): () => void {
     this.cronEventListeners.add(cb);

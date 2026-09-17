@@ -21,6 +21,38 @@
 
 ## 登记区
 
+## \[已解决·要警惕] QQ 通道断网后重连耗尽「静默装死」——网络恢复也不自愈（2026-09-17）
+
+- 症状：QQ 私聊/群聊全部离线，但网关进程活着、密钥/补丁/配置全正常；日志里 qqbot 子系统最后一次输出停在断网期间，之后再无任何报错（连"channel exited"都没有）。
+- 根因：主机断网 9 小时（03:08–12:27，时间与迁移 WSL 吻合）期间，QQ 插件（@tencent-connect/openclaw-qqbot 2.0.3）的 WebSocket 例行重连（每 30 分钟 4009）从 03:08 起连续失败，**04:46 退避耗尽后彻底放弃重试且不再输出任何日志**。微信是轮询式通道能自愈，QQ 长连接不能——网络恢复后就成了"僵尸通道"。对照取证：`channels status --json` 的 `channels.qqbot.connected=false` 即僵尸铁证；进程对外连接里没有 api.sgroup.qq.com 的任何现解析 IP。
+- 解决方案：标准重启（taskkill 网关 → start-gateway.cmd），重启后 `[qqbot] gateway READY` 即恢复。**防复发已落地**：`rana-web/health-patrol.mjs` 每 30 分钟查 `channels status`，QQ 不健康 30 分钟内必被发现并 QQ 私聊报警（见 SYSTEM-MAINTENANCE-PLAN.md 阶段2）。
+- 排障抓手：QQ 连不上先看 `%TEMP%\openclaw\openclaw-当日.log` 搜 qqbot——**日志完全安静 = 大概率僵尸，直接重启**；有 100016 循环才是 secret 问题（见 9-13 条目）。注意 `rana-web/.gateway.log` 是陈旧文件（9-15 后不再更新），别再当依据。
+- 状态：已解决（当日重启恢复；巡检兜底已上线）。
+
+## \[已解决] cron 小写 store 孤儿病大面积发作——备份/git 日报/学习日报静默停摆 5 天（2026-09-17）
+
+- 症状：Daily Private Backup 最后成功推送停在 9-12 17:30（当天 robocopy 其实成功、是 git push 撞 Clash 半死 TLS eof 失败）；git 活动日报/周报/月报、学习睡前小结/周报最后收据全部停在 9-11/9-12；全部无报错无通知（备份任务 failureAlert=false，其它任务的静默属常态）。
+- 根因（两层叠加）：①9-12 傍晚网关只调度大写 `K:\OpenClaw\...` store 后（9-14 私密桥条目已记录该机制），**所有恰好只存在小写 store 行的任务全部变孤儿**——不止私密桥，还有备份、git×3、study×2 共 7 个；②当天 push 失败的近因是 Clash 7897 半死（端口在听、TLS 全断，见 9-11 条目），重启 Verge 后恢复。备份脚本的重试用 `timeout /t 60`，该命令在 cron 无控制台环境**秒失败**（ERROR: Input redirection is not supported），重试间隔形同虚设。
+- 解决方案（2026-09-17 落地）：①备份脚本 push 重试 3 次且延时改 `ping -n 61`；②备份任务重建进活 store（新 id f8b51148，每日 17:30）；③停网关→备份 `state/openclaw.sqlite`（`backups/cron-surgery-20260917-145423/`）→ `DELETE FROM cron_jobs WHERE store_key GLOB 'K:\openclaw*'` 一举清掉 13 条小写行（含 5 条真僵尸 + 8 条重复对的小写半边）→ git×3/study×2 五条**从备份库原行复活到大写 store**（保留原 job_id 与中文载荷，仅重置调度状态）→ 重启网关；④过期心跳小抄（挂僵尸 8bd6d022 上、声称"备份由本清单接管"）已删，备份职责唯一归 cron，巡检盯新鲜度。验证：19 条任务无重复全在调度；手动备份跑通并推送成功（与 origin 齐平）。
+- 教训：**cron 收据（`cron_run_receipts` 表）才是任务死活的真相**，`cron list` 看不到死 store 的行；一个任务"配置在但收据停更"= 孤儿。backup 新鲜度已纳入 health-patrol 巡检（>26h 报警）。
+- 状态：已解决（全链验证通过）。
+
+## \[已解决] 前端「挂载单次取数、失败静默、不重试」——首屏面板随机空白（2026-09-17）
+
+- 症状：定时任务页/技能面板/课表「刷新后有、有时又没有」；会话页从不中招。断网/网关忙/重启窗口期概率大增。
+- 根因：三处同款模式——①CronPage 最严重：`gateway.ts` 的 `request()` 在 WS 非 OPEN 时**立即拒绝**，而 App 挂载才发起 connect，页面挂载比握手快就秒拒，之后只有 cron 事件能触发重拉（连上也不重拉）；②AgentKitCard 走 `/__rana/agent-info`（中间件拉 CLI 子进程 20s 超时），单次 fetch 失败只显示小字；③StudyPage 同款单次 fetch。会话页因 connect 回调主动刷新 + `sessions.changed` 防抖 + 八处触发点而天然自愈。
+- 解决方案：①`request()` 在 WS CONNECTING 时排队等握手（上限=请求超时），新增 `onConnected()` 广播；②CronPage 挂载+重连双路重拉，错误文案可点击重试；③新增 `src/lib/fetchRetry.ts`（重试 2 次、指数退避），AgentKitCard/StudyPage 接入。tsc 通过。
+- 教训：新页面取数要么走 fetchRetry，要么挂 onConnected——别再写裸的单次 fetch。vite 拆模块（规划书阶段5）时保持此约定。
+- 状态：已解决（逻辑对齐根因；等待日常复验）。
+
+## \[未解决·疑似] rana-web/.life/ 目录整目录消失——人生目标从未录入，内容库候选已捞回（2026-09-17）
+
+- 症状：规划页「总览（人生目标）」「内容库」为空；`.life/` 目录连同 `.bak` 不存在；用户以为数据丢了。
+- 根因（未实锤）：目录在 9-16 01:27 之后某时刻被仓库外动作删除。**关键反证：life 功能 9-15 深夜才上线，9-16 每次搜集会话注入的上下文都写着「（还没建人生目标）」，goals.json 里 0 个 lifeGoalId 引用——人生目标大概率从未录入过**，丢失的实际只有内容库搜集候选。头号嫌疑是 9-16/9-17「心跳马拉松」期间 Rana 拿着 workspace AGENTS.md 的后台整理授权误删（当时授权已在 9-17 收回，见心跳马拉松补录），无直接证据；git 从未跟踪该目录、私有备份 9-12 起停摆（见上条），故无恢复源。
+- 解决方案：从被删 life-planner 会话的 zstd 归档（`agents/main/sessions/b8ecc360-*.jsonl.deleted.*.zst`，WSL zstd 解压）提取三次搜集共 **16 条候选**，按 LibraryEntry 契约重建 `rana-web/.life/library.json`；人生目标由用户在规划页重新录入。
+- 排障抓手：被删会话数据没死——`agents/<agent>/sessions/*.jsonl.deleted.*.zst` 是全量归档，`wsl.exe zstd -d` 解开后按 `message.content[0].text` 找正文；Git Bash 调 wsl 记得 `MSYS_NO_PATHCONV=1`。
+- 状态：数据已捞回；删除者未定案（若再发生，优先查心跳/整理类会话的 write/exec 轨迹）。
+
 ## \[已解决·防复发] 任务收尾把工具报错原话当回复外发——QQ 凭空弹 "⚠️ Read failed"（2026-09-16）
 
 - 症状：00:09 QQ 私聊收到一条只有 "⚠️ Read failed" 的消息，看着像心跳或模型端点出了病。
@@ -53,6 +85,7 @@
 - 实验 C（2026-09-15 00:04-00:24，用户批准后执行）：手动心跳 A/B 对照，各 3 次——**臂1**（acpx 开 + 心跳摘 glm 钉回落 qwen）3/3 成功（76s/60s/113s）；**臂2**（acpx 关 + 心跳 qwen）端点层面同样干净（无 400/畸形/断连，21.5s/27.5s 两次成功）。两臂全绿 = **qwen 端点当夜已自愈，acpx 载荷诱因假说无法在同一病窗内复现，悬置**。臂2 唯一失败是一次 `agent-tool-failure`：模型把消息工具目标写成 `qqbot:c2c`（漏了 openid 后缀，提示语里就有正确格式），9-13/9-14 均零发生，属 qwen 单发手滑，与端点无关——已应用户要求在 `agents.defaults.heartbeat.prompt` 末尾追加目标格式提醒（提醒对任何心跳模型都有效；prompt 热生效，9-15 00:45 验证心跳 ok）。实验全程配置动过三处（heartbeat.model、activeHours.end、acpx.enabled），结束后已还原并与实验前备份 `openclaw.json.bak-expc` 语义比对一致，还原后心跳 00:23 glm ok（199s）。
 - 教训：①"弹了两次"≠只发生两次——先 grep 指纹再数；②失败时间分布（xx:52-57）直接暴露触发源是心跳；③cron/heartbeat 的模型覆盖改动**不热生效**，验证前先重启网关；④手动触发心跳用 `openclaw cron run <heartbeat jobId>`，成败看 `openclaw cron runs <jobId>` 的 status/durationMs；heartbeat 是 system-owned 任务，`cron disable` 会被拒（"system-owned monitor jobs cannot be edited"）。
 - 状态：已缓解（glm 路线全绿）；实验 C 已做：当晚两臂全绿无法归因，acpx 诱因假说悬置，主嫌疑 = token-plan qwen3.8-flash 端点日间不健康（已自愈）。**9-15 用户拍板：心跳 glm 钉已拔**（回落 qwen3.8-flash，00:53 心跳 22.6s 绿、运行窗口 14 次调用全 qwen 全 200；术前的 glm 配置存 `openclaw.json.bak-unpin-hb` 可随时回钉）；**主人画像 cron 也已切回** **`aliyun-maas/qwen3.8-flash`**（cron edit 即时生效无需重启）。⚠️ 但 9-15 01:01 画像手动验证跑暴露新问题：47 次 qwen 调用全 200、跑 468s，工具活干完却不写画像档案（停在 9-13 05:15）、"settled post-tool turn lacked a final answer"+finalization 失败（模型收尾时又去调工具）——与 9-14 晚 dashboard 同 signature，但端点健康下复现 = qwen3.8-flash 长工具链收尾问题，非端点病，待查。另：群画像（b566bd64，240s 上限）实际约每 30 分钟跑一次增量而非名单显示的每日，偶发 240s 超时后下一轮自愈。
+- **补录（9-17 凌晨）——同一收尾病在心跳身上的放大形态：心跳马拉松**。数据：正常班一直 24~120s，但 9-16 00:02=442s、11:09=564s、9-17 00:33=557s（该班跑完后系统 isolated finalization 产出英文元话术 "Final answer: The current transcript…" 外发 QQ）、9-17 01:05 班 600s 撞死全局超时（QQ 收到超时罐头话）。机制：心跳是隔离小会话无上下文膨胀，变长全是 qwen 拿着 workspace AGENTS.md「用 cron/心跳做后台整理（更新文档都可以自主做）」的授权在心跳里跑 18 轮工具马拉松且不落笔。处方（9-17 已落地，治机制不换模型）：①`agents.defaults.heartbeat.prompt` 追加巡查纪律（工具≤8 次、长活只记待办不施工、收尾必须中文人话，prompt 热生效无需重启，备份 `openclaw.json.bak-hbpatrol`）；②workspace AGENTS.md「定时任务」段改写为巡查/施工分工，收回心跳的长活授权（每班新会话自动注入）。openclaw **没有**心跳专用的轮数/超时旋钮（600s 是全局 `agents.defaults.timeoutSeconds`，动它误伤主会话长任务）。观察 1~2 天：再出现 >300s 班或超时 → 执行后备 = 回钉 glm（配置在 `openclaw.json.bak-unpin-hb`，需重启网关）。
 
 ## \[已解决] 微信通道静默死亡——网关进程丢 OPENCLAW\_STATE\_DIR，微信插件回落主目录找不到账号（2026-09-14）
 
