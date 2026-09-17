@@ -12,6 +12,33 @@ import { modelSuffix } from "../lib/types";
 /** 排课/出题/判分共用的专用会话 key（study-agent.mjs 里的 SESSION_KEY 同款） */
 const STUDY_SESSION_KEY = "agent:main:study-planner";
 const MODEL_PREF_KEY = "study.model.v1";
+/** 「开始今天的课」勾选面板的偏好（发给云端模型的上下文自选） */
+const LESSON_CTX_KEY = "study.lessonCtx.v1";
+type LessonHistory = "none" | "tail5" | "all";
+interface LessonCtx {
+  history: LessonHistory;
+  schedule: boolean;
+  materials: boolean;
+  mistakes: boolean;
+  reports: boolean;
+  contract: boolean;
+}
+const DEFAULT_LESSON_CTX: LessonCtx = {
+  history: "tail5", // 只带最近 5 轮对话（治上下文爆炸的默认值）
+  schedule: true,
+  materials: false,
+  mistakes: false,
+  reports: false,
+  contract: false,
+};
+const loadLessonCtx = (): LessonCtx => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LESSON_CTX_KEY) ?? "{}") as Partial<LessonCtx>;
+    return { ...DEFAULT_LESSON_CTX, ...raw };
+  } catch {
+    return { ...DEFAULT_LESSON_CTX };
+  }
+};
 
 export interface StudyCourse {
   id: string;
@@ -206,6 +233,21 @@ export default function StudyPage({ embedded = false }: { embedded?: boolean } =
   };
   // "现在该学什么"每分钟刷新一次
   const [, setTick] = useState(0);
+  // 「开始今天的课」勾选面板：上下文自选（勾什么，发给云端模型什么）
+  const [lessonOpen, setLessonOpen] = useState(false);
+  const [lessonCtx, setLessonCtx] = useState<LessonCtx>(loadLessonCtx);
+  const [lessonBusy, setLessonBusy] = useState(false);
+  const [lessonReply, setLessonReply] = useState("");
+  const setCtx = (patch: Partial<LessonCtx>) =>
+    setLessonCtx((c) => {
+      const next = { ...c, ...patch };
+      try {
+        localStorage.setItem(LESSON_CTX_KEY, JSON.stringify(next));
+      } catch {
+        /* 存不进就算了 */
+      }
+      return next;
+    });
 
   const load = useCallback(async () => {
     try {
@@ -396,6 +438,26 @@ export default function StudyPage({ embedded = false }: { embedded?: boolean } =
     }
   };
 
+  /** 开始今天的课：按勾选面板的上下文发起（服务端拼自给自足的指令，不让她读文件） */
+  const startLesson = async () => {
+    if (lessonBusy) return;
+    setLessonBusy(true);
+    setLessonReply("");
+    try {
+      const r = await fetch("/__rana/study/lesson-start", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ context: lessonCtx, ...(pickModel ? { model: pickModel } : {}) }),
+      });
+      const j = (await r.json()) as { ok?: boolean; reply?: string; error?: string };
+      setLessonReply(j.ok ? j.reply ?? "（她没说话）" : j.error ?? "她没回话。");
+    } catch (e) {
+      setLessonReply(`发起失败：${(e as Error).message}`);
+    } finally {
+      setLessonBusy(false);
+    }
+  };
+
   // ---- 到点弹窗开关 ----
   const notifyOn = getNotifyPref() && notifyPermission() === "granted";
   const toggleNotify = async () => {
@@ -581,6 +643,13 @@ export default function StudyPage({ embedded = false }: { embedded?: boolean } =
                 <b>现在没安排{nextCourse ? `，下一节 ${nextCourse.date} ${nextCourse.timeStart ?? ""}` : ""}</b>
               )}
             </div>
+            <button
+              className="btn ghost sm"
+              onClick={() => setLessonOpen((v) => !v)}
+              title="按下面板勾选的上下文，让她带今天的课开场（历史对话带多少、课表/资料/错题带不带，都是你说了算）"
+            >
+              ▶ 开始今天的课
+            </button>
             <button className="btn ghost sm" onClick={lazyToday} title="把今天（当前计划）没学的课全部顺延到后面的空位">
               😴 今天不想学
             </button>
@@ -592,6 +661,55 @@ export default function StudyPage({ embedded = false }: { embedded?: boolean } =
               {notifyOn ? "🔔 弹窗：开" : "🔔 弹窗：关"}
             </button>
           </div>
+          {lessonOpen && (
+            <div className="lesson-ctx">
+              <div className="lesson-ctx-head">
+                带给她的上下文（勾什么发什么，不勾不发，发给云端模型的内容就这么多）
+              </div>
+              <div className="lesson-ctx-row">
+                <span className="k">历史对话</span>
+                {([
+                  ["tail5", "只带最近5轮"],
+                  ["none", "不带（干净会话）"],
+                  ["all", "全部"],
+                ] as Array<[LessonHistory, string]>).map(([v, label]) => (
+                  <label key={v} className="chip-btn">
+                    <input
+                      type="radio"
+                      name="lesson-history"
+                      checked={lessonCtx.history === v}
+                      onChange={() => setCtx({ history: v })}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              <div className="lesson-ctx-row">
+                {([
+                  ["schedule", "课程表"],
+                  ["materials", "资料路径"],
+                  ["mistakes", "错题本"],
+                  ["reports", "周报"],
+                  ["contract", "学习契约"],
+                ] as Array<[keyof LessonCtx, string]>).map(([k, label]) => (
+                  <label key={String(k)} className="chip-btn" title={k === "materials" ? "勾上才给资料文件路径（她想读时自己去读）；不勾只给文件名" : undefined}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(lessonCtx[k])}
+                      onChange={(e) => setCtx({ [k]: e.target.checked } as Partial<LessonCtx>)}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              <div className="lesson-ctx-row">
+                <button className="btn green sm" onClick={() => void startLesson()} disabled={lessonBusy || !plannedToday.length}>
+                  {lessonBusy ? "她在准备……" : plannedToday.length ? "开始" : "今天没课"}
+                </button>
+                {lessonReply && <p className="plan-result lesson-reply">{lessonReply}</p>}
+              </div>
+            </div>
+          )}
           {lazyDay && <p className="plan-result">{lazyDay}</p>}
           {streak.comment && streak.commentDay === t && (
             <p className="plan-result" title={`连续 ${streak.days} 天`}>

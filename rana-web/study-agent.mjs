@@ -2,7 +2,11 @@
 // 等她干完活，把最终回复连同其中最后一个 ```json 结果块打印到 stdout（一行 JSON）。
 // 由 vite.config.ts 的 /__rana/study/* 中间件以子进程方式调用：
 //   node study-agent.mjs --message "完整指令文本" [--model "模型id"]
+//     [--session-key "会话key" --ephemeral] [--tail N]
 // --model：可选，指定这轮用哪个模型（sessions.patch 到专用会话，粘性生效）。
+// --session-key：可选，用指定会话而不是常驻排课会话（配合 --ephemeral 做一次性干净会话）。
+// --ephemeral：干完活把这次用的会话删掉，不留在侧栏（一次性模式专用）。
+// --tail N：可选，发消息前从常驻会话的历史里摘最近 N 轮对话拼进指令开头（"只带最近几条"用）。
 // 输出契约：{ok:true, reply:"她的最终回复", data:{解析出的json} | null} 或 {ok:false, error:"原因"}
 import WebSocket from "ws";
 import { generateKeyPairSync, sign as cryptoSign, createHash } from "node:crypto";
@@ -16,9 +20,15 @@ const WAIT_FINAL_MS = 165000; // 等 final 的上限（中间件 execFile 超时
 const argv = process.argv.slice(2);
 let message = "";
 let wantModel = "";
+let sessionKeyArg = "";
+let ephemeral = false;
+let tailCount = 0;
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--message") message = argv[i + 1] ?? "";
   if (argv[i] === "--model") wantModel = argv[i + 1] ?? "";
+  if (argv[i] === "--session-key") sessionKeyArg = argv[i + 1] ?? "";
+  if (argv[i] === "--ephemeral") ephemeral = true;
+  if (argv[i] === "--tail") tailCount = Number(argv[i + 1]) || 0;
 }
 if (!message) {
   console.log(JSON.stringify({ ok: false, error: "缺少 --message 参数" }));
@@ -73,6 +83,8 @@ const extractJson = (text) => {
 };
 
 const ws = new WebSocket("ws://127.0.0.1:18789", { origin: "http://localhost:5173" });
+// 这轮实际用的会话 key（默认常驻排课会话；一次性模式是调用方传进来的）
+const targetKey = sessionKeyArg || SESSION_KEY;
 
 // 兜底看门狗：无论卡在哪一步，到点就报超时退出（别让中间件干等）
 const watchdog = setTimeout(() => {
@@ -90,7 +102,7 @@ ws.onmessage = (ev) => {
     const { ts, nonce } = frame.payload ?? {};
     const payload = buildDeviceAuthPayloadV3({
       deviceId, clientId: "webchat-ui", clientMode: "webchat",
-      role: "operator", scopes: ["operator.read", "operator.write"],
+      role: "operator", scopes: ["operator.read", "operator.write", "operator.admin"],
       signedAtMs: ts ?? Date.now(), token, nonce: nonce ?? "", platform: "browser",
     });
     const rid = String(++seq);
@@ -100,7 +112,7 @@ ws.onmessage = (ev) => {
       params: {
         minProtocol: 4, maxProtocol: 4,
         client: { id: "webchat-ui", version: "0.1.0", platform: "browser", mode: "webchat" },
-        role: "operator", scopes: ["operator.read", "operator.write"],
+        role: "operator", scopes: ["operator.read", "operator.write", "operator.admin"],
         device: {
           id: deviceId, publicKey: publicKeyRaw.toString("base64url"),
           signature: cryptoSign(null, Buffer.from(payload, "utf8"), privateKey).toString("base64url"),
@@ -121,7 +133,7 @@ ws.onmessage = (ev) => {
   }
   if (frame.type === "event" && frame.event === "chat") {
     const p = frame.payload ?? {};
-    if (p.sessionKey && p.sessionKey !== SESSION_KEY) return;
+    if (p.sessionKey && p.sessionKey !== targetKey) return;
     if (p.runId && myRunId && p.runId !== myRunId) return;
     if (p.state === "final") {
       finalText = (p.message?.content ?? []).filter((c) => c.type === "text").map((c) => c.text).join("");
@@ -147,26 +159,41 @@ try {
     }, 100);
   });
 
-  // 2) 找到/创建专用会话（固定 key，她能记住之前的排课偏好）
+  // 0) 可选：从常驻会话摘最近 N 轮对话当背景（"只带最近几条"模式）
+  if (tailCount > 0) {
+    try {
+      const hist = await request("chat.history", { sessionKey: SESSION_KEY });
+      const msgs = (hist.messages ?? [])
+        .map((m) => ({ role: String(m.role ?? ""), text: String(m.content ?? "") }))
+        .filter((m) => (m.role === "user" || m.role === "assistant") && m.text);
+      const picked = msgs.slice(-(tailCount * 2)); // 一轮 = 一问一答
+      if (picked.length) {
+        const lines = picked.map((m) => `${m.role === "user" ? "主人" : "Rana"}：${m.text}`);
+        message = `【近期对话背景（只要这 ${tailCount} 轮，更早的不用管）】\n${lines.join("\n")}\n\n${message}`;
+      }
+    } catch { /* 摘不到历史就不带，指令照发 */ }
+  }
+
+  // 2) 找到/创建这轮要用的会话
   let sessionKey = "";
   try {
     const list = await request("sessions.list", {});
-    const hit = (list.sessions ?? []).find((s) => s.key === SESSION_KEY);
+    const hit = (list.sessions ?? []).find((s) => s.key === targetKey);
     if (hit) sessionKey = hit.key;
   } catch { /* list 失败不致命，下面直接试创建 */ }
   if (!sessionKey) {
     try {
       const created = await request("sessions.create", {
-        key: SESSION_KEY,
+        key: targetKey,
         agentId: "main",
-        label: SESSION_LABEL,
+        label: sessionKeyArg ? `📖 上课（一次性 ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}）` : SESSION_LABEL,
         ...(wantModel ? { model: wantModel } : {}), // 创建时直接带上模型
       });
-      sessionKey = created.key ?? SESSION_KEY;
+      sessionKey = created.key ?? targetKey;
     } catch (e) {
       // 已存在等并发情形：再 list 一次兜底
       const list = await request("sessions.list", {});
-      const hit = (list.sessions ?? []).find((s) => s.key === SESSION_KEY);
+      const hit = (list.sessions ?? []).find((s) => s.key === targetKey);
       if (!hit) throw e;
       sessionKey = hit.key;
     }
@@ -192,6 +219,10 @@ try {
   });
   if (runError) throw new Error("她那边出错了：" + runError);
 
+  // 一次性会话：干完就删，别留在侧栏
+  if (ephemeral && sessionKeyArg) {
+    try { await request("sessions.delete", { key: sessionKey }); } catch { /* 删不掉也无妨 */ }
+  }
   clearTimeout(watchdog);
   out({ ok: true, reply: finalText, data: extractJson(finalText) });
 } catch (e) {

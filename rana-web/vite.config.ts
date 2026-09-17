@@ -877,6 +877,8 @@ function ranaNewsMiddleware(): Plugin {
  * - POST   /__rana/study/material?name=   上传学习资料（raw body ≤10MB）
  * - DELETE /__rana/study/material?id=     删除资料（仍被课程引用时拒删）
  * - POST   /__rana/study/plan             排课（Rana 按 study-planner skill 直接改 schedule.json）
+ * - POST   /__rana/study/lesson-start    开始今天的课：{context:{history,schedule,materials,mistakes,reports,contract}, model?}
+ *                                        勾什么附什么（信息直接写进指令，不让她读文件）；不带历史=一次性干净会话
  * - POST   /__rana/study/quiz-gen         出题：{courseId} | {mistakeIds:错题重考} | {planId, final:期末考}
  * - POST   /__rana/study/quiz-grade       判分；错题自动回收、错题重考自动销账、期末考成绩记到计划
  * - GET    /__rana/study/goals            读待办 goals.json（大方向学习目标，独立文件不与课程表互扰）
@@ -1184,10 +1186,18 @@ function ranaStudyMiddleware(): Plugin {
     return path.join(materialsDir, m.file);
   };
 
-  /** 唤醒 Rana：子进程跑 study-agent.mjs，解析它 stdout 的最后一行 JSON；model 可选（页面选的模型） */
-  const spawnAgent = async (message: string, model?: string): Promise<{ ok: boolean; reply?: string; data?: Record<string, unknown>; error?: string }> => {
+  /** 唤醒 Rana：子进程跑 study-agent.mjs，解析它 stdout 的最后一行 JSON；model 可选（页面选的模型）
+   *  opts.sessionKey/ephemeral：一次性干净会话模式；opts.tail：先从常驻会话摘最近 N 轮对话当背景 */
+  const spawnAgent = async (
+    message: string,
+    model?: string,
+    opts?: { sessionKey?: string; ephemeral?: boolean; tail?: number },
+  ): Promise<{ ok: boolean; reply?: string; data?: Record<string, unknown>; error?: string }> => {
     const args = [path.join(here, "study-agent.mjs"), "--message", message];
     if (model) args.push("--model", model);
+    if (opts?.sessionKey) args.push("--session-key", opts.sessionKey);
+    if (opts?.ephemeral) args.push("--ephemeral");
+    if (opts?.tail) args.push("--tail", String(opts.tail));
     const { stdout } = await execFileP(process.execPath, args, {
       encoding: "utf8",
       timeout: 180000,
@@ -1197,12 +1207,16 @@ function ranaStudyMiddleware(): Plugin {
     return JSON.parse(stdout.trim().split("\n").pop() ?? "{}");
   };
 
-  /** 排课/出题/判分共用的互斥执行：她一次只干一件事 */
-  const runAgent = async (message: string, model?: string) => {
+  /** 互斥执行也带上会话参数（她一次只干一件事） */
+  const runAgent = async (
+    message: string,
+    model?: string,
+    opts?: { sessionKey?: string; ephemeral?: boolean; tail?: number },
+  ) => {
     if (agentBusy) throw new Error("她正忙着上一个请求，等一下再试");
     agentBusy = true;
     try {
-      return await spawnAgent(message, model);
+      return await spawnAgent(message, model, opts);
     } finally {
       agentBusy = false;
     }
@@ -1301,6 +1315,72 @@ function ranaStudyMiddleware(): Plugin {
     return mats.length
       ? mats.map((m) => `- ${m.name} → ${materialAbs(m)}`).join("\n")
       : "（这节课没挂资料，按课程标题和笔记出。）";
+  };
+
+  /** 「开始今天的课」勾选面板的上下文选项（页面传来的，默认值在页面侧） */
+  interface LessonCtx {
+    history: "none" | "tail5" | "all";
+    schedule: boolean;
+    materials: boolean;
+    mistakes: boolean;
+    reports: boolean;
+    contract: boolean;
+  }
+  /** 按勾选项拼一条自给自足的上课指令：勾了什么附什么，并明确告诉她别再读文件 */
+  const lessonMessage = (ctx: LessonCtx, s: StudySchedule): string => {
+    const t = todayStr();
+    const todays = s.courses.filter((c) => c.date === t && c.status === "planned");
+    const parts: string[] = [
+      `【开始今天的课·页面触发】今天是 ${t}。`,
+      `今天待学的课（信息已经附在下面，不要再去读 schedule.json 或资料文件）：`,
+      todays.length
+        ? todays
+            .map((c) => {
+              const bits = [`- ${c.timeStart ? `${c.timeStart}${c.timeEnd ? `-${c.timeEnd}` : ""} ` : ""}${c.title}`];
+              if (c.estMin) bits.push(`（预计 ${c.estMin} 分钟）`);
+              if (c.note) bits.push(`备注：${c.note}`);
+              const mats = (c.materialIds ?? []).map((id) => s.materials.find((m) => m.id === id)).filter(Boolean);
+              if (mats.length) {
+                // 勾了「带资料」才给路径，否则只给名字（她想读也读不到，省上下文）
+                bits.push(
+                  ctx.materials
+                    ? `资料：${mats.map((m) => `${m!.name}（原文可读 ${materialAbs(m!)}）`).join("、")}`
+                    : `资料：${mats.map((m) => m!.name).join("、")}`,
+                );
+              }
+              if (c.kind === "review" && c.reviewOf) bits.push("（这是复习课）");
+              return bits.join(" ");
+            })
+            .join("\n")
+        : "（今天没有待学的课。如实说一句，别编课。）",
+    ];
+    if (ctx.schedule) {
+      const lines = [...s.courses]
+        .sort((a, b) => a.date.localeCompare(b.date) || (a.timeStart ?? "").localeCompare(b.timeStart ?? ""))
+        .map((c) => `- ${c.date}${c.timeStart ? ` ${c.timeStart}` : ""} ${c.title}${c.status === "done" ? "（已学完）" : ""}`);
+      parts.push(`课程表全貌（供参考）：\n${lines.join("\n")}`);
+      parts.push(`连续打卡：${s.streak.days} 天（最好 ${s.streak.best}）`);
+    }
+    if (ctx.mistakes) {
+      const open = s.mistakes.filter((m) => !m.resolvedAt);
+      parts.push(
+        open.length
+          ? `未解决错题（讲课时顺带照顾一下）：\n${open.slice(-20).map((m) => `- ${m.courseTitle}：${m.q.slice(0, 120)}`).join("\n")}`
+          : "错题本：没有未解决的错题。",
+      );
+    }
+    if (ctx.reports && s.reports.length) {
+      const latest = [...s.reports].sort((a, b) => b.at - a.at)[0];
+      parts.push(`最近周报（${latest.title}）：${latest.text.slice(0, 600)}`);
+    }
+    if (ctx.contract && s.contract?.text) parts.push(`学习契约：${s.contract.text}`);
+    parts.push(
+      [
+        "要求：按你平时的风格开场带这节课（话少、直接），把今天的课讲起来。",
+        "这轮不需要改任何文件，也不要调用排课工具。",
+      ].join("\n"),
+    );
+    return parts.join("\n");
   };
 
   /** 难度自适应的上下文：近期成绩 + 未解决错题 */
@@ -1691,6 +1771,37 @@ function ranaStudyMiddleware(): Plugin {
           json(res, 400, { error: (e as Error).message });
         }
       });
+      return;
+    }
+
+    if (req.method === "POST" && route === "/lesson-start") {
+      readBody(req)
+        .then(async (body) => {
+          const parsed = JSON.parse(body || "{}") as { context?: Partial<LessonCtx>; model?: string };
+          const c = parsed.context ?? {};
+          const ctx: LessonCtx = {
+            history: c.history === "none" || c.history === "all" ? c.history : "tail5",
+            schedule: c.schedule !== false, // 默认带课表
+            materials: c.materials === true, // 默认不带资料路径
+            mistakes: c.mistakes === true,
+            reports: c.reports === true,
+            contract: c.contract === true,
+          };
+          const model = typeof parsed.model === "string" && parsed.model ? parsed.model : undefined;
+          const message = lessonMessage(ctx, readSchedule());
+          // 历史选项：none=一次性干净会话（用完即删）；tail5=一次性会话+摘常驻会话最近5轮；all=常驻会话（全量历史）
+          const opts =
+            ctx.history === "all"
+              ? undefined
+              : {
+                  sessionKey: `agent:main:study-lesson-${Date.now().toString(36)}`,
+                  ephemeral: true,
+                  ...(ctx.history === "tail5" ? { tail: 5 } : {}),
+                };
+          const r = await runAgent(message, model, opts);
+          json(res, r.ok ? 200 : 500, r.ok ? { ok: true, reply: r.reply ?? "" } : { ok: false, error: r.error ?? "她没回话" });
+        })
+        .catch((e) => json(res, 400, { error: (e as Error).message }));
       return;
     }
 

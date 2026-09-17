@@ -1553,6 +1553,21 @@ body.has-bg .room { display: none; }
   padding: 8px 10px; margin: 8px 0 0;
 }
 
+/* 「开始今天的课」上下文勾选面板 */
+.lesson-ctx { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 10px; }
+.lesson-ctx-head { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+.lesson-ctx-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.lesson-ctx-row .k { font-size: 12px; color: var(--text-dim); flex: none; }
+.chip-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12.5px; cursor: pointer; user-select: none;
+  border: 1.5px solid var(--border); border-radius: 999px;
+  padding: 3px 10px; background: transparent;
+}
+.chip-btn:has(input:checked) { border-color: var(--accent); color: var(--accent-strong); }
+.chip-btn input { accent-color: var(--accent-strong); margin: 0; }
+.lesson-reply { white-space: pre-wrap; flex: 1 1 100%; }
+
 .quiz-panel { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 10px; }
 .quiz-gen input { width: 100%; }
 .quiz-q { margin-bottom: 14px; }
