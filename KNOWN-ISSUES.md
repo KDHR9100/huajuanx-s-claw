@@ -28,6 +28,7 @@
 - **cmd.exe 按 GBK 解析批处理，UTF-8 中文注释会把 REM 行拆成命令**：症状是 start-gateway.cmd 报「'制造多开。日志见…' 不是内部或外部命令」+ 变量为空（`'""' 不是命令`）。原因：Write 类工具默认写 UTF-8，而老脚本当年是 GBK/纯 ASCII 所以没事。**规矩：启动链 .cmd 一律纯 ASCII 注释**（setup.cmd 例外——它第一行 `chcp 65001` 先切换了代码页，验证可行；local-overrides.example.cmd 同款处理）。
 - **OpenClaw 网关首次启动会自动装内置插件（anthropic/browser/canvas…+qwen），装完「拒绝宣告就绪」要求再启一次**：`plugin migration inputs changed during startup convergence; refusing to report the gateway ready`。这不是故障——第二次启动即收敛。README 快速上手已提示「首启连不上就再双击一次」。另注：装插件走 openclaw 内部 npm，需要代理的网络要带 `HTTPS_PROXY`（老坑），发行文档提示用户。
 - **`workspace-main` 目录不会被自动认领，必须在 agent 条目显式写 `workspace` 字段**：症状是 SOUL.md 不被注入、模型自称「没有名字的白纸」。本机 main 能工作是历史注册的运气；发行模板因此加 `__SETUP_WORKSPACE_MAIN__` 占位，setup.mjs 生成时替换为实际绝对路径（正斜杠）。显式指定后验证：模型自我介绍与 SOUL.template.md 人设一致。
+- **台账自身也中过招（09-19 发布前扫描发现并已脱敏）**：09-17 写回的 cron 命名坑条目把主人真名写进了本文档、09-13 的 QQ 条目引用日志原文带了 appId。教训：**回写台账时引用配置/日志原文必须先脱敏**——红线条款早有，执行要跟上；发布/推送前跑一遍个人信息图样扫描应成为固定动作。
 
 ## [行为变更·须知] exec 审批闸门开启（auto 档）——她的命令执行从全放行改为白名单+自动审查（2026-09-19）
 
@@ -43,7 +44,7 @@
 - 根因：投递目标由 `deliveryContextFromSession`（会话历史）推导，隔离会话天然没有；主会话虽有 `pendingDeliveryNotice`（qqbot c2c→主人）但 systemEvent 回复不消费它。
 - 解决方案（当晚 21:47 实测送达，QQ API 200 OK）：**让 agent 自己用 message 工具发**——心跳跑了几天验证过的路。配方：isolated + glm + 提示词里写死完整目标 `qqbot:c2c:<主人openid>`（openid 从 bindings 提取，任务存 state 库不进公开 git）+「发完最终回复只回『已问候』三字」防双发。任务 id 106785cf。
 - 附带修正：巡检的 eventloop 检查改「只报持续性」（网关自报降级>2 分钟或连续两班才报）——问候班 10:00/21:00 与巡检 :00 整点必然撞车，模型调用的瞬时闪断是常态，当晚首班就误报了一次。
-- **附带的坑（同晚第二例）：隔离会话+lightContext 没有 USER.md 身份档案，glm-5.3-flash 会瞎编主人名字**——两班问候分别把「<真名已移除>」写成「轩辕」和「裴瑜」（内容全对、只名字错）。修法：cron 提示词里写死「主人叫<真名已移除>，日常称呼<真名已移除>，禁止同音字」；兜底心跳提示词同款加固。**凡是隔离会话里要称呼主人的 cron，名字必须写进提示词**，不能指望她从记忆文件里猜。
+- **附带的坑（同晚第二例）：隔离会话+lightContext 没有 USER.md 身份档案，glm-5.3-flash 会瞎编主人名字**——两班问候把主人的名字写成了同音错字（内容全对、只名字错）。修法：cron 提示词里写死主人的正确名字与日常称呼并禁止同音字（真名只写在运行态 openclaw.json 的提示词里，不入台账不入库）；兜底心跳提示词同款加固。**凡是隔离会话里要称呼主人的 cron，名字必须写进提示词**，不能指望她从记忆文件里猜。
 - 附带修正②：巡检 tcpOk 只查 IPv4 `127.0.0.1`——重启后 vite 只绑 IPv6 `[::1]:5173` 时会误报「前端没监听」（网页明明开着还 QQ 委屈用户）。已改双栈任一可连即算活（2026-09-18）。
 - 排障抓手：QQ 有没有真发出去，看 `%TEMP%\openclaw\openclaw-当日.log` 的 `[qqbot:api]` 行（**日志按大小轮转，当天 4.9M 后重开**，老内容不保留）；会话里她回了什么，查 `agents/main/agent/openclaw-agent.sqlite` 的 transcript_events（session_key→current_session_id 要跟对，主会话每天 /reset 会换 id）。
 - 状态：已解决（端到端验证通过）。
@@ -168,7 +169,7 @@
 
 ## \[已解决] QQ 机器人渠道 secret 校验失败循环重连 + QClaw 桌面版双实例隐患（2026-09-13）
 
-- 症状：网关日志每 60s 刷 `[qqbot:<appId已移除>] Connection failed: ... {"code":100016,"message":"invalid appid or secret"}`，attempt 一直涨；QQ 私聊/群聊全部离线。
+- 症状：网关日志每 60s 刷 `[qqbot:<appId>] Connection failed: ... {"code":100016,"message":"invalid appid or secret"}`，attempt 一直涨；QQ 私聊/群聊全部离线。
 - 根因：openclaw\.json 里 `channels.qqbot.clientSecret` 与开放平台当前值不匹配（期间另发现 QClaw 桌面版 `K:\QClaw\v0.2.33.617` 内置 OpenClaw 也在跑同一渠道，同 appId 双实例存在互踢隐患，2026-09-13 用户已卸载 QClaw）。
 - 解决方案：用户提供有效 AppSecret → 写回 openclaw\.json（先备份）→ 重启网关。
 - 状态：**已解决（2026-09-14）**——secret 已写入，重启后日志 `✅ Access token obtained` + `[qqbot] gateway READY`，无 100016。
