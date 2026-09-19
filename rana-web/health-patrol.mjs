@@ -44,19 +44,23 @@ const readPatrol = () => {
   }
 };
 
-const tcpOk = (port, ms = 4000) =>
-  new Promise((resolve) => {
-    const s = net.connect({ host: "127.0.0.1", port, timeout: ms });
-    s.on("connect", () => {
-      s.destroy();
-      resolve(true);
+const tcpOk = async (port, ms = 4000) => {
+  // IPv4 与 IPv6 回环任一可连即算活：重启后 vite 可能只绑 [::1]，只查 127.0.0.1 会误报
+  const one = (host) =>
+    new Promise((resolve) => {
+      const s = net.connect({ host, port, timeout: ms });
+      s.on("connect", () => {
+        s.destroy();
+        resolve(true);
+      });
+      s.on("error", () => resolve(false));
+      s.on("timeout", () => {
+        s.destroy();
+        resolve(false);
+      });
     });
-    s.on("error", () => resolve(false));
-    s.on("timeout", () => {
-      s.destroy();
-      resolve(false);
-    });
-  });
+  return (await one("127.0.0.1")) || (await one("::1"));
+};
 
 const fmtAge = (ms) => {
   const h = Math.floor(ms / 3600000);
@@ -142,17 +146,29 @@ const main = async () => {
     if (ch.ok) {
       const j = ch.json;
       const qq = j?.channels?.qqbot;
-      const degraded = j?.eventLoop?.degraded === true;
+      const ev = j?.eventLoop;
+      const degraded = ev?.degraded === true;
       const qqDown = !qq || qq.running !== true || qq.connected !== true;
-      channelsDetail = `QQ ${qq?.running ? "running" : "停"} / ${qq?.connected ? "connected" : "断连"}；事件循环 ${degraded ? "降级" : "正常"}`;
-      addCheck("channels", "通道状态", !qqDown && !degraded, channelsDetail);
+      channelsDetail = `QQ ${qq?.running ? "running" : "停"} / ${qq?.connected ? "connected" : "断连"}`;
+      addCheck("channels", "通道状态", !qqDown, channelsDetail);
       if (qqDown)
         addAnomaly(
           "qq-channel",
           "QQ 通道",
           `QQ 通道不在健康态（${qq ? `running=${qq.running} connected=${qq.connected}` : "状态里没有 qqbot"}）——若是断网后起的僵尸，重启网关即恢复`,
         );
-      if (degraded) addAnomaly("eventloop", "网关事件循环", "网关事件循环降级（卡顿/内存压力），盯一眼日志");
+      // 事件循环单独成行：模型调用/会话写入的瞬间会闪断（问候班 10:00/21:00 与巡检 :00 必然撞车），
+      // 只报持续性的——网关自报降级超过 2 分钟，或上一班也降级（连续两班）
+      const degradedSince = typeof ev?.degradedSinceMs === "number" ? ev.degradedSinceMs : null;
+      const prevEvBad = prev.checks?.find((c) => c.id === "eventloop")?.ok === false;
+      const evBad = degraded && (degradedSince !== null ? Date.now() - degradedSince > 120000 : prevEvBad);
+      addCheck("eventloop", "事件循环", !degraded, degraded ? (degradedSince !== null ? `降级中，已 ${Math.round((Date.now() - degradedSince) / 1000)}s` : "降级中（瞬时）") : "正常");
+      if (evBad)
+        addAnomaly(
+          "eventloop",
+          "网关事件循环",
+          `网关事件循环持续降级（卡顿/内存压力），盯一眼日志${degradedSince !== null ? `，已持续 ${Math.round((Date.now() - degradedSince) / 60000)} 分钟` : "，连续两班"}`,
+        );
     } else {
       channelsDetail = `查不到：${ch.error}`;
       addCheck("channels", "通道状态", false, channelsDetail);
@@ -163,6 +179,7 @@ const main = async () => {
     }
   } else {
     addCheck("channels", "通道状态", false, "网关挂了，跳过");
+    addCheck("eventloop", "事件循环", false, "网关挂了，跳过");
   }
 
   // 4. 备份新鲜度

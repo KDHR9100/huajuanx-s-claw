@@ -28,7 +28,10 @@ import os from 'node:os';
 // ---- 可调参数（环境变量可覆盖，便于临时调试） --------------------------------
 const BASE = process.env.EMBED_WATCHDOG_BASE ?? 'http://127.0.0.1:1234';
 const MODEL = process.env.EMBED_WATCHDOG_MODEL ?? 'text-embedding-qwen3-embedding-0.6b';
-const STANDARD_CTX = Number(process.env.EMBED_WATCHDOG_CTX ?? 32768);
+// 2026-09-18：32768→2048。新后端（llama.cpp 2.40.0 CUDA）加载嵌入模型时强制 batch=ctx，
+// 缓冲区随 ctx 线性膨胀且上 GPU（--gpu off 也拦不住）：ctx32768=10.7GB / 8192=6.6GB / 2048=2.3GB。
+// 嵌入输入是记忆小块（≤千余 token），2048 足够；OpenClaw 嵌入请求实测复用现存实例不裂开。
+const STANDARD_CTX = Number(process.env.EMBED_WATCHDOG_CTX ?? 2048);
 const INTERVAL_MS = Number(process.env.EMBED_WATCHDOG_INTERVAL_MS ?? 60_000);
 const LOCK_PORT = Number(process.env.EMBED_WATCHDOG_LOCK_PORT ?? 47611);
 const LMS_BIN = process.env.EMBED_WATCHDOG_LMS ?? 'C:\\Users\\Administrator\\.lmstudio\\bin\\lms.exe';

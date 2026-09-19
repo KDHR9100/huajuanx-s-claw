@@ -1104,6 +1104,12 @@ function ranaStudyMiddleware(): Plugin {
   };
 
   const writeSchedule = (s: StudySchedule) => {
+    // 写入前校验：materials[].file 一律纯文件名，脏数据就地拒绝（与 materialAbs 同一规则）
+    for (const m of s.materials ?? []) {
+      if (typeof m.file === "string" && (!m.file || /[\\/]|\.\./.test(m.file))) {
+        throw new Error(`资料文件名非法，拒绝写入：${m.file}`);
+      }
+    }
     fs.mkdirSync(studyDir, { recursive: true });
     try {
       fs.copyFileSync(scheduleFile, scheduleFile + ".bak");
@@ -1197,7 +1203,12 @@ function ranaStudyMiddleware(): Plugin {
     if (typeof m.file !== "string" || !m.file || /[\\/]|\.\./.test(m.file)) {
       throw new Error(`资料文件名非法：${String(m.file)}`);
     }
-    return path.join(materialsDir, m.file);
+    const abs = path.join(materialsDir, m.file);
+    // 二次防线（containment）：join 的结果必须仍落在 materialsDir 里面，双保险防穿越
+    if (path.relative(materialsDir, abs).startsWith("..")) {
+      throw new Error(`资料路径越界：${m.file}`);
+    }
+    return abs;
   };
 
   /** 唤醒 Rana：子进程跑 study-agent.mjs，解析它 stdout 的最后一行 JSON；model 可选（页面选的模型）
@@ -1207,6 +1218,9 @@ function ranaStudyMiddleware(): Plugin {
     model?: string,
     opts?: { sessionKey?: string; ephemeral?: boolean; tail?: number },
   ): Promise<{ ok: boolean; reply?: string; data?: Record<string, unknown>; error?: string }> => {
+    // 请求侧来的 model/sessionKey 要进子进程参数：白名单字符集，拒绝一切路径/注入形状
+    if (model && !/^[A-Za-z0-9:./_-]+$/.test(model)) throw new Error(`model 含非法字符`);
+    if (opts?.sessionKey && !/^[A-Za-z0-9:_-]+$/.test(opts.sessionKey)) throw new Error(`sessionKey 含非法字符`);
     const args = [path.join(here, "study-agent.mjs"), "--message", message];
     if (model) args.push("--model", model);
     if (opts?.sessionKey) args.push("--session-key", opts.sessionKey);

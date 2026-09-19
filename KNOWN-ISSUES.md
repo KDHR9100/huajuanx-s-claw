@@ -21,6 +21,35 @@
 
 ## 登记区
 
+## \[已解决] cron 主动消息的三条投递弯路——isolated+announce/systemEvent 都送不到，正路是「自己发」（2026-09-17）
+
+- 症状：早晚问候任务三连败——①隔离会话+announce→last：`Channel is required when multiple channels are configured`（隔离会话无历史，"last"解析不出）；②显式 `--channel qqbot --account default`：`Delivering to QQ Bot requires target`（还缺 qqbot:c2c:openid 目标，cron CLI 无 target 参数）；③systemEvent 进主会话：模型轮成功、回复也生成了（会话 transcript 实证），但**回复并不自动出站**（receipt deliveryStatus=not-requested，全天 QQ 出站 API 零调用）——旧台账「main 会话回复按最近活跃频道投递」的说法在 2026.9.2 版不成立。
+- 根因：投递目标由 `deliveryContextFromSession`（会话历史）推导，隔离会话天然没有；主会话虽有 `pendingDeliveryNotice`（qqbot c2c→主人）但 systemEvent 回复不消费它。
+- 解决方案（当晚 21:47 实测送达，QQ API 200 OK）：**让 agent 自己用 message 工具发**——心跳跑了几天验证过的路。配方：isolated + glm + 提示词里写死完整目标 `qqbot:c2c:<主人openid>`（openid 从 bindings 提取，任务存 state 库不进公开 git）+「发完最终回复只回『已问候』三字」防双发。任务 id 106785cf。
+- 附带修正：巡检的 eventloop 检查改「只报持续性」（网关自报降级>2 分钟或连续两班才报）——问候班 10:00/21:00 与巡检 :00 整点必然撞车，模型调用的瞬时闪断是常态，当晚首班就误报了一次。
+- **附带的坑（同晚第二例）：隔离会话+lightContext 没有 USER.md 身份档案，glm-5.3-flash 会瞎编主人名字**——两班问候分别把「<真名已移除>」写成「轩辕」和「裴瑜」（内容全对、只名字错）。修法：cron 提示词里写死「主人叫<真名已移除>，日常称呼<真名已移除>，禁止同音字」；兜底心跳提示词同款加固。**凡是隔离会话里要称呼主人的 cron，名字必须写进提示词**，不能指望她从记忆文件里猜。
+- 附带修正②：巡检 tcpOk 只查 IPv4 `127.0.0.1`——重启后 vite 只绑 IPv6 `[::1]:5173` 时会误报「前端没监听」（网页明明开着还 QQ 委屈用户）。已改双栈任一可连即算活（2026-09-18）。
+- 排障抓手：QQ 有没有真发出去，看 `%TEMP%\openclaw\openclaw-当日.log` 的 `[qqbot:api]` 行（**日志按大小轮转，当天 4.9M 后重开**，老内容不保留）；会话里她回了什么，查 `agents/main/agent/openclaw-agent.sqlite` 的 transcript_events（session_key→current_session_id 要跟对，主会话每天 /reset 会换 id）。
+- 状态：已解决（端到端验证通过）。
+
+## \[未解决·有解法] Mimosa git 门钩拦截提交——静态规则只认「形状」不认守卫（2026-09-17）
+
+- 症状：ZCode 会话里 `git commit` 被 Mimosa L3 拦截：vite.config.ts 学习中间件 12 处「path-traversal 入口」高危（spawnAgent/runAgent/writeSchedule/writeGoals/materialAbs 的定义与调用点），提示"高危已强制拦截，请修复并重新扫描"。**只拦 ZCode 会话内的提交**——用户手动 push-public.cmd、cron 里的备份 commit 都不经此钩子，不受影响。
+- 根因：静态污点规则把「HTTP 请求对象 → fs 写入/exec 参数」一律标高危。materialAbs 其实早有 fail-closed 校验（拒绝分隔符/..），09-17 又补了 join 后 containment 双保险、model/sessionKey 白名单、writeSchedule 写入前校验——**守卫全在但规则看不见**，前后两次扫描结论一字不差（49 高危/1 中危）。这批写法是 9-12 起就有的存量代码，此前提交能过只因扫描一直不完整（scanner_enobufs 走兼容策略），当天第一次跑完全量才激活门禁。
+- 解决方案（未执行，二选一）：
+  1. **正规出口**：用户明确同意后跑官方深度扫描（`/mimosa-scan` 或 MCP `security_scan`），用 finding 级行为 Oracle 验证真守卫、正式关掉误报——README 明言 `mimosa validate <findingId>` 是 allowlist 级运行验证；勿手改 `.mimosa/finding-ledger/`（属绕过安全机制）。
+  2. **阶段 5 重构顺带解决**：vite.config.ts 拆模块时把 study 写入重构成「白名单字段克隆后落盘」（请求对象先过显式字段提取），大概率同时满足静态形状。
+- 当前状态：09-17 的加固+文档改动停在暂存区未提交（工作区文件已生效，vite 热更不依赖提交）；前两笔（f6b35df/ef2fdb1）在门禁激活前已落库。
+- 状态：未解决（提交被拦）；运行无影响。
+
+## \[已解决·要警惕] 开机自启动的「幽灵网关」——从 C 盘旧状态目录拉起、与 K 盘正牌网关抢 18789（2026-09-17）
+
+- 症状：启动文件夹（shell:startup）里有 `OpenClaw Gateway.vbs`，登录即隐藏运行 `C:\Users\Administrator\.openclaw\gateway.cmd`——一个**用错状态目录**的网关，且抢占 18789 端口；与「禁止开机自启」的用户红线冲突。
+- 根因：早期（迁到 K 盘状态目录之前）装的自启动残留。谁先绑定 18789 谁活：开机后若幽灵网关先起，正牌网关（K 盘 state、QQ/微信凭据、会话库全在那边）会被顶掉或共存打架——历史上「网页有会话但通道失踪」「状态目录错乱」类玄学问题大概率有它一份（如 9-13 `rana-web/openclaw.openclaw.openclaw/` 误建库事件同族）。
+- 解决方案（2026-09-17）：自启动 VBS 移出启动文件夹（存 `C:\Users\Administrator\.openclaw.old\OpenClaw Gateway.vbs.disabled`，想恢复放回去即可）；整个 C 盘旧目录改名 `.openclaw.old` 观察一周后删。已核实无计划任务/自启动项再引用该目录。
+- 排障抓手：`ls shell:startup` 看有没有 OpenClaw 项；`Get-CimInstance Win32_StartupCommand` 查引用；开机后 18789 被 PID 命令行含 `C:\Users\Administrator\.openclaw` 的进程占住 = 幽灵复活。
+- 状态：已解决（自启动已停、旧目录已隔离）。
+
 ## \[已解决·要警惕] QQ 通道断网后重连耗尽「静默装死」——网络恢复也不自愈（2026-09-17）
 
 - 症状：QQ 私聊/群聊全部离线，但网关进程活着、密钥/补丁/配置全正常；日志里 qqbot 子系统最后一次输出停在断网期间，之后再无任何报错（连"channel exited"都没有）。
@@ -184,6 +213,7 @@
   - 已实测验收：人为 REST 加载 8192 制造 `:2` 双实例 → 60s 内自动收敛回 1 份 32768 纯 CPU。
   - 想**手动清掉**模型（比如临时挤内存）：先停看门狗（关网关窗口，或 `taskkill /F /IM node.exe` 前先按端口找 PID：`netstat -ano | findstr 47611`），再 unload；否则下一轮会被拉回。
   - 附注：本次排查确认裂开**与 QQ 不同群聊无关**——openclaw\.json 的 `memory.search` 全局一份，main / rana-rp / rana-qq-public 三个 agent 共用；裂点始终是"JIT 默认参数(ctx 8192, GPU) ≠ 常驻参数(32768, CPU)"。API 的 `loaded_instances[].config` 只回报 ctx 不回报 GPU 属性，看门狗靠"重载永远 --gpu off + ctx 校验捕获 JIT 裂份"闭环。
+- **2026-09-18 新篇章：显存 10.7GB 尸体的真凶是后端版本行为**。重启后 LM Studio（llama.cpp CUDA 2.40.0）加载嵌入模型时**强制 batch=ctx**（服务端日志有明示警告），计算缓冲随 ctx 线性膨胀且**上 GPU——`--gpu off` 完全拦不住**：实测 ctx32768=10.7GB / 8192=6.6GB / 2048=2.3GB（模型本体仅 609MB）。处置：看门狗 STANDARD_CTX 32768→**2048**（嵌入输入是记忆小块 ≤千余 token，足够；OpenClaw 嵌入请求实测复用 2048 实例不裂开），显存占用 11.6GB→3.2GB。另：卸载模型后显存不还的情况也存在（进程级残留），整树重启 LM Studio（`taskkill /PID <根> /T`，注意 Electron 多进程、杀子进程没用）可清零。
 
 ## \[已解决·会复发] Clash 7897 被 Windows 动态端口保留段圈占 → 代理失效 → git 推送 GitHub 挂死（2026-09-11）
 

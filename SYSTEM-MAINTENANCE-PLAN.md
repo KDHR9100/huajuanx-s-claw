@@ -63,8 +63,13 @@
 - [x] 系统心跳降频收权：every 60m→**24h** 兜底（网关热重载确认 intervalMs=86400000），
       prompt 改为「读 memory/patrol-status.md（巡检脚本每 30 分钟重写的快照）：异常或快照
       超 90 分钟未更新（巡检自身停摆）才报告，否则 NO_REPLY」
-- [x] 早晚问候 cron（id 3b50935f，`0 10,21 * * *`，隔离+轻上下文，glm-5.3-flash，
-      announce→last 通道）：读最近日记+巡检异常，必须中文收尾
+- [x] 早晚问候 cron 最终版（id **106785cf**，`0 10,21 * * *`，隔离+轻上下文，glm-5.3-flash）：
+      **投递走「Rana 自己用 message 工具发」**（心跳验证过几天的路），openid 直接写进提示词，
+      发完只回「已问候」三字。当晚 21:47 实测送达（QQ API 200 OK）。
+      ⚠️ 三条投递弯路都已排雷并登记 KNOWN-ISSUES：isolated+announce→last 多通道下解析不出；
+      显式 channel=qqbot 还要 target；systemEvent 进主会话回复并不自动出站（本版行为）。
+      另：巡检的 eventloop 检查已改「只报持续性降级」（问候班与巡检 :00 必然撞车，瞬时闪断
+      是常态——当晚 21:00 首班即误报一次，已修）
 - [x] 状态页新增「🩺 巡检」卡：sys/status 接口带 patrol 数据，四项检查红绿灯+异常明细
       +「90 分钟没更新」自警
 
@@ -80,24 +85,25 @@
       复活：git-activity×3、study 睡前/周报（job_id 原样保留，收据历史连续）
 - [x] 定时任务总账已更新（见下节）
 
-### 阶段 4：文件目录瘦身（⚠️ 每项删前给用户过目）
+### 阶段 4：文件目录瘦身 ✅（2026-09-17 完成，用户确认"按推荐执行"）
 
-候选清单（执行时逐项列「路径+大小+为什么能删」请用户确认）：
+- [x] `C:\Users\Administrator\.openclaw\`（395M 旧状态目录）→ **改名 `.openclaw.old` 观察一周**再删
+- [x] **顺手挖出开机幽灵网关**：启动文件夹里 `OpenClaw Gateway.vbs` 每次登录从 C 盘旧目录
+      拉起一个错状态目录的网关抢 18789 端口——违反「禁止开机自启」红线，已停用
+      （文件移入 `.openclaw.old/OpenClaw Gateway.vbs.disabled`，可逆）
+- [x] 35 个 `openclaw.json.bak-*` 删 32 个，保留 3 个关键回退：bak-hbdemote / bak-unpin-hb / bak-hbpatrol
+- [x] `rana-web/openclaw.openclaw.openclaw/` 误建目录（1.4M）已删；`rana-web/.gateway.log` 死日志已删
+- [x] 保留：默认骨架 workspace（70K 无害）；手术备份 `backups/cron-surgery-*`（149M，稳定几天后删）
+- [x] 瘦身后复验：网关存活、双通道 running+connected、巡检全绿
 
-| 候选 | 位置 | 说明 |
-| --- | --- | --- |
-| 默认骨架 workspace | `.openclaw/.openclaw/workspace/` | 09-07 初始库，无 agent 引用 |
-| Tifa 残留 workspace | `workspace-tifa` + 路径别名 | agent 已删，别名还指向拼写错误旧路径 |
-| 误建状态目录 | `rana-web/openclaw.openclaw.openclaw/` | 9-13 错误 STATE_DIR 的产物，仅 state/tmp |
-| 第二状态目录 | `C:\Users\Administrator\.openclaw\` | 默认 HOME 遗留，先确认无引用 |
-| 配置备份堆 | 40+ 个 `openclaw.json.bak-*` | 保留最近 3 个关键的，其余删 |
-| 旧归档 | `backups/*-archive` 等 | 已废弃的 workspace 归档 |
+### 阶段 5：代码瘦身（下个会话执行）
 
-### 阶段 5：代码瘦身
-
-- [ ] 先提交工作区现有的「开始今天的课」未提交改动（此前会话成果）
+- [ ] 先把工作区被 Mimosa 门钩拦下的提交落账（见 KNOWN-ISSUES「Mimosa git 门钩」条目：
+      要么用户点头跑官方深扫关误报，要么本阶段重构顺带解决）
+- [ ] 提交工作区现有的「开始今天的课」未提交改动（此前会话成果）✅ 已于 09-17 落库（f6b35df）
 - [ ] vite.config.ts（3740 行）按中间件拆成 `rana-web/server/` 下模块 + 装配入口；
-      桥脚本按「数据桥/会话桥/工具」归拢；**页面功能与路由零变化**
+      桥脚本按「数据桥/会话桥/工具」归拢；**页面功能与路由零变化**；
+      study 写入重构为白名单字段克隆（顺带满足 Mimosa 静态形状，解封提交）
 - [ ] `npx tsc --noEmit` + 全页签手动冒烟（重点：早报、规划、定时任务、清理弹窗）
 
 ## 四、定时任务总账（2026-09-17 手术后，19 条，唯一权威清单）
@@ -106,7 +112,7 @@
 | --- | --- | --- | --- | --- |
 | Heartbeat main（af8f6f0e） | every 24h | main | 是（兜底班） | 读 patrol-status.md，异常/巡检停摆才报告 |
 | 巡检（9fe23401） | */30 * * * * | 脚本 | **否** | health-patrol.mjs；异常 QQ 直报+状态页红灯 |
-| 早晚问候（3b50935f） | 0 10,21 * * * | main | 是（glm，2次/天） | announce→last；读日记+巡检异常 |
+| 早晚问候（106785cf） | 0 10,21 * * * | main | 是（glm，2次/天） | 自己发 message→qqbot:c2c:主人 |
 | Daily Private Backup（f8b51148） | 30 17 * * * | 脚本 | 否 | robocopy+git push（3 次重试）；巡检盯新鲜度 |
 | memory-bridge（1960c470） | 0 * * * * | 脚本 | 否 | 共享记忆桥三腿 |
 | private-memory-bridge（d09b5239） | 17 * * * * | 脚本 | 否 | 私密记忆桥 |
