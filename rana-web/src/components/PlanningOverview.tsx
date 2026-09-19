@@ -1,8 +1,10 @@
 // 规划总览：整条规划链的最上层——人生目标 →（她拆解）→ 每月里程碑 →（一键转待办）→ 待办 → 课表。
-// 数据：/__rana/life（life.json）+ /__rana/study（课程表，只读做统计）+ /__rana/study/goals（待办，只读计数）。
+// 数据：/__rana/life（life.json）+ /__rana/study（课程表，只读做统计）+ /__rana/study/goals（待办，只读计数）
+// + /__rana/events（全局日历事件，今日卡与课程混排展示）。
 // 拆解走 /__rana/life/goals/parse（life-planning skill 只出方案）；转待办/里程碑状态走 /__rana/life/milestones/*。
 import { useCallback, useEffect, useState } from "react";
 import { useAppStore } from "../store/useAppStore";
+import { EVENT_META, type CalEvent } from "./CalendarPage";
 
 export interface LifeMilestone {
   id: string;
@@ -59,6 +61,26 @@ const fmtTs = (ts: number) => {
   const d = new Date(ts);
   return `${d.getMonth() + 1}月${d.getDate()}日`;
 };
+/** 今天还没到的时刻 → 「还有 X 小时Y分」倒计时文案；已过/非今天返回空 */
+const countdownLabel = (date: string, time?: string): string => {
+  if (!time || date !== todayStr()) return "";
+  const [h, m] = time.split(":").map(Number);
+  const target = new Date();
+  target.setHours(h, m, 0, 0);
+  const diffMin = Math.round((target.getTime() - Date.now()) / 60000);
+  if (diffMin <= 0) return "";
+  if (diffMin < 60) return `还有 ${diffMin} 分`;
+  const hh = Math.floor(diffMin / 60);
+  const mm = diffMin % 60;
+  return mm ? `还有 ${hh} 时 ${mm} 分` : `还有 ${hh} 小时`;
+};
+const addDaysStr = (ds: string, n: number) => {
+  const [y, m, d] = ds.split("-").map(Number);
+  return dateStr(new Date(y, m - 1, d + n));
+};
+/** 距某天还有几个整天（1=明天） */
+const daysUntil = (ds: string) =>
+  Math.round((new Date(ds + "T00:00:00").getTime() - new Date(todayStr() + "T00:00:00").getTime()) / 86400000);
 /** 拆解用的模型：规划页自己的偏好（与内容库共用，""=跟随专用会话当前模型） */
 const modelPref = () => {
   const v = localStorage.getItem("life.model.v1");
@@ -84,6 +106,7 @@ export default function PlanningOverview() {
   const [life, setLife] = useState<LifeFile | null>(null);
   const [courses, setCourses] = useState<CourseLite[]>([]);
   const [todos, setTodos] = useState<GoalLite[]>([]);
+  const [events, setEvents] = useState<CalEvent[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -96,10 +119,11 @@ export default function PlanningOverview() {
 
   const load = useCallback(async () => {
     try {
-      const [rLife, rStudy, rGoals] = await Promise.all([
+      const [rLife, rStudy, rGoals, rEvents] = await Promise.all([
         fetch("/__rana/life"),
         fetch("/__rana/study"),
         fetch("/__rana/study/goals"),
+        fetch("/__rana/events"),
       ]);
       if (!rLife.ok) throw new Error(`life HTTP ${rLife.status}`);
       const jLife = (await rLife.json()) as LifeFile;
@@ -111,6 +135,10 @@ export default function PlanningOverview() {
       if (rGoals.ok) {
         const jGoals = (await rGoals.json()) as { goals?: GoalLite[] };
         setTodos(Array.isArray(jGoals.goals) ? jGoals.goals : []);
+      }
+      if (rEvents.ok) {
+        const jEvents = (await rEvents.json()) as { events?: CalEvent[] };
+        setEvents(Array.isArray(jEvents.events) ? jEvents.events : []);
       }
       setError("");
     } catch (e) {
@@ -252,12 +280,48 @@ export default function PlanningOverview() {
   const monthCourses = courses.filter((c) => c.date.startsWith(cm));
   const monthDone = monthCourses.filter((c) => c.status === "done").length;
 
-  // 今日的数据
+  // 今日的数据：课程 + 日历事件混成一条时间线（没时段的沉底）
   const todayCourses = courses
     .filter((c) => c.date === t)
-    .sort((a, b) => (a.timeStart ?? "").localeCompare(b.timeStart ?? ""));
+    .map((c) => ({
+      key: `c:${c.id}`,
+      icon: "📖",
+      cls: "ev-course",
+      label: "课程",
+      time: c.timeStart ?? "",
+      title: c.title,
+      done: c.status === "done",
+      location: "",
+    }));
+  const todayEvents = events
+    .filter((e) => e.date === t)
+    .map((e) => {
+      const meta = EVENT_META[e.type] ?? EVENT_META.appointment;
+      return {
+        key: `e:${e.id}`,
+        icon: meta.icon,
+        cls: meta.cls,
+        label: meta.label,
+        time: e.timeStart ?? "",
+        title: e.title,
+        done: Boolean(e.done),
+        location: e.location ?? "",
+      };
+    });
+  const todayAll = [...todayCourses, ...todayEvents].sort((a, b) => {
+    if (a.time && b.time) return a.time.localeCompare(b.time);
+    if (a.time) return -1;
+    if (b.time) return 1;
+    return a.title.localeCompare(b.title);
+  });
   const overdue = courses.filter((c) => c.status === "planned" && c.date < t);
   const openTodos = todos.filter((g) => g.status === "open");
+
+  // 接下来 14 天内的活动/游戏/面试（今日卡的远期倒计时，Live/漫展/开活动前心里有数）
+  const upcoming = events
+    .filter((e) => !e.done && e.date > t && e.date <= addDaysStr(t, 14))
+    .sort((a, b) => a.date.localeCompare(b.date) || (a.timeStart ?? "99:99").localeCompare(b.timeStart ?? "99:99"))
+    .slice(0, 3);
 
   return (
     <>
@@ -432,7 +496,7 @@ export default function PlanningOverview() {
         </div>
       </div>
 
-      {/* 今日 */}
+      {/* 今日：课 + 事件一条时间线 */}
       <div className="card">
         <h3>
           <span className="ic">☀️</span> 今日<small>{todayStr()}</small>
@@ -442,22 +506,61 @@ export default function PlanningOverview() {
             有 {overdue.length} 节逾期没学完（最早 {overdue[0].date}），去课表补上
           </div>
         )}
-        {todayCourses.length ? (
-          todayCourses.map((c) => (
-            <div key={c.id} className="plan-focus-row">
-              <span className="chip">{c.timeStart ?? "—"}</span>
-              <span style={{ flex: 1, minWidth: 0 }}>
-                {c.status === "done" ? "✅ " : ""}
-                {c.title}
-              </span>
-            </div>
-          ))
+        {todayAll.length ? (
+          todayAll.map((it) => {
+            const cd = countdownLabel(t, it.time);
+            return (
+              <div key={it.key} className="plan-focus-row">
+                <span className={`cal-course ${it.cls}`} style={{ flex: "none" }}>
+                  {it.icon} {it.label}
+                </span>
+                <span className="chip" style={{ flex: "none" }}>
+                  {it.time || "—"}
+                </span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  {it.done ? "✅ " : ""}
+                  {it.title}
+                  {cd && !it.done ? <span className="tune-hint"> · {cd}</span> : null}
+                  {it.location && <span className="tune-hint"> · {it.location}</span>}
+                </span>
+              </div>
+            );
+          })
         ) : (
           <p className="pending-text" style={{ margin: 0 }}>
-            今天没有排课。
+            今天没有课，也没有日程。
           </p>
         )}
+        {upcoming.length > 0 && (
+          <div style={{ borderTop: "1.5px dashed var(--border)", marginTop: 8, paddingTop: 8 }}>
+            {upcoming.map((e) => {
+              const meta = EVENT_META[e.type] ?? EVENT_META.appointment;
+              const dd = daysUntil(e.date);
+              return (
+                <div key={e.id} className="plan-focus-row">
+                  <span className={`cal-course ${meta.cls}`} style={{ flex: "none" }}>
+                    {meta.icon} {meta.label}
+                  </span>
+                  <span className="chip" style={{ flex: "none" }}>
+                    {e.date}
+                  </span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    {e.title}
+                    <span className="tune-hint">
+                      {" · "}
+                      {dd === 1 ? "明天" : `${dd} 天后`}
+                      {e.location ? ` · ${e.location}` : ""}
+                    </span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
         <div className="plan-stats">
+          <button className="btn ghost sm" onClick={() => setPlanningTab("calendar")}>
+            去日历 →
+          </button>
           <button className="btn ghost sm" onClick={() => setPlanningTab("schedule")}>
             去课表 →
           </button>

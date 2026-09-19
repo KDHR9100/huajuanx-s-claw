@@ -1,5 +1,5 @@
-// 「🧰 程序」页：多用途工具壳。第一个专区是玄学全套（万年历/生辰档案/排盘/问卜），
-// 页内小节导航锚点跳转；以后新工具往这儿加专区就行。
+// 「🧰 程序」页：多用途工具壳。当前专区是玄学全套（万年历/生辰档案/排盘/问卜），
+// 页内小节导航锚点跳转；以后新工具往这儿加专区就行（追番已独立成「📺 追番」页）。
 import { useState } from "react";
 import CalendarAlmanac from "./apps/CalendarAlmanac";
 import FateProfileCard from "./apps/FateProfile";

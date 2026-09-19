@@ -466,3 +466,18 @@
 - 根因（已实锤）：不是崩溃——是**另一会话做会话清理手术**（脚本删心跳等系统会话占用的会话窗口，需停网关），按"停旧→启新"流程替掉了 agent 会话拉起的实例。辨别特征：①旧进程"无声退出"（被杀，非崩溃）；②TEMP 日志出现 `Another gateway (pid …) already owns this state directory; refusing…`（重启者在杀旧实例前先跑了一次脚本，被占用保护拦下）；③随后新实例经 cmd 父进程正常接管，QQ/微信/webchat 全重连，且启动后紧跟着 `sessions.delete` WS 调用（=清理脚本收尾）。
 - 处置：无需任何动作。看到"后台网关任务 failed"先查 `netstat :18789 LISTENING` + TEMP 日志的 owns-state-dir 记录再下结论——网关活着就别重复重启。
 
+## \[经验] Windows 工作站下测本地接口/单测的三个坑（2026-09-19）
+
+- **Git Bash 的 curl 发中文 JSON 会按 GBK 编码**，服务端按 UTF-8 解出来是乱码且不报错（看起来像服务端 bug 其实是测试端问题）。给 `localhost` 接口发中文 body 一律用 python 的 `urllib.request`（`.encode('utf-8')` + content-type 头），别用 curl -d。
+- **`npx tsx -e "..."` 在 Windows 下静默失败**（不报错、无输出，import 语句带不进去）。要跑 TS 单测就先用 Write 工具写临时 `.ts` 文件再 `npx tsx file.ts`，跑完删。
+- **Bash heredoc 写源码/配置文件会被 Mimosa 拦**（Hook 层 PreToolUse 拦截"绕过 Write/Edit 安全扫描"）。同内容改用 Write 工具提交即可放行——这是设计行为不是故障。
+
+## \[已落地] Bangumi（bgm.tv）出网必须走 Clash 代理 + 网关 skill 扫描缓存两坑（2026-09-19）
+
+- **bgm.tv 全域直连不通**（api 和图片 CDN lain.bgm.tv 实测超时），必须走 Clash `http://127.0.0.1:7897`。两套接法：
+  1. **MCP（node 进程）**：node ≥24 给子进程注入 `NODE_USE_ENV_PROXY=1` + `HTTPS_PROXY=http://127.0.0.1:7897`（openclaw.json 的 mcp.servers.bangumi.env 已配），内置 fetch 自动走代理；
+  2. **vite 中间件**：spawn `curl -x 7897`（项目里状态页探测同款先例，`ranaBangumiMiddleware`）。
+- **bgm.tv v0 API（POST /v0/search/subjects、GET /v0/subjects）间歇 502**（nginx 网关抖动，重试可能好）：搜索用旧版 `GET /search/subject/{关键词}?type=2` 稳定；v0 详情在 bangumi.mjs 里做了 5xx 自动重试一次。旧接口封面给 `http://` 链接，转发时统一升 https。
+- **网关的 workspace skill 扫描是启动时全量 + 内存缓存，之后新增的 skill 目录不会动态出现**（`openclaw skills check` 一直 Total 不涨）。job-match 当时"立即可见"是撞上了缓存过期窗口。**新建/改 skill 后想立刻生效：重启网关**（taskkill + start-gateway.cmd）。判定特征：CLI 能看到老 skill、看不到新 skill、目录里文件确实在。
+
+

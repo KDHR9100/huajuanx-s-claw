@@ -1,0 +1,76 @@
+# ===== 个人数据与密钥 —— 绝不上传（公开仓库）=====
+# OpenClaw 主目录：含 API 密钥配置、会话记录、长期记忆、个人档案(SOUL/USER/MEMORY.md)
+.openclaw/
+# ZCode 本地会话数据（工作区副本）
+.zcode/
+# 第三方参考仓库克隆（deepseek-ai/deepseek-harness，自带 .git）
+dsh-reference/
+
+# ===== 系统文件 =====
+*.lnk
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# 本地工具脚本（不入公开仓库）
+backup-private.cmd
+push-public.cmd
+
+# 本地临时文件与备份快照
+tmp-*
+db-safety-*/
+rana-web/tmp-*
+rana-web/openclaw.*
+rana-web/wechat-mode-*.cmd
+rana-web/fix-ws-path.mjs
+# 私密记忆桥（NSFW 场景基础设施，不入公开仓库；共享桥 memory-bridge.mjs 保持公开）
+rana-web/private-memory-bridge.mjs
+# RP 评估脚手架与语料/转写（含私人向素材与生成对话，整体本地化）
+rp-eval/
+# RP 微调：数据管线、数据集（含真实 NSFW RP 日志）、训练配置与产物，全部本地
+rp-tune/
+
+# LM Studio 控制台（本地模型加载管理，node_modules 不入库）
+node_modules/
+lmctl/
+.workbuddy/
+
+# Mimosa 安全扫描本地产物（含本地路径与扫描历史，不入公开仓库）
+.mimosa/
+# 记忆桥本地兜底过滤表（私人词表，不入公开仓库）
+rana-web/memory-bridge.privacy-patterns.json
+# 记忆桥主人称呼映射（真名/化名，不入公开仓库；缺文件时脚本回退中性称呼）
+rana-web/memory-bridge.identity.json
+# 本机个人路径配置（WSL 用户名/项目目录等，不入公开仓库；模板见 local-config.example.json）
+rana-web/local-config.json
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+bower_components/
+jspm_packages/
+__pycache__/
+site-packages/
+venv/
+coverage/
+htmlcov/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.egg-info/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）

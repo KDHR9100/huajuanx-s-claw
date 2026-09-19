@@ -1,5 +1,5 @@
 // 会话页右侧用量面板（token 累计 / 上下文占用 / 费用）+ 上下文体检 + 本地模型超参数 + 快捷命令 + 技能/MCP 清单，可收起。
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAppStore } from "../store/useAppStore";
 import ModelTuningCard from "./ModelTuningCard";
 import AgentKitCard from "./AgentKitCard";
@@ -14,7 +14,7 @@ function fmtTokens(n?: number) {
 /** /__rana/context 的返回形状 */
 interface ContextReport {
   checkedAt: string;
-  main: { key: string; inputTokens?: number; contextWindow?: number };
+  session: { key: string; agentId?: string; inputTokens?: number; contextWindow?: number };
   baseline: {
     sysTok: number;
     projectTok: number;
@@ -32,43 +32,71 @@ type CheckState =
   | { s: "ok"; data: ContextReport }
   | { s: "err"; error: string };
 
+/** 每个会话各自的体检结果：切会话互不干扰，删会话时由订阅清掉 */
+const reportCache = new Map<string, ContextReport>();
+
 /** 上下文体检卡：一键拉「她每句话都带着什么」的官方账单（临时会话跑 /context，不进聊天流） */
 function ContextCheckCard() {
+  const currentKey = useAppStore((s) => s.currentKey);
   const [state, setState] = useState<CheckState>({ s: "idle" });
 
+  // 切会话：显示该会话自己的体检结果（没测过则回到待测状态）
+  useEffect(() => {
+    const cached = currentKey ? reportCache.get(currentKey) : undefined;
+    setState(cached ? { s: "ok", data: cached } : { s: "idle" });
+  }, [currentKey]);
+
+  // 会话删除/归档时清缓存：会话列表是权威，缓存里不在列表的 key 全部丢弃
+  useEffect(() => {
+    const unsub = useAppStore.subscribe((s, prev) => {
+      if (s.sessions === prev.sessions) return;
+      const live = new Set(s.sessions.map((x) => x.key));
+      for (const k of [...reportCache.keys()]) {
+        if (!live.has(k)) reportCache.delete(k);
+      }
+    });
+    return unsub;
+  }, []);
+
   const run = async () => {
+    if (!currentKey) return;
+    const keyAtClick = currentKey;
     setState({ s: "loading" });
     try {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 75_000);
-      const res = await fetch("/__rana/context", { signal: ctrl.signal });
+      const res = await fetch(`/__rana/context?sessionKey=${encodeURIComponent(keyAtClick)}`, { signal: ctrl.signal });
       clearTimeout(timer);
       const j = (await res.json()) as ContextReport & { ok?: boolean; error?: string };
       if (!res.ok || !j.ok) throw new Error(j.error ?? `HTTP ${res.status}`);
-      setState({ s: "ok", data: j });
+      reportCache.set(keyAtClick, j);
+      // 体检期间用户切走了会话：结果进缓存即可，界面留给当前会话
+      if (useAppStore.getState().currentKey === keyAtClick) setState({ s: "ok", data: j });
+      else setState((cur) => cur);
     } catch (e) {
-      setState({ s: "err", error: (e as Error).name === "AbortError" ? "体检超时（网关忙？稍后再试）" : (e as Error).message });
+      const msg = (e as Error).name === "AbortError" ? "体检超时（网关忙？稍后再试）" : (e as Error).message;
+      if (useAppStore.getState().currentKey === keyAtClick) setState({ s: "err", error: msg });
     }
   };
 
   const segs: Array<{ label: string; tok: number; color: string; hint: string }> = [];
   let segTotal = 0;
-  let footerNote = "点一下跑一次：开临时会话问网关要账单，看完即删，不烧 token。";
+  let footerNote = "点一下跑一次：开临时会话问网关要账单，看完即删，不烧 token。结果跟着会话走。";
   if (state.s === "ok") {
     const d = state.data;
     const tools = d.baseline.schemasTok;
     const skills = d.baseline.skillsTok;
     const docs = d.baseline.sysTok + d.extra.reduce((n, f) => n + f.tok, 0);
-    const total = d.main.inputTokens ?? tools + skills + docs;
+    const total = d.session.inputTokens ?? tools + skills + docs;
     const history = Math.max(0, total - tools - skills - docs);
     segTotal = total;
     segs.push(
-      { label: "🔧 工具说明书", tok: tools, color: "#5b8def", hint: "全部工具的 JSON 使用说明，占上下文最大头" },
+      { label: "🔧 工具说明书", tok: tools, color: "#5b8def", hint: "该 agent 全部工具的 JSON 使用说明，占上下文最大头" },
       { label: "🎯 技能清单", tok: skills, color: "#e8a33d", hint: `${d.baseline.skillsCount} 个技能的名字+简介` },
       { label: "📄 底稿文件", tok: docs, color: "var(--accent)", hint: "SOUL/AGENTS/USER/MEMORY/日记，每轮现拼" },
-      { label: "💬 当天会话", tok: history, color: "#b07ad9", hint: "今早 6 点重置以来的聊天历史" },
+      { label: "💬 聊天历史", tok: history, color: "#b07ad9", hint: "这个会话攒下的对话（main 主会话每天 6 点重置）" },
     );
-    footerNote = `主会话单轮输入 ${fmtTokens(total)}${d.main.contextWindow ? ` / 窗口 ${fmtTokens(d.main.contextWindow)}` : ""}；中文底稿按 chars/4 粗算，仅供参考。`;
+    footerNote = `该会话单轮输入 ${fmtTokens(total)}${d.session.contextWindow ? ` / 窗口 ${fmtTokens(d.session.contextWindow)}` : ""}${d.session.agentId ? `（agent：${d.session.agentId}）` : ""}；中文底稿按 chars/4 粗算，仅供参考。`;
   }
 
   return (

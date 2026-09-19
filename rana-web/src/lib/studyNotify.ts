@@ -1,5 +1,7 @@
-// 学习计划·到点弹窗提醒：网页开着时，今天的课到了 timeStart 就发一条浏览器通知。
-// 规则：只提醒「设了时段且未完成」的课；过点 15 分钟内补发，再晚不补；一天一课只弹一次（localStorage 记账）。
+// 到点弹窗提醒：网页开着时，课程到点、日程临近就发浏览器通知。
+// 课程：今天的课到了 timeStart 就提醒；过点 15 分钟内补发，再晚不补；一天一课只弹一次。
+// 日程（.life/events.json）：从 timeStart 提前 remindMin 分钟（默认 30）开始提醒，
+// 到点后 15 分钟内仍补发；已完成的不提醒；没设时段的（纯日期型）不弹、由页面展示。
 // 没设时段的课算"今天该学"，由页面常驻卡负责展示，不弹窗。
 
 export interface NotifyCourse {
@@ -10,6 +12,25 @@ export interface NotifyCourse {
   timeEnd?: string;
   status: string;
 }
+export interface NotifyEvent {
+  id: string;
+  title: string;
+  type: string;
+  date: string;
+  timeStart?: string;
+  timeEnd?: string;
+  remindMin?: number;
+  done?: boolean;
+}
+
+/** 日程类型的通知前缀（与 CalendarPage 的 EVENT_META 保持一个意思即可，lib 里不引组件） */
+const EVENT_NOTIFY_ICON: Record<string, string> = {
+  interview: "🎯 面试提醒",
+  appointment: "📌 日程提醒",
+  activity: "🎤 别忘了",
+  game: "🎮 游戏活动",
+  deadline: "⏰ 快到截止",
+};
 
 const PREF_KEY = "study.notify.v1";
 const FIRED_KEY = "study.notified.v1";
@@ -55,10 +76,13 @@ const nowHM = () => {
   const d = new Date();
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 };
+const hmToMin = (hm: string) => {
+  const [h, m] = hm.split(":").map(Number);
+  return h * 60 + m;
+};
 
 function addMin(hm: string, n: number): string {
-  const [h, m] = hm.split(":").map(Number);
-  const total = h * 60 + m + n;
+  const total = hmToMin(hm) + n;
   return `${pad2(Math.floor(total / 60) % 24)}:${pad2(total % 60)}`;
 }
 
@@ -73,6 +97,22 @@ export function dueForNotify(courses: NotifyCourse[], nowDate: string, hm: strin
       hm <= addMin(c.timeStart!, WINDOW_MIN) &&
       !firedIds.includes(c.id),
   );
+}
+
+/** 该弹的日程（纯逻辑）：今天 + 未完成 + 有 timeStart + 进入 [timeStart - remindMin, timeStart + 15min] 窗口 + 今天没弹过 */
+export function eventsDueForNotify(
+  events: NotifyEvent[],
+  nowDate: string,
+  hm: string,
+  firedIds: string[],
+): NotifyEvent[] {
+  const now = hmToMin(hm);
+  return events.filter((e) => {
+    if (e.date !== nowDate || e.done || !e.timeStart) return false;
+    const start = hmToMin(e.timeStart);
+    const remind = e.remindMin ?? 30;
+    return now >= start - remind && now <= start + WINDOW_MIN && !firedIds.includes(`e:${e.id}`);
+  });
 }
 
 function readFired(date: string): string[] {
@@ -119,13 +159,19 @@ export function startStudyNotifier(): () => void {
   const tick = async () => {
     if (!getNotifyPref() || typeof Notification === "undefined" || Notification.permission !== "granted") return;
     try {
-      const r = await fetch("/__rana/study");
-      if (!r.ok) return;
-      const s = (await r.json()) as { courses?: NotifyCourse[] };
+      const [rStudy, rEvents] = await Promise.all([
+        fetch("/__rana/study"),
+        fetch("/__rana/events"),
+      ]);
+      if (!rStudy.ok) return;
+      const s = (await rStudy.json()) as { courses?: NotifyCourse[] };
+      const ev = rEvents.ok ? ((await rEvents.json()) as { events?: NotifyEvent[] }) : { events: [] };
       const date = todayStr();
+      const hm = nowHM();
       const fired = readFired(date);
-      const due = dueForNotify(s.courses ?? [], date, nowHM(), fired);
-      if (!due.length) return;
+      const due = dueForNotify(s.courses ?? [], date, hm, fired);
+      const dueEv = eventsDueForNotify(ev.events ?? [], date, hm, fired);
+      if (!due.length && !dueEv.length) return;
       const busy = await gpuBusy();
       for (const c of due) {
         const n = new Notification(`该学习了 · ${c.title}`, {
@@ -139,6 +185,22 @@ export function startStudyNotifier(): () => void {
           n.close();
         };
         fired.push(c.id);
+      }
+      for (const e of dueEv) {
+        const prefix = EVENT_NOTIFY_ICON[e.type] ?? "📅 日程提醒";
+        const early = e.timeStart ? hmToMin(e.timeStart) - hmToMin(hm) : 0;
+        const n = new Notification(`${prefix} · ${e.title}`, {
+          body:
+            early > 0
+              ? `${e.timeStart}${e.timeEnd ? ` ~ ${e.timeEnd}` : ""} 开始，还有 ${early} 分钟`
+              : `${e.timeStart}${e.timeEnd ? ` ~ ${e.timeEnd}` : ""} 到点了${busy ? `。${busy}` : ""}`,
+          tag: `e:${e.id}`,
+        });
+        n.onclick = () => {
+          window.focus();
+          n.close();
+        };
+        fired.push(`e:${e.id}`);
       }
       writeFired(date, fired);
     } catch {

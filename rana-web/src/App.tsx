@@ -14,6 +14,7 @@ import SysPage from "./components/SysPage";
 import CronPage from "./components/CronPage";
 import NewsPage from "./components/NewsPage";
 import PlanningPage from "./components/PlanningPage";
+import BangumiPage from "./components/BangumiPage";
 import AppsPage from "./components/AppsPage";
 import GroupsPage from "./components/GroupsPage";
 import DshPage from "./components/DshPage";
@@ -81,6 +82,12 @@ export default function App() {
             <main className="main">
               {connError && <div className="err-banner">⚠ {connError}</div>}
               {page("规划", <PlanningPage />)}
+            </main>
+          )}
+          {view === "bangumi" && (
+            <main className="main">
+              {connError && <div className="err-banner">⚠ {connError}</div>}
+              {page("追番", <BangumiPage />)}
             </main>
           )}
           {view === "apps" && (

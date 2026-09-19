@@ -1587,6 +1587,18 @@ body.has-bg .room { display: none; }
 .cal-course.late { background: color-mix(in srgb, var(--danger) 20%, transparent); color: var(--danger); }
 .cal-more { font-size: 10px; color: var(--text-dim); text-align: left; }
 
+/* 全局日历：六类日程的类型色（柔和底 + 深字；course 用学习域的绿） */
+.cal-course.ev-interview { background: color-mix(in srgb, #e05252 20%, transparent); color: #d84c4c; }
+.cal-course.ev-appointment { background: color-mix(in srgb, #d98e2b 20%, transparent); color: #b0741c; }
+.cal-course.ev-activity { background: color-mix(in srgb, #d9528c 20%, transparent); color: #c7487e; }
+.cal-course.ev-game { background: color-mix(in srgb, #4a7fd4 20%, transparent); color: #3a6cb8; }
+.cal-course.ev-deadline { background: color-mix(in srgb, #b8922a 22%, transparent); color: #94771c; }
+.cal-course.ev-course { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text); }
+/* 日历录入表单：一行塞多控件时收紧间距 */
+.ev-form .pg-new { gap: 8px; }
+.ev-form .pg-new .set-input[type="time"],
+.ev-form .pg-new .set-input[type="number"] { max-width: 120px; }
+
 .study-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .course-card {
   border: 1.5px solid var(--border);
@@ -2289,3 +2301,25 @@ label.lib-cand { cursor: pointer; }
 .lib-take { font-size: 12px; color: var(--accent-strong); margin: 4px 0 0; line-height: 1.65; }
 .lib-src { font-size: 11px; color: var(--text-dim); margin-top: 6px; word-break: break-all; line-height: 1.6; }
 .lib-src a { color: var(--text-dim); text-decoration: underline dotted; }
+
+/* ===== 🎮 追番专区（BangumiWatch）===== */
+.bgm-mine { display: flex; flex-direction: column; gap: 8px; }
+.bgm-search { display: flex; gap: 8px; align-items: center; }
+.bgm-search .set-input { flex: 1; }
+.bgm-results { border: 1.5px dashed var(--border); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.bgm-result-row { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 13px; }
+.bgm-thumb { width: 34px; height: 47px; border-radius: 4px; object-fit: cover; flex: none; background: var(--bg-panel); }
+.bgm-thumb.none { display: inline-block; }
+.bgm-progress { display: flex; align-items: center; gap: 4px; flex: none; }
+.bgm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 10px; }
+.bgm-card {
+  display: flex; flex-direction: column; gap: 3px; min-width: 0;
+  border: 1.5px solid var(--border); border-radius: 10px; padding: 5px;
+  background: color-mix(in srgb, var(--bg-panel) 55%, transparent);
+}
+.bgm-card.mine { border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.bgm-card img { width: 100%; aspect-ratio: 3 / 4.15; object-fit: cover; border-radius: 6px; background: var(--bg-panel); }
+.bgm-nocover { width: 100%; aspect-ratio: 3 / 4.15; border-radius: 6px; background: color-mix(in srgb, var(--accent) 14%, var(--bg-panel)); }
+.bgm-name { font-size: 11.5px; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.bgm-sub { font-size: 10.5px; color: var(--text-dim); }
+.sec-sub { font-size: 13.5px; margin: 0 0 10px; }

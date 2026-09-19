@@ -1989,6 +1989,536 @@ function ranaStudyMiddleware(): Plugin {
 }
 
 /**
+ * 全局日历端点（数据存本地 .life/events.json，不进公开仓库）：
+ * - GET    /__rana/events           读全部事件（按日期+时段排序；课表课程不在这里，前端去 /__rana/study 镜像）
+ * - POST   /__rana/events           新增 {title, type, date, timeStart?, timeEnd?, remindMin?, location?, note?}
+ * - POST   /__rana/events/done      {id, done} 切换完成
+ * - DELETE /__rana/events?id=       删除事件
+ * 事件类型：interview 面试 / appointment 约会事务 / activity Live·漫展·出门 / game 游戏活动 / deadline 截止。
+ * 课程（course）是 schedule.json 的镜像，由前端当日合并展示，不落本文件（不双写）。
+ */
+function ranaEventsMiddleware(): Plugin {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const lifeDir = path.join(here, ".life");
+  const eventsFile = path.join(lifeDir, "events.json");
+
+  type EventType = "interview" | "appointment" | "activity" | "game" | "deadline";
+  interface CalEvent {
+    id: string;
+    title: string;
+    type: EventType;
+    date: string; // YYYY-MM-DD
+    timeStart?: string; // HH:MM（deadline 可不设时段）
+    timeEnd?: string;
+    /** 提前多少分钟提醒，默认 30 */
+    remindMin?: number;
+    location?: string;
+    note?: string;
+    done?: boolean;
+    createdAt: number;
+  }
+  interface EventsFile {
+    version: number;
+    events: CalEvent[];
+    updatedAt: number;
+  }
+
+  const EVENT_TYPES: EventType[] = ["interview", "appointment", "activity", "game", "deadline"];
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  const TIME_RE = /^\d{2}:\d{2}$/;
+
+  const emptyEvents = (): EventsFile => ({ version: 1, events: [], updatedAt: 0 });
+  const readEvents = (): EventsFile => {
+    try {
+      const j = JSON.parse(fs.readFileSync(eventsFile, "utf8")) as EventsFile;
+      if (!Array.isArray(j.events)) j.events = [];
+      j.version = 1;
+      return j;
+    } catch {
+      return emptyEvents();
+    }
+  };
+  const writeEvents = (f: EventsFile) => {
+    fs.mkdirSync(lifeDir, { recursive: true });
+    try {
+      fs.copyFileSync(eventsFile, eventsFile + ".bak");
+    } catch {
+      // 首次写入没有旧文件
+    }
+    f.updatedAt = Date.now();
+    fs.writeFileSync(eventsFile, JSON.stringify(f, null, 2), "utf8");
+  };
+  const sortedEvents = (f: EventsFile): EventsFile => ({
+    ...f,
+    events: [...f.events].sort(
+      (a, b) => a.date.localeCompare(b.date) || (a.timeStart ?? "99:99").localeCompare(b.timeStart ?? "99:99"),
+    ),
+  });
+
+  const json = (
+    res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void },
+    code: number,
+    out: unknown,
+  ) => {
+    res.setHeader("content-type", "application/json");
+    res.statusCode = code;
+    res.end(JSON.stringify(out));
+  };
+  const isLoopback = (req: { socket?: { remoteAddress?: string }; headers?: Record<string, unknown> }) => {
+    const ra = req.socket?.remoteAddress ?? "";
+    if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(ra)) return false;
+    const origin = String(req.headers?.origin ?? "");
+    if (origin && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) return false;
+    return true;
+  };
+  const readBody = (req: { on: (ev: string, cb: (c?: string) => void) => void }) =>
+    new Promise<string>((resolve) => {
+      let body = "";
+      req.on("data", (c?: string) => {
+        body += c ?? "";
+      });
+      req.on("end", () => resolve(body));
+    });
+
+  const handler = (
+    req: {
+      method?: string;
+      url?: string;
+      socket?: { remoteAddress?: string };
+      headers?: Record<string, unknown>;
+      on: (ev: string, cb: (c?: string) => void) => void;
+    },
+    res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string | Buffer) => void },
+  ) => {
+    const u = new URL(req.url ?? "/", "http://x");
+    const route = u.pathname.replace(/\/+$/, "") || "/";
+
+    if (req.method === "GET" && route === "/") {
+      json(res, 200, sortedEvents(readEvents()));
+      return;
+    }
+    if (!isLoopback(req)) {
+      json(res, 403, { error: "仅本机可操作" });
+      return;
+    }
+
+    if (req.method === "POST" && route === "/") {
+      readBody(req).then((body) => {
+        try {
+          const p = JSON.parse(body || "{}") as Record<string, unknown>;
+          const title = String(p.title ?? "").trim().slice(0, 80);
+          const type = String(p.type ?? "") as EventType;
+          const date = String(p.date ?? "").trim();
+          if (!title) {
+            json(res, 400, { error: "标题不能为空" });
+            return;
+          }
+          if (!EVENT_TYPES.includes(type)) {
+            json(res, 400, { error: `type 只能是 ${EVENT_TYPES.join(" / ")}` });
+            return;
+          }
+          if (!DATE_RE.test(date)) {
+            json(res, 400, { error: "date 要是 YYYY-MM-DD" });
+            return;
+          }
+          const timeStart = String(p.timeStart ?? "").trim();
+          const timeEnd = String(p.timeEnd ?? "").trim();
+          if (timeStart && !TIME_RE.test(timeStart)) {
+            json(res, 400, { error: "timeStart 要是 HH:MM" });
+            return;
+          }
+          if (timeEnd && !TIME_RE.test(timeEnd)) {
+            json(res, 400, { error: "timeEnd 要是 HH:MM" });
+            return;
+          }
+          let remindMin = 30;
+          if (p.remindMin !== undefined && p.remindMin !== null && String(p.remindMin) !== "") {
+            remindMin = Math.max(0, Math.min(1440, Number(p.remindMin) || 0));
+          }
+          const f = readEvents();
+          const ev: CalEvent = {
+            id: `e-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+            title,
+            type,
+            date,
+            ...(timeStart ? { timeStart } : {}),
+            ...(timeEnd ? { timeEnd } : {}),
+            remindMin,
+            ...(String(p.location ?? "").trim() ? { location: String(p.location).trim().slice(0, 200) } : {}),
+            ...(String(p.note ?? "").trim() ? { note: String(p.note).trim().slice(0, 500) } : {}),
+            done: false,
+            createdAt: Date.now(),
+          };
+          f.events.push(ev);
+          writeEvents(f);
+          json(res, 200, { ok: true, event: ev, ...sortedEvents(f) });
+        } catch (e) {
+          json(res, 500, { error: (e as Error).message });
+        }
+      });
+      return;
+    }
+
+    if (req.method === "POST" && route === "/done") {
+      readBody(req).then((body) => {
+        try {
+          const p = JSON.parse(body || "{}") as { id?: string; done?: boolean };
+          const f = readEvents();
+          const ev = f.events.find((x) => x.id === p.id);
+          if (!ev) {
+            json(res, 404, { error: "没有这个事件" });
+            return;
+          }
+          ev.done = Boolean(p.done);
+          writeEvents(f);
+          json(res, 200, { ok: true, ...sortedEvents(f) });
+        } catch (e) {
+          json(res, 500, { error: (e as Error).message });
+        }
+      });
+      return;
+    }
+
+    if (req.method === "DELETE" && route === "/") {
+      const id = u.searchParams.get("id") ?? "";
+      const f = readEvents();
+      if (!f.events.some((x) => x.id === id)) {
+        json(res, 404, { error: "没有这个事件" });
+        return;
+      }
+      f.events = f.events.filter((x) => x.id !== id);
+      writeEvents(f);
+      json(res, 200, { ok: true, ...sortedEvents(f) });
+      return;
+    }
+
+    json(res, 405, { error: "method not allowed" });
+  };
+
+  return {
+    name: "rana-events",
+    configureServer(server) {
+      server.middlewares.use("/__rana/events", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use("/__rana/events", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+  };
+}
+
+/**
+ * 追番端点（Bangumi api.bgm.tv 代理 + 本地追番清单，数据存 .bangumi/ 不进公开仓库）：
+ * - GET    /__rana/bangumi/calendar            今日放送（服务端 curl 经 Clash 抓 api.bgm.tv，60 分钟缓存）
+ * - GET    /__rana/bangumi/search?q=           条目搜索（旧版搜索 API，同链路；供「加进追番」前找条目）
+ * - GET    /__rana/bangumi/cover?u=            封面图转发（仅白名单 lain.bgm.tv；浏览器直连不到 CDN，服务端代取）
+ * - GET    /__rana/bangumi/collection          我的追番清单（.bangumi/collection.json，本地维护不依赖 access token）
+ * - POST   /__rana/bangumi/collection          {subjectId, name, nameCn?, cover?, eps?, airDate?, status?} 加入/更新
+ *                                            （status: watching 在追标进度 / done 看过进展馆；airDate 供年份分组）
+ * - POST   /__rana/bangumi/collection/update   {subjectId, progress?, status?} 改进度/改状态
+ * - DELETE /__rana/bangumi/collection?subjectId= 移出追番
+ * 这台机器 bgm.tv 直连不通（实测），所有出站走 curl -x http://127.0.0.1:7897（Clash，与状态页探测同款）。
+ */
+function ranaBangumiMiddleware(): Plugin {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const bgmDir = path.join(here, ".bangumi");
+  const collectionFile = path.join(bgmDir, "collection.json");
+  const PROXY = "http://127.0.0.1:7897";
+  const UA = "OpenClaw-RanaWeb/1.0 (personal assistant; contact via OpenClaw gateway)";
+  const CALENDAR_TTL_MS = 60 * 60 * 1000;
+
+  interface BgmItem {
+    id: number;
+    name: string;
+    name_cn?: string;
+    eps?: number;
+    air_date?: string;
+    images?: { large?: string; common?: string; medium?: string };
+  }
+  interface CollectionEntry {
+    subjectId: number;
+    name: string;
+    nameCn?: string;
+    cover?: string;
+    eps?: number;
+    /** 放送开始日（YYYY-MM-DD；展馆按它取年份分组） */
+    airDate?: string;
+    /** watching=在追（标进度）/ done=看过（进展馆） */
+    status: "watching" | "done";
+    /** 看到第几话（0=还没开看；仅 watching 用） */
+    progress: number;
+    addedAt: number;
+  }
+  interface CollectionFile {
+    version: number;
+    items: CollectionEntry[];
+    updatedAt: number;
+  }
+
+  /** curl 抓 bgm.tv（数组参数不经 shell；JSON 解析失败/超时都抛错给路由兜底） */
+  const bgmCurlJson = async (urlPath: string) => {
+    const { stdout } = await execFileP(
+      "curl",
+      ["-s", "--max-time", "12", "-x", PROXY, "-A", UA, "https://api.bgm.tv" + urlPath],
+      { encoding: "utf8", timeout: 15000, windowsHide: true },
+    );
+    return JSON.parse(stdout) as unknown;
+  };
+
+  const emptyCollection = (): CollectionFile => ({ version: 1, items: [], updatedAt: 0 });
+  const readCollection = (): CollectionFile => {
+    try {
+      const j = JSON.parse(fs.readFileSync(collectionFile, "utf8")) as CollectionFile;
+      if (!Array.isArray(j.items)) j.items = [];
+      // 旧条目补默认值（无 status 的按在追；airDate 缺着由前端归「未分组」）
+      for (const it of j.items) {
+        if (it.status !== "watching" && it.status !== "done") it.status = "watching";
+        if (typeof it.progress !== "number") it.progress = 0;
+      }
+      j.version = 1;
+      return j;
+    } catch {
+      return emptyCollection();
+    }
+  };
+  const writeCollection = (f: CollectionFile) => {
+    fs.mkdirSync(bgmDir, { recursive: true });
+    try {
+      fs.copyFileSync(collectionFile, collectionFile + ".bak");
+    } catch {
+      // 首次写入没有旧文件
+    }
+    f.updatedAt = Date.now();
+    fs.writeFileSync(collectionFile, JSON.stringify(f, null, 2), "utf8");
+  };
+  const sortedCollection = (f: CollectionFile): CollectionFile => ({
+    ...f,
+    items: [...f.items].sort((a, b) => b.addedAt - a.addedAt),
+  });
+
+  const json = (
+    res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void },
+    code: number,
+    out: unknown,
+  ) => {
+    res.setHeader("content-type", "application/json");
+    res.statusCode = code;
+    res.end(JSON.stringify(out));
+  };
+  const isLoopback = (req: { socket?: { remoteAddress?: string }; headers?: Record<string, unknown> }) => {
+    const ra = req.socket?.remoteAddress ?? "";
+    if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(ra)) return false;
+    const origin = String(req.headers?.origin ?? "");
+    if (origin && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) return false;
+    return true;
+  };
+  const readBody = (req: { on: (ev: string, cb: (c?: string) => void) => void }) =>
+    new Promise<string>((resolve) => {
+      let body = "";
+      req.on("data", (c?: string) => {
+        body += c ?? "";
+      });
+      req.on("end", () => resolve(body));
+    });
+
+  // 今日放送缓存
+  let calCache: { at: number; data: unknown } | null = null;
+  const WEEK_CN = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
+  const fetchCalendar = async () => {
+    if (calCache && Date.now() - calCache.at < CALENDAR_TTL_MS) return calCache.data;
+    const data = (await bgmCurlJson("/calendar")) as Array<{ weekday?: { id?: number }; items?: BgmItem[] }>;
+    if (!Array.isArray(data)) throw new Error("bgm.tv /calendar 返回格式不对");
+    const todayId = ((new Date().getDay() + 6) % 7) + 1; // bgm weekday.id：1=周一…7=周日
+    const today = data.find((d) => d?.weekday?.id === todayId);
+    const items = (today?.items ?? []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      nameCn: s.name_cn || "",
+      cover: s.images?.large ?? s.images?.common ?? "",
+      eps: s.eps ?? 0,
+      airDate: s.air_date ?? "",
+    }));
+    const out = { weekday: WEEK_CN[new Date().getDay()], count: items.length, items };
+    calCache = { at: Date.now(), data: out };
+    return out;
+  };
+
+  const handler = (
+    req: {
+      method?: string;
+      url?: string;
+      socket?: { remoteAddress?: string };
+      headers?: Record<string, unknown>;
+      on: (ev: string, cb: (c?: string) => void) => void;
+    },
+    res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string | Buffer) => void },
+  ) => {
+    const u = new URL(req.url ?? "/", "http://x");
+    const route = u.pathname.replace(/\/+$/, "") || "/";
+
+    const fail = (e: unknown) =>
+      json(res, 502, {
+        error: `bgm.tv 拉取失败：${(e as Error).message}（Clash 代理在 7897，挂了就连不上）`,
+      });
+
+    if (req.method === "GET" && route === "/calendar") {
+      fetchCalendar()
+        .then((d) => json(res, 200, d))
+        .catch(fail);
+      return;
+    }
+
+    if (req.method === "GET" && route === "/search") {
+      const q = (u.searchParams.get("q") ?? "").trim();
+      if (!q) {
+        json(res, 400, { error: "q 不能为空" });
+        return;
+      }
+      bgmCurlJson(`/search/subject/${encodeURIComponent(q)}?type=2&max_results=8`)
+        .then((raw) => {
+          const list = (raw as { list?: BgmItem[] }).list ?? [];
+          json(
+            res,
+            200,
+            list.map((s) => ({
+              id: s.id,
+              name: s.name,
+              nameCn: s.name_cn || "",
+              cover: s.images?.large ?? "",
+              airDate: s.air_date ?? "",
+            })),
+          );
+        })
+        .catch(fail);
+      return;
+    }
+
+    if (req.method === "GET" && route === "/cover") {
+      const raw = u.searchParams.get("u") ?? "";
+      // 旧接口给的封面是 http://，出站统一按 https 取（同一 CDN）
+      const target = raw.replace(/^http:\/\/lain\.bgm\.tv\//, "https://lain.bgm.tv/");
+      if (!/^https:\/\/lain\.bgm\.tv\/pic\//.test(target)) {
+        json(res, 403, { error: "只转发 lain.bgm.tv 的图" });
+        return;
+      }
+      execFileP("curl", ["-s", "--max-time", "10", "-x", PROXY, "-A", UA, target], {
+        timeout: 13000,
+        windowsHide: true,
+        encoding: "buffer",
+        maxBuffer: 8 * 1024 * 1024,
+      })
+        .then(({ stdout }) => {
+          res.setHeader("content-type", "image/jpeg");
+          res.setHeader("cache-control", "public, max-age=86400");
+          res.statusCode = 200;
+          res.end(stdout);
+        })
+        .catch(() => {
+          res.statusCode = 502;
+          res.end("");
+        });
+      return;
+    }
+
+    if (req.method === "GET" && route === "/collection") {
+      json(res, 200, sortedCollection(readCollection()));
+      return;
+    }
+    if (!isLoopback(req)) {
+      json(res, 403, { error: "仅本机可操作" });
+      return;
+    }
+
+    if (req.method === "POST" && route === "/collection") {
+      readBody(req).then((body) => {
+        try {
+          const p = JSON.parse(body || "{}") as Record<string, unknown>;
+          const subjectId = Number(p.subjectId);
+          const name = String(p.name ?? "").trim().slice(0, 120);
+          if (!Number.isInteger(subjectId) || subjectId <= 0 || !name) {
+            json(res, 400, { error: "subjectId 和 name 必填" });
+            return;
+          }
+          const status = p.status === "done" ? "done" : "watching";
+          const f = readCollection();
+          const exists = f.items.find((x) => x.subjectId === subjectId);
+          if (exists) {
+            exists.name = name;
+            if (p.nameCn !== undefined) exists.nameCn = String(p.nameCn).slice(0, 120);
+            if (p.cover !== undefined) exists.cover = String(p.cover).slice(0, 300);
+            if (p.eps !== undefined) exists.eps = Math.max(0, Number(p.eps) || 0);
+            if (p.airDate !== undefined) exists.airDate = String(p.airDate).slice(0, 10);
+            if (p.status !== undefined) exists.status = status;
+          } else {
+            f.items.push({
+              subjectId,
+              name,
+              nameCn: p.nameCn !== undefined ? String(p.nameCn).slice(0, 120) : undefined,
+              cover: p.cover !== undefined ? String(p.cover).slice(0, 300) : undefined,
+              eps: p.eps !== undefined ? Math.max(0, Number(p.eps) || 0) : undefined,
+              airDate: p.airDate !== undefined ? String(p.airDate).slice(0, 10) : undefined,
+              status,
+              progress: 0,
+              addedAt: Date.now(),
+            });
+          }
+          writeCollection(f);
+          json(res, 200, { ok: true, ...sortedCollection(f) });
+        } catch (e) {
+          json(res, 500, { error: (e as Error).message });
+        }
+      });
+      return;
+    }
+
+    if (req.method === "POST" && route === "/collection/update") {
+      readBody(req).then((body) => {
+        try {
+          const p = JSON.parse(body || "{}") as { subjectId?: number; progress?: number; status?: string };
+          const f = readCollection();
+          const it = f.items.find((x) => x.subjectId === Number(p.subjectId));
+          if (!it) {
+            json(res, 404, { error: "追番清单里没有这部" });
+            return;
+          }
+          if (p.progress !== undefined) it.progress = Math.max(0, Math.min(9999, Number(p.progress) || 0));
+          if (p.status === "done" || p.status === "watching") it.status = p.status;
+          writeCollection(f);
+          json(res, 200, { ok: true, ...sortedCollection(f) });
+        } catch (e) {
+          json(res, 500, { error: (e as Error).message });
+        }
+      });
+      return;
+    }
+
+    if (req.method === "DELETE" && route === "/collection") {
+      const subjectId = Number(u.searchParams.get("subjectId"));
+      const f = readCollection();
+      if (!f.items.some((x) => x.subjectId === subjectId)) {
+        json(res, 404, { error: "追番清单里没有这部" });
+        return;
+      }
+      f.items = f.items.filter((x) => x.subjectId !== subjectId);
+      writeCollection(f);
+      json(res, 200, { ok: true, ...sortedCollection(f) });
+      return;
+    }
+
+    json(res, 405, { error: "method not allowed" });
+  };
+
+  return {
+    name: "rana-bangumi",
+    configureServer(server) {
+      server.middlewares.use("/__rana/bangumi", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use("/__rana/bangumi", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+  };
+}
+
+/**
  * 人生规划端点（数据存本地 .life/ 目录，已进 .gitignore 不入公开仓库）：
  * - GET    /__rana/life                    读 life.json（人生目标 + 月度里程碑）
  * - POST   /__rana/life/goals              新建人生目标 {title, why?, horizon?}
@@ -3744,34 +4274,8 @@ function ranaSessionsCleanupMiddleware(): Plugin {
  * 每次点击都新建+删除一个临时会话，所以留给按钮手动触发，不做轮询。
  */
 function ranaContextMiddleware(): Plugin {
-  const workspaceMain = "K:\\openclaw\\.openclaw\\.openclaw\\workspace-main";
-
-  /** 主会话才注入、/context 临时会话估算不到的底稿文件（中文按 chars/4 粗算，与官方口径一致） */
-  const extraFiles = () => {
-    const out: Array<{ name: string; chars: number; tok: number }> = [];
-    for (const name of ["USER.md", "MEMORY.md"]) {
-      try {
-        const chars = fs.readFileSync(path.join(workspaceMain, name), "utf8").length;
-        out.push({ name, chars, tok: Math.round(chars / 4) });
-      } catch {
-        /* 不存在就跳过 */
-      }
-    }
-    try {
-      const memDir = path.join(workspaceMain, "memory");
-      const latest = fs.readdirSync(memDir).filter((f) => /^20\d\d-/.test(f)).sort().pop();
-      if (latest) {
-        const chars = fs.readFileSync(path.join(memDir, latest), "utf8").length;
-        out.push({ name: `日记 ${latest}`, chars, tok: Math.round(chars / 4) });
-      }
-    } catch {
-      /* 无日记 */
-    }
-    return out;
-  };
-
   const handler = async (
-    req: { method?: string; socket?: { remoteAddress?: string } },
+    req: { method?: string; url?: string; socket?: { remoteAddress?: string } },
     res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void },
   ) => {
     res.setHeader("content-type", "application/json");
@@ -3792,9 +4296,12 @@ function ranaContextMiddleware(): Plugin {
       res.end(JSON.stringify({ error: "拿不到 gateway token（openclaw.json）" }));
       return;
     }
+    // ?sessionKey= 指定要体检的会话（账单按该会话所属 agent 装配计算）；缺省测 main 主会话
+    const u = new URL(req.url ?? "/", "http://localhost");
+    const sessionKey = u.searchParams.get("sessionKey") ?? "";
     try {
-      const report = await probeGatewayContext(token);
-      res.end(JSON.stringify({ ok: true, checkedAt: new Date().toISOString(), ...report, extra: extraFiles() }));
+      const report = await probeGatewayContext(token, sessionKey || undefined);
+      res.end(JSON.stringify({ ok: true, checkedAt: new Date().toISOString(), ...report }));
     } catch (e) {
       res.statusCode = 502;
       res.end(JSON.stringify({ error: (e as Error).message }));
@@ -3830,10 +4337,51 @@ const parseContextReport = (text: string) => {
   };
 };
 
-/** 连 gateway 收集上下文账单：临时会话跑 /context list + 主会话实时用量；临时会话即删 */
-async function probeGatewayContext(token: string): Promise<{
-  main: { key: string; inputTokens?: number; contextWindow?: number };
+/** agentId → 工作区目录（openclaw.json 显式配置优先，缺省按约定路径推） */
+const resolveAgentWorkspace = (agentId: string): string => {
+  try {
+    const cfg = JSON.parse(fs.readFileSync("K:\\openclaw\\.openclaw\\.openclaw\\openclaw.json", "utf8")) as {
+      agents?: { entries?: Record<string, { workspace?: string }> };
+    };
+    const ws = cfg.agents?.entries?.[agentId]?.workspace;
+    if (ws) return ws;
+  } catch {
+    /* 配置读不到走约定路径 */
+  }
+  return `K:\\openclaw\\.openclaw\\.openclaw\\workspace-${agentId}`;
+};
+
+/** 该 agent 会话注入、但 /context 临时会话估算不到的底稿文件（中文按 chars/4 粗算，与官方口径一致）。
+ *  exclude 传注入列表里已有的文件名（大写比较），避免同文件重复计数（RP 等装配会把 USER/MEMORY 直接列进注入）。 */
+const contextExtraFiles = (workspaceDir: string, exclude?: Set<string>) => {
+  const out: Array<{ name: string; chars: number; tok: number }> = [];
+  for (const name of ["USER.md", "MEMORY.md"]) {
+    if (exclude?.has(name.toUpperCase())) continue;
+    try {
+      const chars = fs.readFileSync(path.join(workspaceDir, name), "utf8").length;
+      out.push({ name, chars, tok: Math.round(chars / 4) });
+    } catch {
+      /* 该工作区没有此文件就跳过 */
+    }
+  }
+  try {
+    const memDir = path.join(workspaceDir, "memory");
+    const latest = fs.readdirSync(memDir).filter((f) => /^20\d\d-/.test(f)).sort().pop();
+    if (latest) {
+      const chars = fs.readFileSync(path.join(memDir, latest), "utf8").length;
+      out.push({ name: `日记 ${latest}`, chars, tok: Math.round(chars / 4) });
+    }
+  } catch {
+    /* 无日记 */
+  }
+  return out;
+};
+
+/** 连 gateway 收集上下文账单：临时会话跑 /context list + 目标会话实时用量；临时会话即删 */
+async function probeGatewayContext(token: string, sessionKey?: string): Promise<{
+  session: { key: string; agentId?: string; inputTokens?: number; contextWindow?: number };
   baseline: { sysTok: number; projectTok: number; skillsTok: number; skillsCount: number; schemasTok: number; files: Array<{ name: string; chars: number; tok: number }> };
+  extra: Array<{ name: string; chars: number; tok: number }>;
 }> {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const publicKeyRaw = Buffer.from((publicKey.export({ format: "jwk" }) as { x: string }).x, "base64url");
@@ -3911,9 +4459,14 @@ async function probeGatewayContext(token: string): Promise<{
     const mainKey = snapshot?.sessionDefaults?.mainSessionKey ?? "agent:main:main";
 
     const list = (await withTimeout(request("sessions.list", {}), 8000, "sessions.list")) as { sessions?: Array<Record<string, unknown>> };
-    const mainRow = (list.sessions ?? []).find((s) => s.key === mainKey);
+    const rows = list.sessions ?? [];
+    // 指定会话就测它（账单按该会话所属 agent 的装配算）；没指定回退主会话
+    const targetRow = (sessionKey ? rows.find((s) => s.key === sessionKey) : undefined) ?? rows.find((s) => s.key === mainKey);
+    if (!targetRow) throw new Error(sessionKey ? "会话不存在（可能已删除或归档）" : "找不到主会话");
+    const targetKey = String(targetRow.key);
+    const agentId = String(targetRow.agentId ?? "main");
 
-    const created = (await withTimeout(request("sessions.create", { agentId: "main" }), 10000, "临时会话创建")) as Record<string, unknown>;
+    const created = (await withTimeout(request("sessions.create", { agentId }), 10000, "临时会话创建")) as Record<string, unknown>;
     const row = (created.session ?? created) as Record<string, unknown>;
     const tmpKey = String(row.key ?? created.key ?? "");
     try {
@@ -3922,13 +4475,17 @@ async function probeGatewayContext(token: string): Promise<{
       await withTimeout(new Promise<void>((r) => {
         const t = setInterval(() => { if (finalText) { clearInterval(t); r(); } }, 150);
       }), 45000, "/context 回复");
+      const baseline = parseContextReport(finalText);
+      const injected = new Set(baseline.files.map((f) => f.name.toUpperCase()));
       return {
-        main: {
-          key: mainKey,
-          inputTokens: typeof mainRow?.inputTokens === "number" ? (mainRow.inputTokens as number) : undefined,
-          contextWindow: typeof mainRow?.contextTokens === "number" ? (mainRow.contextTokens as number) : undefined,
+        session: {
+          key: targetKey,
+          agentId,
+          inputTokens: typeof targetRow.inputTokens === "number" ? (targetRow.inputTokens as number) : undefined,
+          contextWindow: typeof targetRow.contextTokens === "number" ? (targetRow.contextTokens as number) : undefined,
         },
-        baseline: parseContextReport(finalText),
+        baseline,
+        extra: contextExtraFiles(resolveAgentWorkspace(agentId), injected),
       };
     } finally {
       // 临时会话清理（尽力而为；失败只留一个空会话，可在会话页手动删）
@@ -3949,7 +4506,7 @@ async function probeGatewayContext(token: string): Promise<{
 }
 
 export default defineConfig({
-  plugins: [react(), ranaDevConfig(), ranaProviderConfigMiddleware(), ranaSysStatusMiddleware(), ranaAvatarMiddleware(), ranaNewsMiddleware(), ranaStudyMiddleware(), ranaLifeMiddleware(), ranaFateMiddleware(), ranaAgentInfoMiddleware(), ranaQqProfileMiddleware(), ranaDshModelsMiddleware(), ranaModelTestMiddleware(), ranaModelParamsMiddleware(), ranaSessionsCleanupMiddleware(), ranaContextMiddleware()],
+  plugins: [react(), ranaDevConfig(), ranaProviderConfigMiddleware(), ranaSysStatusMiddleware(), ranaAvatarMiddleware(), ranaNewsMiddleware(), ranaStudyMiddleware(), ranaEventsMiddleware(), ranaBangumiMiddleware(), ranaLifeMiddleware(), ranaFateMiddleware(), ranaAgentInfoMiddleware(), ranaQqProfileMiddleware(), ranaDshModelsMiddleware(), ranaModelTestMiddleware(), ranaModelParamsMiddleware(), ranaSessionsCleanupMiddleware(), ranaContextMiddleware()],
   server: {
     port: 5173,
     proxy: {
