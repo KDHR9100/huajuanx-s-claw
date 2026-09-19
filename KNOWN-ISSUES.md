@@ -21,6 +21,14 @@
 
 ## 登记区
 
+## \[已解决] 发行版打包三坑：cmd 中文注释炸解析 / OpenClaw 首启要两次 / workspace 必须显式（2026-09-19）
+
+开箱即用发行版（setup.cmd + 发行模板）异地模拟验收时踩的三个坑，全部已修：
+
+- **cmd.exe 按 GBK 解析批处理，UTF-8 中文注释会把 REM 行拆成命令**：症状是 start-gateway.cmd 报「'制造多开。日志见…' 不是内部或外部命令」+ 变量为空（`'""' 不是命令`）。原因：Write 类工具默认写 UTF-8，而老脚本当年是 GBK/纯 ASCII 所以没事。**规矩：启动链 .cmd 一律纯 ASCII 注释**（setup.cmd 例外——它第一行 `chcp 65001` 先切换了代码页，验证可行；local-overrides.example.cmd 同款处理）。
+- **OpenClaw 网关首次启动会自动装内置插件（anthropic/browser/canvas…+qwen），装完「拒绝宣告就绪」要求再启一次**：`plugin migration inputs changed during startup convergence; refusing to report the gateway ready`。这不是故障——第二次启动即收敛。README 快速上手已提示「首启连不上就再双击一次」。另注：装插件走 openclaw 内部 npm，需要代理的网络要带 `HTTPS_PROXY`（老坑），发行文档提示用户。
+- **`workspace-main` 目录不会被自动认领，必须在 agent 条目显式写 `workspace` 字段**：症状是 SOUL.md 不被注入、模型自称「没有名字的白纸」。本机 main 能工作是历史注册的运气；发行模板因此加 `__SETUP_WORKSPACE_MAIN__` 占位，setup.mjs 生成时替换为实际绝对路径（正斜杠）。显式指定后验证：模型自我介绍与 SOUL.template.md 人设一致。
+
 ## [行为变更·须知] exec 审批闸门开启（auto 档）——她的命令执行从全放行改为白名单+自动审查（2026-09-19）
 
 - 做了什么：`tools.exec.mode: "auto"`（备份 openclaw.json.bak-execgate）+ 白名单放行 `**/git.exe`。生效策略 `security=allowlist, ask=on-miss, askFallback=deny`（`openclaw exec-policy show` 可查）。目的：Rana 觅食装新工具（plugins install / mcp add / npm install）必须过人工批准，防诱导乱装。
@@ -479,5 +487,12 @@
   2. **vite 中间件**：spawn `curl -x 7897`（项目里状态页探测同款先例，`ranaBangumiMiddleware`）。
 - **bgm.tv v0 API（POST /v0/search/subjects、GET /v0/subjects）间歇 502**（nginx 网关抖动，重试可能好）：搜索用旧版 `GET /search/subject/{关键词}?type=2` 稳定；v0 详情在 bangumi.mjs 里做了 5xx 自动重试一次。旧接口封面给 `http://` 链接，转发时统一升 https。
 - **网关的 workspace skill 扫描是启动时全量 + 内存缓存，之后新增的 skill 目录不会动态出现**（`openclaw skills check` 一直 Total 不涨）。job-match 当时"立即可见"是撞上了缓存过期窗口。**新建/改 skill 后想立刻生效：重启网关**（taskkill + start-gateway.cmd）。判定特征：CLI 能看到老 skill、看不到新 skill、目录里文件确实在。
+
+## \[观察中] 心跳会话 exec 工具卡死 → 网关进程无声退出（2026-09-19 21:48，首次出现）
+
+- 症状：后台任务方式拉起的网关（`cmd //c start-gateway.cmd` 后台跑）运行约半小时后报 failed exit 1，18789 无监听。日志无崩溃堆栈，最后记录是两条 `stalled session: sessionKey=agent:main:main:heartbeat … reason=blocked_tool_call activeTool=exec`（exec 工具调用挂了 622 秒没动）。
+- 已做：重启网关恢复（Channel stable）。**死因未定**——候选：①心跳 cron 里某条 exec 命令挂起（如需出网的命令在 Clash 环境下死等）把进程拖死；②被外部终止。
+- 再遇到先看：`%TEMP%\openclaw\openclaw-当日.log` 尾部是否又是 `stalled session … activeTool=exec`。**若复现 2 次以上，去翻心跳/巡检 cron 里 exec 调的命令**（health-patrol.mjs / 问候 cron），给它们加超时。
+- 附带模式（非故障）：Git Bash 后台任务跑 start-gateway.cmd 时，cmd 把脚本里的 UTF-8 中文注释按 GBK 拆碎报"不是内部或外部命令"且任务退出码 1——**gateway 子进程照常起来**。判活只认 `netstat :18789 LISTENING`，别信后台任务退出码。
 
 

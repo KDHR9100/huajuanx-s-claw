@@ -6,6 +6,8 @@
 
 > 微信上陪你聊的是**显卡上的本地她**（聊天内容不出本机）；QQ 私聊里干活的是**云端的她**（还能把编码重活派给 WSL 里的 DeepSeek 工人）；QQ 群里营业的是**物理隔离的公共号她**（只有群聊公开记忆）。三个她共用一套定时任务、每日早报、学习计划、跨会话长期记忆，以及一条互通近况但绝不泄露隐私的「三腿记忆桥」。
 
+**开箱默认是单 Rana 形态**：陌生人 clone 后跑 `setup.cmd` → 双击启动 → 网页里填一个云端模型的 API key，就能和一个 Rana 聊天，全程不需要本地显卡。上面这套三智能体架构是作者自用配置，属于进阶玩法（见「快速上手」末尾的说明）。
+
 ---
 
 ## ✨ 技术速览（给老手的 30 秒版）
@@ -13,17 +15,17 @@
 | 维度 | 选型 |
 | --- | --- |
 | 运行时底座 | OpenClaw gateway（Node，WebSocket `127.0.0.1:18789`，协议 v4，SQLite 存会话/定时任务，`openclaw.json` 改完即热重载） |
-| 智能体 | 三 agent：`main`（云端模型，干活力，接 QQ 私聊 + rana-web 控制台）+ `rana-rp`（本地 LM Studio 微调 14B，陪伴力，接微信）+ `rana-qq-public`（云端，QQ 群公共号，物理隔离无私货），`ownership=explicit` 显式路由 |
-| 前端 | React 18 + TypeScript + Vite 6 + zustand，无 UI 框架、全手写 CSS（约 10,200 行源码） |
+| 智能体 | **开箱默认单 agent**：`main`（云端模型，网页控制台直接聊）。作者自用为三 agent：`main` + `rana-rp`（本地 LM Studio 微调，接微信）+ `rana-qq-public`（QQ 群公共号，物理隔离），`ownership=explicit` 显式路由，前端按实际存在的 agent 自动显隐 |
+| 前端 | React 18 + TypeScript + Vite 6 + zustand，无 UI 框架、全手写 CSS（约 11,800 行源码） |
 | 连接方式 | 浏览器 WebCrypto 生成 **Ed25519 设备身份**，挑战-签名握手 + token 鉴权；直连失败自动回退同源 `/gateway` 代理 |
-| 「后端」 | **没有独立后端进程**——Vite dev/preview 插件挂了十四组 loopback-only 中间件（`/__rana/*`）充当本地后端 |
+| 「后端」 | **没有独立后端进程**——Vite dev/preview 插件挂了十八组 loopback-only 中间件（`/__rana/*`）充当本地后端 |
 | 编码外包 | acpx（ACP 协议）→ **DSH**：WSL 里的 DeepSeek 编码工人。「🔨派活」页发单，算力走 DSH 自己的云端 key，不占本地显存 |
 | 边车自动化 | 独立 Node 脚本：记忆桥（30 分钟，三腿）、私密记忆桥（每小时）、系统巡检（30 分钟，异常主动 QQ 汇报）、早报、Git 活动统计、学习睡前小结/周报（cron 驱动）；学习排课与问卜解卦走「专用会话桥」（页面按需触发）；embedding 看门狗随网关常驻 |
 | 本地模型 | LM Studio `:1234`，`rana-rp-14b` 显式常驻（ctx 49152 / parallel 2 / KV 卸载到内存），embedding 用 qwen3-0.6b（`tools/embedding-watchdog.mjs` 看门狗锁单实例纯 CPU 常驻） |
 | 硬件约束 | RTX 4070 Ti 12GB + 48GB 内存——所有显存决策都围绕这张卡 |
 | 工程方法 | `KNOWN-ISSUES.md` 问题台账（症状/根因/方案/状态）、两层 AGENTS.md（人机共读规范）、`OPTIMIZATION-ROADMAP.md` 演进路线、公开镜像的 gitignore 隐私纪律 |
 
-代码量：前端 + 边车脚本合计约 14,300 行。下面从零讲起。
+代码量：前端 + 边车脚本合计约 18,800 行。下面从零讲起。
 
 ---
 
@@ -104,32 +106,38 @@
 
 ## 🚀 快速上手
 
-### 先说清楚：克隆这个仓库你会得到什么
+### 开箱三步（新用户）
 
-本仓库是**公开镜像**，包含前端、边车脚本和文档。但网关本体、智能体配置、会话记录、长期记忆都在本机的 OpenClaw 状态目录里（`openclaw.json`、SQLite 等），**不入 git**。所以：
+前置条件只有三样：**Windows** + **[Node.js 22+](https://nodejs.org)**（LTS 版即可）+ **任一 OpenAI 兼容云端模型的 API key**（智谱、阿里百炼/阿里云 MaaS、DeepSeek、OpenAI、硅基流动……都行）。不需要本地显卡。
 
-- 只想看看代码 / 复用某部分设计 → 克隆即读，各模块自包含；
-- 想完整跑一套 → 需要先自备：Node 22+（边车脚本用了 Node 内置的 `node:sqlite`）、OpenClaw（`npm i -g openclaw` 后初始化生成状态目录）、以及可选的 LM Studio + 本地模型。
+1. **初始化**：双击仓库根目录的 `setup.cmd`。它会依次：检查 Node 版本 → 全局安装 OpenClaw（约 1-2 分钟）→ 在仓库内 `.openclaw\.openclaw\` 生成配置和 Rana 人格文件（含随机网关令牌）→ 安装前端依赖。**可重复执行**，已初始化的部分自动跳过。
+2. **启动**：双击 `rana-web\start-rana.cmd`。网关（18789）+ 前端（5173）一起拉起，页面就绪后自动打开浏览器；已在跑的服务自动跳过，放心重复执行。**首次启动如果页面连不上，再双击一次 start-rana 即可**——OpenClaw 第一次启动会自动安装内置插件（anthropic/browser 等），装完要求重启一次才宣告就绪（网关窗口里会写明原因），第二次启动就正常了。
+3. **填 key**：页面左侧「☁ 云端模型」→ 填服务商地址（baseUrl，http(s):// 开头）、API key → 「拉取模型列表」勾选 → 保存。**首个配置好的 provider 会自动成为默认模型**——回到聊天页，跟 Rana 说句话试试。
+
+想改她的性格：编辑 `.openclaw\.openclaw\workspace-main\SOUL.md`（`setup-templates/` 里有出厂模板），改完新会话生效。想让 Rana 了解你：编辑同目录的 `USER.md`。
+
+### 状态目录在哪、怎么挪
+
+运行时状态（配置、会话记录、长期记忆、人格文件）全在仓库内 `.openclaw\.openclaw\`——已被 `.gitignore` 封禁，**永远不会被提交或发布**。想挪到别处：设环境变量 `OPENCLAW_STATE_DIR` 指过去；本机个性化（node 装在特殊位置等）用 `rana-web\local-overrides.cmd`（模板见 `local-overrides.example.cmd`，同样不入库）。
 
 ### 一键启动（本机日常用法）
 
-双击 `start-rana.cmd`（或仓库根的 `Rana Web.lnk`），它会依次：
+双击 `rana-web\start-rana.cmd`，它会依次：
 
-1. 发现 `18789` 没人监听 → 后台拉起 `start-gateway.cmd`（带 `OPENCLAW_STATE_DIR` 环境变量和 TLS 兼容参数）；
+1. 发现 `18789` 没人监听 → 后台拉起 `start-gateway.cmd`（状态目录默认指向仓库内 `.openclaw\.openclaw`，`OPENCLAW_STATE_DIR` 环境变量优先；含 TLS 兼容参数；配置里存在本地 LM Studio provider 时顺带拉起 embedding 看门狗）；
 2. 发现 `5173` 没人监听 → 后台 `npm run dev` 起 Vite；
 3. 轮询等页面就绪（最长 60 秒）→ 自动打开默认浏览器。
 
-已经在跑的服务会自动跳过，可以放心重复执行。
+启动脚本全部相对自身路径解析（node 走 PATH、openclaw.mjs 从 npm 全局目录自动探测），**换机器、换盘符、改目录名都不用改脚本**。
 
 ### 分步启动（想看清楚每一步）
 
 ```bash
-# 1) 装依赖
-cd rana-web && npm install
+# 1) 初始化（装 openclaw + 生成配置与人格 + 装前端依赖）
+setup.cmd
 
-# 2) 起网关（注意：必须带状态目录环境变量，否则读到的是另一个空目录）
-set OPENCLAW_STATE_DIR=K:\openclaw\.openclaw\.openclaw
-openclaw gateway
+# 2) 起网关（状态目录默认=仓库内 .openclaw\.openclaw，不用手动设变量）
+cd rana-web && start-gateway.cmd
 
 # 3) 另开一个终端起前端
 cd rana-web && npm run dev
@@ -141,9 +149,13 @@ cd rana-web && npm run dev
 
 **生产构建**：`npm run build` 产出静态文件，`npm run preview` 起预览服务（中间件在 preview 模式同样挂载，token 端点除外——这是刻意设计，见「中间件」一节）。
 
-### 渠道与绑定（微信 / QQ）
+### 单 Rana 与「三个她」（进阶说明）
 
-三个 agent 各守一条渠道，绑定关系记录在状态目录的 `openclaw.json`（`bindings` 字段），**改绑定要重启网关**：
+开箱形态是**单 agent 单人格**：一个 `main`（网页控制台直接聊）+ 一套 Rana 人格。本项目 README 后半部分描述的三智能体形态（本地 RP 她守微信、云端她守 QQ 私聊、公共号她守 QQ 群）是**作者自用配置**——OpenClaw 本身支持任意多 agent（`openclaw.json` 的 `agents.entries` 里加就是），本前端也做了跟随：界面上「多智能体才有的入口」（如侧栏的 RP 按钮）按配置里实际存在的 agent 自动显隐。想接微信/QQ 渠道、本地 LM Studio 模型，见下节与「本地模型运维」一章。
+
+### 渠道与绑定（微信 / QQ）——进阶
+
+三个 agent 各守一条渠道，绑定关系记录在状态目录的 `openclaw.json`（`bindings` 字段），**改绑定要重启网关**。开箱不包含渠道：微信走 `openclaw-weixin` 插件（需自己申请 bot 账号），QQ 走 `openclaw-qqbot` 插件（需在 QQ 开放平台建机器人拿 appId/clientSecret），配好插件与 bindings 后按需增配 agent：
 
 | 渠道 | 值守的 agent | 说明 |
 | --- | --- | --- |
@@ -164,6 +176,8 @@ K:\OpenClaw
 ├── KNOWN-ISSUES.md        ← 工程问题台账：每个坑的症状/根因/解法/状态，本项目最值钱的文件之一
 ├── OPTIMIZATION-ROADMAP.md ← 演进路线（架构减重/功能增强的分期计划）
 ├── .gitignore             ← 隐私红线清单（公开镜像，什么不能上传写得明明白白）
+├── setup.cmd / setup.mjs  ← ★ 开箱初始化：装 openclaw + 生成配置与 Rana 人格 + 装前端依赖（可重复执行）
+├── setup-templates/       ← 发行模板：openclaw.template.json（单 agent 骨架）+ SOUL/USER/MEMORY 人格三件套
 ├── push-public.cmd        ← 公开仓库一键推送（git add -A 全量；本地私有，不入库）
 ├── backup-private.cmd     ← 私有全量备份（robocopy + git；本地私有，不入库）
 ├── lmctl/                 ← LM Studio 控制台小工具（本地私有，不入库）
@@ -190,13 +204,14 @@ K:\OpenClaw
     │       ├── 会话三件套：Sidebar / ChatStream / Composer（+ Topbar、TopNav、Room 她的房间）
     │       ├── 页面：SysPage(状态) / CronPage / NewsPage /
     │       │        PlanningPage(🗺规划四合一：PlanningOverview 总览 / StudyPage+StudyQuiz+StudyGoalsPage 课表与待办 / PlanningLibrary 内容库) /
-    │       │        AppsPage(程序：万年历/八字紫微/摇卦，apps/ 下五个子组件) / GroupsPage(群画像) / DshPage(派活)
+    │       │        CalendarPage(全局日历) / BangumiPage(追番) / AppsPage(程序：万年历/八字紫微/摇卦，apps/ 下子组件) / GroupsPage(群画像) / DshPage(派活)
     │       └── 面板与弹窗：UsagePanel(用量/超参调参/快捷命令/技能与MCP卡) / SettingsModal /
     │                LmStudioModal / CloudConfigModal / SystemCleanupModal(系统会话清理) / ModelTuningCard / AgentKitCard / ErrorBoundary
-    ├── vite.config.ts        ★ 十四组中间件：token/云端provider配置/电脑状态(含虚拟化切换)/头像/早报/
-    │                           学习计划(含待办)/人生规划与内容库/问卜/模型超参/模型连通测试/技能与MCP卡/群画像/DSH模型清单/系统会话清理
-    ├── start-rana.cmd        一键启动（网关+看门狗+vite+浏览器）
-    ├── start-gateway.cmd     网关启动器（状态目录 + TLS 兼容参数 + 顺带拉起 embedding 看门狗）
+    ├── vite.config.ts        ★ 十八组中间件：token/agents清单/云端provider配置/电脑状态(含虚拟化切换)/头像/早报/
+    │                           学习计划(含待办)/全局日历/追番/人生规划与内容库/问卜/模型超参/模型连通测试/技能与MCP卡/群画像/DSH模型清单/系统会话清理
+    ├── start-rana.cmd        一键启动（网关+vite+浏览器；路径全相对解析，换机器不用改）
+    ├── start-gateway.cmd     网关启动器（状态目录相对推导 + node/openclaw.mjs 自动探测 + 配置含 LM Studio 时拉起 embedding 看门狗）
+    ├── local-overrides.example.cmd ← 本机个性化覆盖模板（node 路径/状态目录；真实文件 gitignore）
     ├── memory-bridge.mjs     三腿共享记忆桥（cron 每 30 分钟；真名/化名映射在 gitignore 的 identity 文件里）
     ├── news-report.mjs       早报生成器（联播抓取 + 博查搜索 + flash 总结；key 兼容密钥库 SecretRef）
     ├── study-agent.mjs       学习专用会话桥（排课/出题/判分/开课 → agent:main:study-planner）
@@ -206,7 +221,6 @@ K:\OpenClaw
     ├── cron-session-cleanup.mjs 系统会话清理手术（停网关→备份→清 placement 残留→重启→删 cron 父会话；会话页左下角入口，--dry-run 只盘点）
     ├── lib/rana-config.mjs   边车共享小工具：状态目录定位 + SecretRef apiKey 解析
     ├── git-activity.mjs      Git 活动统计（日报/周报/月报口径）
-    ├── e2e-chat.mjs          无头端到端验证（配合 window.gw 调试钩子）
     └── design-mockups/       v2 界面的五版设计稿（纯 HTML 静态原型，从 a 到 e 迭代到「她的房间」）
 ```
 
@@ -312,13 +326,14 @@ QQ 公共号**自己养出来的**群画像：群档案、群友档案、每周�
 
 ## 🧩 深入：没有后端的全栈——Vite 中间件当后端
 
-「网页要读电脑状态、要改配置文件，后端呢？」——**没有独立后端进程**。`vite.config.ts`（约 2,700 行）里写了十四组 Vite 插件，直接把接口挂到开发服务器上；`configurePreviewServer` 把同样的中间件挂到生产预览服务上，所以 `npm run dev` 和 `npm run preview` 行为一致，始终是单进程。
+「网页要读电脑状态、要改配置文件，后端呢？」——**没有独立后端进程**。`vite.config.ts`（约 4,600 行）里写了十八组 Vite 插件，直接把接口挂到开发服务器上；`configurePreviewServer` 把同样的中间件挂到生产预览服务上，所以 `npm run dev` 和 `npm run preview` 行为一致，始终是单进程。
 
 > 给新手的一句话：Vite 的开发服务器本质是个 Node 程序，允许你往它身上挂自己的接口。请求不进打包产物，只在本地服务器这一层就被拦下处理了。这对「纯本地自用」的工具来说是零成本的架构简化。
 
 | 端点 | 干什么 | 关键设计 |
 | --- | --- | --- |
 | `GET /__rana/config` | 给前端发网关 token | **只挂 dev 模式**；生产构建必须手动填 token，防止静态部署时泄露 |
+| `GET /__rana/agents` | 智能体清单（id/name） | 前端按「配置里实际存在的 agent」决定多智能体入口的显隐（发行版单 Rana 时侧栏无 RP 按钮）；其余字段不外传 |
 | `/__rana/provider-config` | 云端 provider 增改删（直接写 `openclaw.json`，网关文件监听自动热重载） | API key 列表里**打码**显示；删除前做**引用检查**（还有 agent 在用就拒删）；每次写前自动备份 `.bak-cloud`；保留既有模型条目的扩展字段不被 UI 覆盖 |
 | `POST /__rana/provider-models` | 服务端代理拉取供应商的 `/models` 列表 | 规避浏览器 CORS，key 不经过前端明文流转 |
 | `POST /__rana/model-test` | 测某个模型能不能连通（顶栏模型菜单每行一个 ⚡ 按钮） | 一条最小消息（max_tokens 16）实测；apiKey 只在服务端运行时从配置读，不进日志不进前端；45 秒超时照顾本地模型冷加载 |
@@ -334,6 +349,8 @@ QQ 公共号**自己养出来的**群画像：群档案、群友档案、每周�
 | `GET /__rana/agent-info` | 智能体装备：技能清单 + MCP 服务器名（右侧面板「🛠 技能 / 🔌 MCP」卡） | 子进程跑 openclaw CLI `skills list --json --agent <id>`（node 直跑 openclaw.mjs 不走 .cmd shim，env 带 OPENCLAW_STATE_DIR）；只留 modelVisible 且未停用的，自装（workspace 来源）排前；按 agent 缓存 120s（?refresh=1 强制）；MCP 只回 server id，command/args/env 不外传 |
 | `GET /__rana/qq-profile` | 群画像页数据（群档案/群友档案/周报，**纯只读**） | 只读映射本地画像目录，页面没有任何写入入口；画像由公共号她自己每晚更新 |
 | `GET /__rana/dsh-models` | DSH 可用模型清单（派活页下拉） | 读 WSL 里 DSH 的 settings.yaml；WSL 没开/读不到时返回空，前端退回自由填写 |
+| `/__rana/events` | 全局日历事件读写（增删、完成切换） | 数据在本地 `.life/`（gitignore，写前 .bak）；提醒走前端浏览器通知 |
+| `/__rana/bangumi/*` | 追番：今日放送 / 条目搜索 / 封面转发 / 追番清单 | bgm.tv 直连不通，服务端经代理抓取（60 分钟缓存）；封面仅白名单 CDN 域；清单存本地 `.bangumi/` |
 
 所有**写操作**端点都做双重来源校验：socket 必须是本机回环地址 + Origin 头必须匹配 localhost。这套东西不面向公网，但也没有裸奔。
 
@@ -505,6 +522,12 @@ GBK 输出解码、PowerShell 显式 UTF8、Node `--tls-max-v1.2` 绕 TLS 1.3 �
 **Q：打开页面一直「未连接」？**
 网关没起来。跑一遍 `start-rana.cmd`；还不行就看设置里 token 填了没（连接层报「缺少 gateway token」时会在横幅里明说）。
 
+**Q：开箱版和作者的三智能体形态差在哪？**
+功能同一个前端、同一套网关。差别只在 `openclaw.json`：开箱模板只有 `main` 一个 agent + 云端模型；作者配置多了本地 RP agent（微信）、QQ 群公共号、记忆桥等边车。多智能体入口（如侧栏 RP 按钮）按配置自动显隐，加 agent 不用改前端代码。
+
+**Q：怎么改她的性格 / 让她认识我？**
+编辑状态目录 `workspace-main\SOUL.md`（人格）和 `USER.md`（你的介绍），模板见仓库 `setup-templates/`。改完开新会话生效。
+
 **Q：她在微信/QQ 里和网页上是同一个她吗？**
 同一个网关、同一份会话存储，但**不同渠道由不同人格值守**：微信是本地陪聊的 RP，QQ 私聊是云端干活的 main，QQ 群是物理隔离的公共号。网页控制台是总览——三个她的会话都看得到、都能聊。
 
@@ -531,7 +554,9 @@ GBK 输出解码、PowerShell 显式 UTF8、Node `--tls-max-v1.2` 绕 TLS 1.3 �
 | --- | --- |
 | [KNOWN-ISSUES.md](KNOWN-ISSUES.md) | 排障先查这里；新坑解决后回写 |
 | [OPTIMIZATION-ROADMAP.md](OPTIMIZATION-ROADMAP.md) | 演进路线：减重/增强分期计划 |
+| [OPEN-SOURCE-ROADMAP.md](OPEN-SOURCE-ROADMAP.md) | 开源任务书：五阶段路线（可移植/英文门面/框架化） |
 | [AGENTS.md](AGENTS.md) | code agent 行为规范（公开版） |
+| `setup.cmd` / `setup-templates/` | 开箱初始化与发行模板 |
 | `rana-web/vite.config.ts` | 「后端」全部代码，注释齐全 |
 | `rana-web/src/lib/gateway.ts` | 连接层，读懂它就读懂了半套前端 |
 | `.gitignore`（根 + rana-web） | 隐私红线的落地清单，动新增文件前先看 |

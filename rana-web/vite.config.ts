@@ -3,7 +3,7 @@ import path from "node:path";
 import net from "node:net";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { execFile, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { generateKeyPairSync, sign as cryptoSign, createHash, randomUUID } from "node:crypto";
 import { defineConfig, type Plugin } from "vite";
@@ -18,13 +18,48 @@ const execFileP = promisify(execFile);
 // 前端直连该地址；若浏览器 Origin 被网关拒绝，可改用 /gateway 代理路径
 // （见 src/lib/gateway.ts 的回退逻辑与下方 server.proxy 配置）。
 
+// ===== 路径可移植化：环境变量优先，缺省相对仓库根推导（换机器/换目录不用改代码） =====
+// 状态目录：OPENCLAW_STATE_DIR 环境变量优先（与启动脚本/边车同一约定），
+// 缺省 = 仓库内 .openclaw/.openclaw（已 gitignore，setup.cmd 初始化的就是这里）。
+const STATE_HOME = process.env.OPENCLAW_STATE_DIR
+  ? path.resolve(process.env.OPENCLAW_STATE_DIR)
+  : path.resolve(fileURLToPath(new URL("../.openclaw/.openclaw", import.meta.url)));
+
+const OPENCLAW_CONFIG = path.join(STATE_HOME, "openclaw.json");
+
+/** openclaw CLI 入口（拉运行时模型目录用；与 start-gateway.cmd 同源）：
+ *  OPENCLAW_MJS 环境变量 > 常见 npm 全局位置探测 > npm root -g 兜底。 */
+function resolveOpenclawMjs(): string {
+  if (process.env.OPENCLAW_MJS) return process.env.OPENCLAW_MJS;
+  const candidates = [
+    path.join(process.env.APPDATA ?? "", "npm", "node_modules", "openclaw", "openclaw.mjs"),
+    path.join(process.env.USERPROFILE ?? "", ".npm-global", "lib", "node_modules", "openclaw", "openclaw.mjs"),
+  ];
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c)) return c;
+    } catch {
+      // 尝试下一个候选
+    }
+  }
+  try {
+    const root = execFileSync("npm", ["root", "-g"], { encoding: "utf8", timeout: 15000, windowsHide: true, shell: true }).trim();
+    const guess = path.join(root, "openclaw", "openclaw.mjs");
+    if (fs.existsSync(guess)) return guess;
+  } catch {
+    // 探测失败：返回首选候选，调用时会给出明确报错
+  }
+  return candidates[0];
+}
+const OPENCLAW_MJS = resolveOpenclawMjs();
+
 // 仅开发服务器：为本机前端提供 gateway token。
-// 优先读本项目的 gateway 状态目录（K:\openclaw\.openclaw\.openclaw\openclaw.json），
+// 优先读本项目的 gateway 状态目录（STATE_HOME/openclaw.json），
 // 再回退到 %USERPROFILE%\.openclaw\openclaw.json。
 // 只在 loopback dev server 暴露；生产部署请通过设置面板手动填 token。
 function readGatewayToken(): string {
   const candidates = [
-    "K:\\openclaw\\.openclaw\\.openclaw\\openclaw.json",
+    OPENCLAW_CONFIG,
     path.join(process.env.USERPROFILE ?? "", ".openclaw", "openclaw.json"),
   ];
   for (const file of candidates) {
@@ -38,10 +73,6 @@ function readGatewayToken(): string {
   }
   return "";
 }
-
-const OPENCLAW_CONFIG = "K:\\openclaw\\.openclaw\\.openclaw\\openclaw.json";
-/** openclaw CLI 入口（拉运行时模型目录用；与 start-gateway.cmd 同源） */
-const OPENCLAW_MJS = "C:\\Users\\Administrator\\AppData\\Roaming\\npm\\node_modules\\openclaw\\openclaw.mjs";
 
 interface ModelEntry {
   id: string;
@@ -169,6 +200,13 @@ function ranaProviderConfigMiddleware(): Plugin {
         }));
     }
     providers[id] = next;
+    // 首配云端 provider 时把默认模型指过去——开箱用户「填完 key 就能聊」；已有默认模型则不动
+    const firstModel = Array.isArray(next.models) && next.models[0]?.id ? `${id}/${next.models[0].id}` : "";
+    if (firstModel && !cfg.agents?.defaults?.model?.primary) {
+      cfg.agents = cfg.agents ?? {};
+      cfg.agents.defaults = cfg.agents.defaults ?? {};
+      cfg.agents.defaults.model = { ...cfg.agents.defaults.model, primary: firstModel };
+    }
     cfg.models = { ...(cfg.models ?? {}), providers };
     fs.writeFileSync(OPENCLAW_CONFIG, JSON.stringify(cfg, null, 2), "utf8");
     return { ok: true as const, saved: id };
@@ -196,7 +234,7 @@ function ranaProviderConfigMiddleware(): Plugin {
         encoding: "utf8",
         timeout: 120000,
         windowsHide: true,
-        env: { ...process.env, OPENCLAW_STATE_DIR: "K:\\openclaw\\.openclaw\\.openclaw" },
+        env: { ...process.env, OPENCLAW_STATE_DIR: STATE_HOME },
       });
     const listIds = async () => {
       const { stdout } = await runCli(["models", "list", "--all", "--provider", providerId, "--json"]);
@@ -2429,7 +2467,7 @@ function ranaBangumiMiddleware(): Plugin {
     }
 
     if (req.method === "POST" && route === "/collection") {
-      readBody(req).then((body) => {
+      readBody(req).then(async (body) => {
         try {
           const p = JSON.parse(body || "{}") as Record<string, unknown>;
           const subjectId = Number(p.subjectId);
@@ -2441,12 +2479,23 @@ function ranaBangumiMiddleware(): Plugin {
           const status = p.status === "done" ? "done" : "watching";
           const f = readCollection();
           const exists = f.items.find((x) => x.subjectId === subjectId);
+          // 旧搜索接口不给 air_date（展馆按年份分组要它）——缺了就查一次条目详情补上，查不到归「其他」
+          let airDate = p.airDate !== undefined ? String(p.airDate).slice(0, 10) : undefined;
+          const needAirDate = (exists && !exists.airDate) || (!exists && !airDate);
+          if (needAirDate) {
+            try {
+              const det = (await bgmCurlJson(`/v0/subjects/${subjectId}`)) as { date?: string };
+              if (det?.date) airDate = det.date;
+            } catch {
+              // 详情接口抖动就算了，展示归「其他」
+            }
+          }
           if (exists) {
             exists.name = name;
             if (p.nameCn !== undefined) exists.nameCn = String(p.nameCn).slice(0, 120);
             if (p.cover !== undefined) exists.cover = String(p.cover).slice(0, 300);
             if (p.eps !== undefined) exists.eps = Math.max(0, Number(p.eps) || 0);
-            if (p.airDate !== undefined) exists.airDate = String(p.airDate).slice(0, 10);
+            if (airDate !== undefined) exists.airDate = airDate;
             if (p.status !== undefined) exists.status = status;
           } else {
             f.items.push({
@@ -2455,7 +2504,7 @@ function ranaBangumiMiddleware(): Plugin {
               nameCn: p.nameCn !== undefined ? String(p.nameCn).slice(0, 120) : undefined,
               cover: p.cover !== undefined ? String(p.cover).slice(0, 300) : undefined,
               eps: p.eps !== undefined ? Math.max(0, Number(p.eps) || 0) : undefined,
-              airDate: p.airDate !== undefined ? String(p.airDate).slice(0, 10) : undefined,
+              airDate,
               status,
               progress: 0,
               addedAt: Date.now(),
@@ -3898,7 +3947,6 @@ function ranaModelTestMiddleware(): Plugin {
  * - MCP：读 openclaw.json 的 mcp.servers，只回 server id，command/args/env 一律不外传。
  */
 function ranaAgentInfoMiddleware(): Plugin {
-  const OPENCLAW_MJS = "C:\\Users\\Administrator\\AppData\\Roaming\\npm\\node_modules\\openclaw\\openclaw.mjs";
   const CACHE_MS = 120000;
   const AGENT_RE = /^[a-z0-9][a-z0-9-]{0,40}$/;
   const cache = new Map<string, { at: number; data: unknown }>();
@@ -3912,7 +3960,7 @@ function ranaAgentInfoMiddleware(): Plugin {
         timeout: 20000,
         windowsHide: true,
         maxBuffer: 8 * 1024 * 1024,
-        env: { ...process.env, OPENCLAW_STATE_DIR: "K:\\openclaw\\.openclaw\\.openclaw" },
+        env: { ...process.env, OPENCLAW_STATE_DIR: STATE_HOME },
       },
     );
     const j = JSON.parse(stdout) as {
@@ -4177,6 +4225,38 @@ function ranaDevConfig(): Plugin {
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({ gatewayUrl: "ws://127.0.0.1:18789", token: readGatewayToken() }));
       }) as Parameters<typeof server.middlewares.use>[1]);
+    },
+  };
+}
+
+/**
+ * agents 清单端点：GET /__rana/agents → { agents: [{id, name}] }
+ * 读 openclaw.json 的 agents.entries——前端按「配置里实际存在的智能体」决定显隐
+ * （例：发行版单 Rana 时侧栏不出现 RP 入口；本机多智能体时照常显示）。
+ * 只回 id/name，其余字段（模型、workspace 路径等）不外传。
+ */
+function ranaAgentsMiddleware(): Plugin {
+  const handler = (
+    _req: unknown,
+    res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void },
+  ) => {
+    res.setHeader("content-type", "application/json");
+    try {
+      const cfg = readFullConfig() as { agents?: { entries?: Record<string, { name?: string }> } };
+      const agents = Object.entries(cfg.agents?.entries ?? {}).map(([id, e]) => ({ id, name: String(e.name ?? id) }));
+      res.end(JSON.stringify({ agents }));
+    } catch (e) {
+      res.statusCode = 500;
+      res.end(JSON.stringify({ error: (e as Error).message }));
+    }
+  };
+  return {
+    name: "rana-agents",
+    configureServer(server) {
+      server.middlewares.use("/__rana/agents", handler as Parameters<typeof server.middlewares.use>[1]);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use("/__rana/agents", handler as Parameters<typeof server.middlewares.use>[1]);
     },
   };
 }
@@ -4506,7 +4586,7 @@ async function probeGatewayContext(token: string, sessionKey?: string): Promise<
 }
 
 export default defineConfig({
-  plugins: [react(), ranaDevConfig(), ranaProviderConfigMiddleware(), ranaSysStatusMiddleware(), ranaAvatarMiddleware(), ranaNewsMiddleware(), ranaStudyMiddleware(), ranaEventsMiddleware(), ranaBangumiMiddleware(), ranaLifeMiddleware(), ranaFateMiddleware(), ranaAgentInfoMiddleware(), ranaQqProfileMiddleware(), ranaDshModelsMiddleware(), ranaModelTestMiddleware(), ranaModelParamsMiddleware(), ranaSessionsCleanupMiddleware(), ranaContextMiddleware()],
+  plugins: [react(), ranaDevConfig(), ranaAgentsMiddleware(), ranaProviderConfigMiddleware(), ranaSysStatusMiddleware(), ranaAvatarMiddleware(), ranaNewsMiddleware(), ranaStudyMiddleware(), ranaEventsMiddleware(), ranaBangumiMiddleware(), ranaLifeMiddleware(), ranaFateMiddleware(), ranaAgentInfoMiddleware(), ranaQqProfileMiddleware(), ranaDshModelsMiddleware(), ranaModelTestMiddleware(), ranaModelParamsMiddleware(), ranaSessionsCleanupMiddleware(), ranaContextMiddleware()],
   server: {
     port: 5173,
     proxy: {

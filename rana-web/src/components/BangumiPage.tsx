@@ -291,7 +291,7 @@ export default function BangumiPage() {
                 <div className="bgm-year-label">{year}</div>
                 <div className="bgm-grid hall">
                   {items.map((it) => (
-                    <div key={it.subjectId} className={`bgm-card hall${it.status === "done" ? "" : ""}`} title={`${it.nameCn || it.name}${it.eps ? ` · 全${it.eps}话` : ""}`}>
+                    <div key={it.subjectId} className="bgm-card hall" title={`${it.nameCn || it.name}${it.eps ? ` · 全${it.eps}话` : ""}`}>
                       {it.cover ? (
                         <img src={coverUrl(it.cover)} alt="" loading="lazy" />
                       ) : (

@@ -12,6 +12,8 @@ tsconfig.tsbuildinfo
 .probe-identity.json
 # 旧 aliyun-maas provider 配置备份（含 API Key）
 aliyun-maas-backup.json
+# 本机个性化覆盖（node 路径/状态目录等，模板见 local-overrides.example.cmd）
+local-overrides.cmd
 
 # ===== 日志（可能含对话内容与令牌）=====
 *.log

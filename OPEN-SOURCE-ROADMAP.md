@@ -82,13 +82,15 @@
 
 **目标**：陌生人 clone 后按 README 能跑起来。工作量约 2 个晚上。
 
-- [ ] 路径全链路环境变量化：`OPENCLAW_STATE_DIR` 贯穿 vite.config / 边车脚本 / 启动脚本（`lib/rana-config.mjs` 已有 env 优先逻辑，把所有写死路径收敛过去 = OPTIMIZATION-ROADMAP 1.4）
-- [ ] 子进程统一 `process.execPath`，替换 `G:\node\node.exe` 等写死值
-- [ ] 启动脚本提供 `.example` 模板（start-gateway.example.cmd 等），真实脚本保持 gitignore
-- [ ] README 快速上手改写为可复现步骤：前置依赖（OpenClaw / LM Studio / Node 版本）→ 配置 → 启动 → 验证，每步可核对
-- [ ] package.json 元数据补全（name/description/keywords/repository）+ 打 tag `v0.1.0` + GitHub Release（简版 CHANGELOG）
+> 2026-09-19 施工注记：本阶段随「开箱即用发行版」落地——新增 `setup.cmd`/`setup.mjs`/`setup-templates/`（发行模板 + 一键初始化，默认**单 agent 单人格**形态，多智能体入口按配置自动显隐）。原计划的「.example 启动脚本模板」被更好的方案取代：启动脚本直接可移植（相对路径 + 自动探测），配 `local-overrides.cmd`（gitignore）做本机差异兜底。
 
-**验收**：在非 `K:\OpenClaw` 的目录 clone，按 README 走完全部步骤能启动（本机实测留档截图/日志）。
+- [x] 路径全链路环境变量化：`OPENCLAW_STATE_DIR` 贯穿 vite.config / 边车脚本 / 启动脚本（`lib/rana-config.mjs` 已有 env 优先逻辑，把所有写死路径收敛过去 = OPTIMIZATION-ROADMAP 1.4）
+- [x] 子进程统一 `process.execPath`，替换 `G:\node\node.exe` 等写死值（启动脚本走 PATH + `local-overrides.cmd` 兜底；openclaw.mjs 自动探测）
+- [x] 启动脚本提供 `.example` 模板（start-gateway.example.cmd 等），真实脚本保持 gitignore —— **方案升级**：脚本直接可移植入库，`local-overrides.example.cmd` 提供本机差异模板
+- [x] README 快速上手改写为可复现步骤：前置依赖（OpenClaw / LM Studio / Node 版本）→ 配置 → 启动 → 验证，每步可核对
+- [ ] package.json 元数据补全（name/description/keywords/repository）+ 打 tag `v0.1.0` + GitHub Release（简版 CHANGELOG）——元数据已补，tag/Release 待发布时执行
+
+**验收**：在非 `K:\OpenClaw` 的目录 clone，按 README 走完全部步骤能启动（本机实测留档截图/日志）——已排期执行（异地模拟：剔除 gitignored 内容复制到全新目录跑 setup→启动→填 key→聊天）。
 
 ## 6. 阶段三：英文门面 + 传播
 

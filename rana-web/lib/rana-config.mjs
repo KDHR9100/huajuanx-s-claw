@@ -5,12 +5,13 @@
  * 变成 {source:"store",id} 对象——直读当 Bearer 用会发出 "[object Object]"。
  */
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 
-/** 状态目录：环境变量优先（网关启动脚本同款），缺省回退本机默认布局 */
+/** 状态目录：环境变量优先（网关启动脚本同款），缺省回退仓库内布局（本文件在 rana-web/lib/ 下，上两级即仓库根） */
 export const STATE_HOME = process.env.OPENCLAW_STATE_DIR
   ? path.resolve(process.env.OPENCLAW_STATE_DIR)
-  : 'K:/OpenClaw/.openclaw/.openclaw';
+  : path.resolve(fileURLToPath(new URL('../../.openclaw/.openclaw', import.meta.url)));
 
 /** apiKey 可能是明文串，也可能是 SecretRef 对象（{source:"store",id}）——后者去 state SQLite 解析 */
 export function resolveApiKey(raw) {

@@ -1,0 +1,54 @@
+{
+  "gateway": {
+    "mode": "local",
+    "auth": {
+      "mode": "token",
+      "token": "__SETUP_GENERATE_TOKEN__"
+    },
+    "controlUi": {
+      "allowedOrigins": [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+      ]
+    }
+  },
+  "agents": {
+    "defaults": {
+      "systemAgent": {
+        "agentId": "main"
+      }
+    },
+    "ownership": "explicit",
+    "entries": {
+      "main": {
+        "name": "Rana",
+        "workspace": "__SETUP_WORKSPACE_MAIN__",
+        "tools": {
+          "deny": [
+            "ask_user",
+            "browser",
+            "canvas",
+            "image_generate",
+            "music_generate",
+            "video_generate",
+            "acp_sessions"
+          ]
+        }
+      }
+    }
+  },
+  "models": {
+    "providers": {}
+  },
+  "session": {
+    "reset": {
+      "mode": "daily",
+      "atHour": 6
+    }
+  },
+  "tools": {
+    "exec": {
+      "mode": "auto"
+    }
+  }
+}

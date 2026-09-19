@@ -44,6 +44,14 @@ export default function Sidebar() {
   const setCloudOpen = useAppStore((s) => s.setCloudOpen);
   const setCleanupOpen = useAppStore((s) => s.setCleanupOpen);
   const [creating, setCreating] = useState(false);
+  // 配置里实际存在 rana-rp 智能体时才显示 RP 入口（发行版单 Rana 时自然隐藏；端点读 openclaw.json 的 agents.entries）
+  const [hasRp, setHasRp] = useState(false);
+  useEffect(() => {
+    fetch("/__rana/agents")
+      .then((r) => (r.ok ? r.json() : { agents: [] }))
+      .then((j: { agents?: Array<{ id: string }> }) => setHasRp((j.agents ?? []).some((a) => a.id === "rana-rp")))
+      .catch(() => setHasRp(false));
+  }, []);
   const [menu, setMenu] = useState<CtxMenuState | null>(null);
   const [renamingKey, setRenamingKey] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -151,14 +159,16 @@ export default function Sidebar() {
         <button className="btn" onClick={() => newSession()} disabled={creating || sessions.some((s) => s.key === currentKey && s.hasActiveRun)}>
           {creating ? "创建中…" : "＋ 新会话"}
         </button>
-        <button
-          className="btn tifa"
-          onClick={() => newSession("rana-rp")}
-          disabled={creating || sessions.some((s) => s.key === currentKey && s.hasActiveRun)}
-          title="和 Rana（本地 RP 模型）开始私下聊天"
-        >
-          🌸 Rana·RP
-        </button>
+        {hasRp && (
+          <button
+            className="btn tifa"
+            onClick={() => newSession("rana-rp")}
+            disabled={creating || sessions.some((s) => s.key === currentKey && s.hasActiveRun)}
+            title="和 Rana（本地 RP 模型）开始私下聊天"
+          >
+            🌸 Rana·RP
+          </button>
+        )}
       </div>
       <div className="sys-toggle-row">
         <button

@@ -2,6 +2,22 @@
   "name": "rana-web",
   "private": true,
   "version": "0.1.0",
+  "description": "Rana · OpenClaw —— 跑在自己电脑上的 AI 伙伴自建前端：会话/状态/规划/玄学/追番多页签，Vite 中间件充当零部署本地后端",
+  "keywords": [
+    "openclaw",
+    "ai-companion",
+    "local-first",
+    "vite",
+    "react",
+    "self-hosted"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/KDHR9100/huajuanx-s-claw"
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

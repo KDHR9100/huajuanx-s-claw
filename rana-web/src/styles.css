@@ -2323,3 +2323,24 @@ label.lib-cand { cursor: pointer; }
 .bgm-name { font-size: 11.5px; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .bgm-sub { font-size: 10.5px; color: var(--text-dim); }
 .sec-sub { font-size: 13.5px; margin: 0 0 10px; }
+
+/* 看过的番 · 展馆：年份大字标签 + 海报墙 */
+.bgm-hall-year { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+.bgm-hall-year:last-child { margin-bottom: 0; }
+.bgm-year-label {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+  letter-spacing: 1px;
+  border-left: 4px solid var(--accent);
+  padding-left: 10px;
+  opacity: 0.92;
+}
+.bgm-grid.hall { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+.bgm-card.hall { padding: 6px; }
+.bgm-hall-del {
+  border: none; background: none; color: var(--text-dim); cursor: pointer;
+  font-size: 10px; padding: 0 2px; border-radius: 4px;
+}
+.bgm-hall-del:hover { color: var(--danger); }
