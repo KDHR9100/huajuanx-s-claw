@@ -45,6 +45,8 @@ export default function BangumiPage() {
   const [col, setCol] = useState<CollectionEntry[]>([]);
   const [q, setQ] = useState("");
   const [results, setResults] = useState<SearchItem[] | null>(null);
+  /** 命中总数（接口单页最多给 25 条，超出时提示换更具体的词） */
+  const [totalHits, setTotalHits] = useState(0);
   const [searching, setSearching] = useState(false);
   const [busyId, setBusyId] = useState(0);
 
@@ -76,11 +78,15 @@ export default function BangumiPage() {
     if (searching || !q.trim()) return;
     setSearching(true);
     setResults(null);
+    setTotalHits(0);
     try {
       const r = await fetch(`/__rana/bangumi/search?q=${encodeURIComponent(q.trim())}`);
-      const j = (await r.json()) as SearchItem[] | { error?: string };
-      if (!Array.isArray(j)) throw new Error((j as { error?: string }).error ?? `HTTP ${r.status}`);
-      setResults(j);
+      const j = (await r.json()) as { total?: number; items?: SearchItem[] } | { error?: string };
+      if (!("items" in j) || !Array.isArray(j.items)) {
+        throw new Error((j as { error?: string }).error ?? `HTTP ${r.status}`);
+      }
+      setResults(j.items);
+      setTotalHits(Number(j.total ?? j.items.length));
     } catch (e) {
       setResults([]);
       setCalError((e as Error).message);
@@ -108,9 +114,9 @@ export default function BangumiPage() {
       });
       const j = (await r.json()) as { ok?: boolean; items?: CollectionEntry[]; error?: string };
       if (!r.ok || !j.ok || !j.items) throw new Error(j.error ?? `HTTP ${r.status}`);
+      // 只刷新清单（结果面板里这条的按钮会自动变「已在追/已在展馆」）——
+      // 搜索词和结果保留：同系列的番（第2期/剧场版）可以接着连加，不用重搜
       setCol(j.items);
-      setResults(null);
-      setQ("");
     } catch (e) {
       setCalError(`没加进清单：${(e as Error).message}`);
     } finally {
@@ -230,6 +236,11 @@ export default function BangumiPage() {
               ) : (
                 <p className="pending-text" style={{ margin: 0 }}>
                   没搜到。换个名字试试（日文原名也行）。
+                </p>
+              )}
+              {results.length > 0 && totalHits > results.length && (
+                <p className="tune-hint" style={{ margin: "4px 0 0" }}>
+                  共命中 {totalHits} 条，只列了最相关的 {results.length} 条——要找的不在里面就换个更具体的词。
                 </p>
               )}
             </div>
