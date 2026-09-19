@@ -5,7 +5,7 @@
 import { buildDeviceAuthPayloadV3 } from "@openclaw/gateway-client/browser";
 import { loadBrowserIdentity } from "./identity";
 import { useAppStore } from "../store/useAppStore";
-import type { ChatMessage, ModelInfo, SessionRow } from "./types";
+import type { ChatAttachment, ChatMessage, ModelInfo, OutgoingAttachment, SessionRow } from "./types";
 
 const TOKEN_KEY = "rana-web.gateway-token";
 const HELLO_TIMEOUT_MS = 15_000;
@@ -67,6 +67,21 @@ function extractText(m: unknown): string {
       .join("");
   }
   return "";
+}
+
+/** 服务端消息行里的附件 → 展示用（名字/类型能拿到就展示；预览只存在于本地发送的那条） */
+function mapServerAttachments(m: Record<string, unknown>): ChatAttachment[] | undefined {
+  const raw = m.attachments ?? m.media;
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const out: ChatAttachment[] = [];
+  for (const a of raw as Array<Record<string, unknown>>) {
+    const name = String(a.fileName ?? a.name ?? "附件");
+    const mimeType =
+      typeof a.mimeType === "string" ? a.mimeType : typeof a.contentType === "string" ? a.contentType : undefined;
+    const kind = (typeof a.type === "string" && a.type === "image") || mimeType?.startsWith("image/") ? "image" : "file";
+    out.push({ name, ...(mimeType ? { mimeType } : {}), kind });
+  }
+  return out.length ? out : undefined;
 }
 
 class GatewayConnection {
@@ -464,17 +479,19 @@ class GatewayConnection {
     // 该回复已由 chat 流式事件渲染（run 进行中，或 final 已落）→ 跳过
     if (role === "assistant" && (s.runs[key] || (p.runId !== undefined && this.finalRunIds.has(p.runId)))) return;
     const text = extractText(msg);
-    if (!text) return;
+    const atts = mapServerAttachments(msg);
+    if (!text && !atts) return;
     const list = s.messages[key] ?? [];
     // 本地乐观追加/流式渲染过的消息会再收到一份落库事件，按内容去重。
     // compaction 会让 user 落库事件晚于 assistant 回复到达，只比对最后一条会漏 → 扫最近几条
-    if (list.slice(-8).some((m) => m.role === role && m.text === text)) return;
+    if (list.slice(-8).some((m) => m.role === role && m.text === text && (m.attachments?.length ?? 0) === (atts?.length ?? 0))) return;
     s.appendMessage(key, {
       id: String(p.messageId ?? `sm-${p.messageSeq ?? Date.now()}`),
       role: role as "user" | "assistant",
       text,
       ts: (msg.timestamp as number) ?? (msg.ts as number) ?? Date.now(),
       model: msg.model ? String(msg.model) : undefined,
+      ...(atts ? { attachments: atts } : {}),
     });
   }
 
@@ -589,13 +606,15 @@ class GatewayConnection {
         const role = String(m.role ?? "");
         if (role !== "user" && role !== "assistant") continue;
         const text = extractText(m);
-        if (!text) continue;
+        const atts = mapServerAttachments(m);
+        if (!text && !atts) continue;
         mapped.push({
           id: String(m.id ?? m.messageId ?? `h-${mapped.length}`),
           role: role as "user" | "assistant",
           text,
           ts: (m.timestamp as number) ?? (m.ts as number) ?? 0,
           model: m.model ? String(m.model) : undefined,
+          ...(atts ? { attachments: atts } : {}),
         });
       }
       store().setMessages(sessionKey, mapped);
@@ -605,9 +624,9 @@ class GatewayConnection {
     }
   }
 
-  async sendChat(sessionKey: string, text: string) {
+  async sendChat(sessionKey: string, text: string, attachments?: OutgoingAttachment[]) {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed && !attachments?.length) return;
     // 会话处于乐观创建期：先等后台创建拿到真实 key 再发送
     let key = sessionKey;
     if (key.startsWith("pending-create:")) {
@@ -621,12 +640,31 @@ class GatewayConnection {
     }
     const idempotencyKey = crypto.randomUUID();
     const msgId = `local-${idempotencyKey}`;
-    store().appendMessage(key, { id: msgId, role: "user", text: trimmed, ts: Date.now() });
+    store().appendMessage(key, {
+      id: msgId,
+      role: "user",
+      text: trimmed,
+      ts: Date.now(),
+      ...(attachments?.length
+        ? {
+            attachments: attachments.map((a) => ({
+              name: a.fileName,
+              mimeType: a.mimeType,
+              kind: a.type,
+              ...(a.type === "image" ? { dataUrl: `data:${a.mimeType};base64,${a.content}` } : {}),
+            })),
+          }
+        : {}),
+    });
     const liveId = `pending-${idempotencyKey}`;
     store().appendMessage(key, { id: liveId, role: "assistant", text: "", ts: Date.now(), streaming: true });
     store().setRun(key, { runId: idempotencyKey, msgId: liveId, text: "", lastSeq: 0 });
     try {
-      const res = (await this.request("chat.send", { sessionKey: key, message: trimmed, idempotencyKey })) as Record<string, unknown>;
+      const res = (await this.request(
+        "chat.send",
+        { sessionKey: key, message: trimmed, idempotencyKey, ...(attachments?.length ? { attachments } : {}) },
+        60_000, // 附件走 base64 进帧，大文件序列化比纯文本慢，放宽一档
+      )) as Record<string, unknown>;
       const runId = String(res.runId ?? idempotencyKey);
       const r = store().runs[key];
       if (r && r.runId === idempotencyKey) store().setRun(key, { ...r, runId });

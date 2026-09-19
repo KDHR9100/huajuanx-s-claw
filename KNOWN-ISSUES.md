@@ -21,6 +21,14 @@
 
 ## 登记区
 
+## [行为变更·须知] exec 审批闸门开启（auto 档）——她的命令执行从全放行改为白名单+自动审查（2026-09-19）
+
+- 做了什么：`tools.exec.mode: "auto"`（备份 openclaw.json.bak-execgate）+ 白名单放行 `**/git.exe`。生效策略 `security=allowlist, ask=on-miss, askFallback=deny`（`openclaw exec-policy show` 可查）。目的：Rana 觅食装新工具（plugins install / mcp add / npm install）必须过人工批准，防诱导乱装。
+- 行为变化：白名单命中的命令直接跑；没见过的命令先过网关内置自动审查器，可疑的弹审批（QQ 渠道已注册审批界面；CLI 用 `openclaw approvals pending` / `resolve <id> allow-once|allow-always|deny`）。**allow-always 的许可绑定"精确参数+当时工作目录"**，换个目录跑同一命令要重新批。
+- 设计要点：**python.exe / node.exe / powershell.exe 这类解释器不能加路径级白名单**——放行整个程序等于连 `pip install`/`npm install`/任意脚本一起放行，闸门失效。它们靠自动审查器判断；固定常跑的（cron 里的 node 桥、备份）是 automation 载荷，走 standing grant（首次触发弹一次，allow-always 后对该任务长期有效）。
+- 预期摩擦：开启后头一两天，她的新命令/cron 任务首次运行可能弹审批，批 allow-always 即沉淀为长期许可；属一次性成本。
+- 配套：workspace-main/skills/skill-scout（觅食技能：搜索→评估→固定格式提案→明确批准才装；拒绝记录进 memory/ops-notes.md 台账）。原生自我学习（skills.workshop.autonomous.mode）维持默认 auto。
+
 ## \[已解决] cron 主动消息的三条投递弯路——isolated+announce/systemEvent 都送不到，正路是「自己发」（2026-09-17）
 
 - 症状：早晚问候任务三连败——①隔离会话+announce→last：`Channel is required when multiple channels are configured`（隔离会话无历史，"last"解析不出）；②显式 `--channel qqbot --account default`：`Delivering to QQ Bot requires target`（还缺 qqbot:c2c:openid 目标，cron CLI 无 target 参数）；③systemEvent 进主会话：模型轮成功、回复也生成了（会话 transcript 实证），但**回复并不自动出站**（receipt deliveryStatus=not-requested，全天 QQ 出站 API 零调用）——旧台账「main 会话回复按最近活跃频道投递」的说法在 2026.9.2 版不成立。

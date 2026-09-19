@@ -3,6 +3,25 @@ import { useAppStore } from "../store/useAppStore";
 import Markdown from "./Markdown";
 import { splitReasoning, stripOpenclawEnvelope } from "../lib/reasoning";
 import { Bell, Paw, RanaAvatar } from "./RanaArt";
+import type { ChatAttachment } from "../lib/types";
+
+/** 气泡里的附件：图片有预览显示预览，其余显示文件条 */
+function AttachmentList({ items }: { items: ChatAttachment[] }) {
+  return (
+    <div className="bubble-attachments">
+      {items.map((a, i) =>
+        a.kind === "image" && a.dataUrl ? (
+          <img key={i} className="bubble-img" src={a.dataUrl} alt={a.name} title={a.name} />
+        ) : (
+          <span key={i} className="bubble-file" title={a.name}>
+            <span className="attach-ic">{a.kind === "image" ? "🖼" : "📄"}</span>
+            {a.name}
+          </span>
+        ),
+      )}
+    </div>
+  );
+}
 
 function fmtTime(ts: number) {
   if (!ts) return "";
@@ -56,7 +75,7 @@ function PawDots() {
   );
 }
 
-function Bubble({ role, text, streaming, error, model, ts, status }: {
+function Bubble({ role, text, streaming, error, model, ts, status, attachments }: {
   role: "user" | "assistant";
   text: string;
   streaming?: boolean;
@@ -64,6 +83,7 @@ function Bubble({ role, text, streaming, error, model, ts, status }: {
   model?: string;
   ts: number;
   status?: string;
+  attachments?: ChatAttachment[];
 }) {
   // 先剥离 OpenClaw 运行时封套回显（压缩前冲刷回合模型偶尔把指令块吐进正文）
   const stripped = role === "assistant" ? stripOpenclawEnvelope(text) : null;
@@ -95,7 +115,8 @@ function Bubble({ role, text, streaming, error, model, ts, status }: {
           ) : (
             <>
               {(reasoning || thinking) && <ReasoningBlock reasoning={reasoning} thinking={thinking} />}
-              {body ? <Markdown text={body} /> : streaming && !thinking ? <PawDots /> : null}
+              {attachments && attachments.length > 0 && <AttachmentList items={attachments} />}
+              {body ? <Markdown text={body} /> : streaming && !thinking && !attachments?.length ? <PawDots /> : null}
               {streaming && body ? <PawDots /> : null}
             </>
           )}
@@ -157,7 +178,7 @@ export default function ChatStream() {
           </div>
         )}
         {messages.map((m) => (
-          <Bubble key={m.id} role={m.role} text={m.text} streaming={m.streaming} error={m.error} model={m.model} ts={m.ts} status={m.status} />
+          <Bubble key={m.id} role={m.role} text={m.text} streaming={m.streaming} error={m.error} model={m.model} ts={m.ts} status={m.status} attachments={m.attachments} />
         ))}
       </div>
     </div>

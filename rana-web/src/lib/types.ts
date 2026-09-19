@@ -6,6 +6,23 @@ export interface UsageInfo {
   estimatedCostUsd?: number;
 }
 
+/** 消息附件（展示用）：图片有本地预览时带 dataUrl，历史回放的附件可能只有名字 */
+export interface ChatAttachment {
+  name: string;
+  mimeType?: string;
+  kind: "image" | "file";
+  /** 图片预览（dataURL）；仅发送时的本地消息有，历史消息一般没有 */
+  dataUrl?: string;
+}
+
+/** 发往网关 chat.send 的附件（content 为 base64，不带 data: 前缀） */
+export interface OutgoingAttachment {
+  fileName: string;
+  mimeType: string;
+  content: string;
+  type: "image" | "file";
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -17,6 +34,7 @@ export interface ChatMessage {
   error?: string;
   /** 运行阶段（chat 事件 state=status 的 phase），仅流式期间有意义 */
   status?: string;
+  attachments?: ChatAttachment[];
 }
 
 export interface SessionRow {
