@@ -21,6 +21,13 @@
 
 ## 登记区
 
+## \[状态：待拍板] Mimosa L3 提交闸门时拦时放——完整扫描强拦 57 项（多为已设防代码的误报），扫描器缓冲溢出时静默放行（2026-09-19）
+
+- 症状：`git commit` 被「高危已强制拦截」拦截，指向 vite.config.ts study 中间件的 `materialAbs`/`writeSchedule`/`spawnAgent` 等 57 项 high（路径拼接/命令参数向量类）；同晚另三次 commit 因 `scanner_enobufs` 按兼容策略放行；`git push` 同样被扫。
+- 根因：静态污点分析不认正则守卫与 containment 校验——被 flag 的三个函数实际都已设防（`materialAbs` 有 fail-closed 文件名校验 + `path.relative` 二次防线；`spawnAgent` 对 model/sessionKey 有白名单字符集），属误报；扫描器自身缓冲溢出时闸门降级放行，行为不稳定。
+- 影响与候选方案（**待主人拍板**）：A 接受现状（enobufs 常态放行，闸门形同虚设）；B 针对性重构让扫描器认账（如 `path.basename` 先行、辅助函数收敛拼接点）；C 用 Mimosa 深度扫描工具出正式密封报告后按报告复议。注意 `push-public.cmd` 一键推送会撞同一闸门。
+- 状态：待拍板。
+
 ## \[已解决] 发行版打包三坑：cmd 中文注释炸解析 / OpenClaw 首启要两次 / workspace 必须显式（2026-09-19）
 
 开箱即用发行版（setup.cmd + 发行模板）异地模拟验收时踩的三个坑，全部已修：

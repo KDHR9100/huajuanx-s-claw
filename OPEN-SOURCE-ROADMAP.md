@@ -88,9 +88,9 @@
 - [x] 子进程统一 `process.execPath`，替换 `G:\node\node.exe` 等写死值（启动脚本走 PATH + `local-overrides.cmd` 兜底；openclaw.mjs 自动探测）
 - [x] 启动脚本提供 `.example` 模板（start-gateway.example.cmd 等），真实脚本保持 gitignore —— **方案升级**：脚本直接可移植入库，`local-overrides.example.cmd` 提供本机差异模板
 - [x] README 快速上手改写为可复现步骤：前置依赖（OpenClaw / LM Studio / Node 版本）→ 配置 → 启动 → 验证，每步可核对
-- [ ] package.json 元数据补全（name/description/keywords/repository）+ 打 tag `v0.1.0` + GitHub Release（简版 CHANGELOG）——元数据已补，tag/Release 待发布时执行
+- [x] package.json 元数据补全（name/description/keywords/repository）+ 打 tag `v0.1.0` + GitHub Release（简版 CHANGELOG）——2026-09-19 完成（元数据+tag+Release 同晚落地）
 
-**验收**：在非 `K:\OpenClaw` 的目录 clone，按 README 走完全部步骤能启动（本机实测留档截图/日志）——已排期执行（异地模拟：剔除 gitignored 内容复制到全新目录跑 setup→启动→填 key→聊天）。
+**验收**：在非 `K:\OpenClaw` 的目录 clone，按 README 走完全部步骤能启动（本机实测留档截图/日志）——✅ 2026-09-19 异地模拟通过：全新目录跑 setup → 网关/前端启动 → 网页填 key → 默认模型自动写入 → 真实聊天与人格注入全通；本机三她回归全绿。附带完成隐私历史重写（filter-repo 清除真名/appId，详见 KNOWN-ISSUES）。
 
 ## 6. 阶段三：英文门面 + 传播
 
@@ -119,7 +119,7 @@
 | --- | --- |
 | 〇 地基 | ✅ 2026-09-15 完成：有 LICENSE，已跟踪文件无个人信息，图样扫描零高危（历史遗留已拍板接受） |
 | 一 可信度 | CI 绿 + 四模块有测试 + vite.config 拆完 + 上游 issue 已报 |
-| 二 可移植 | 异地 clone 可跑，v0.1.0 已发 Release |
+| 二 可移植 | ✅ 2026-09-19 完成：异地模拟 clone 可跑全链验证（setup→填 key→聊天→人格注入），v0.1.0 已发 Release |
 | 三 传播 | 英文门面就绪，至少一个渠道已发布 |
 | 四 框架 | persona 可配置，核心成包，第二个用户走通 |
 
