@@ -28,12 +28,13 @@
 - 解决方案：filter-repo `--strip-blobs-bigger-than 100M` 剥离超限 blob；备份仓自有 `.gitignore`（robocopy `/XF .gitignore` 不会覆盖它）排除主库与手术备份目录，未来备份不再撞墙；分块推送全部落地。
 - 取舍与后效：主状态库不再经 git 远程备份（本地 robocopy 副本仍完整）；**改进方向（待做）**：备份链改为「sqlite 压缩转储后再入库」（压缩后通常只有原体积的 10-20%，可稳居限内）或改用 git-lfs。
 
-## \[状态：待拍板] Mimosa L3 提交闸门时拦时放——完整扫描强拦 57 项（多为已设防代码的误报），扫描器缓冲溢出时静默放行（2026-09-19）
+## \[状态：待拍板→已审计] Mimosa L3 提交闸门时拦时放——完整扫描强拦（多为已设防代码的误报），扫描器缓冲溢出时静默放行（2026-09-19；09-20 深度审计复核）
 
 - 症状：`git commit` 被「高危已强制拦截」拦截，指向 vite.config.ts study 中间件的 `materialAbs`/`writeSchedule`/`spawnAgent` 等 57 项 high（路径拼接/命令参数向量类）；同晚另三次 commit 因 `scanner_enobufs` 按兼容策略放行；`git push` 同样被扫。
-- 根因：静态污点分析不认正则守卫与 containment 校验——被 flag 的三个函数实际都已设防（`materialAbs` 有 fail-closed 文件名校验 + `path.relative` 二次防线；`spawnAgent` 对 model/sessionKey 有白名单字符集），属误报；扫描器自身缓冲溢出时闸门降级放行，行为不稳定。
-- 影响与候选方案（**待主人拍板**）：A 接受现状（enobufs 常态放行，闸门形同虚设）；B 针对性重构让扫描器认账（如 `path.basename` 先行、辅助函数收敛拼接点）；C 用 Mimosa 深度扫描工具出正式密封报告后按报告复议。注意 `push-public.cmd` 一键推送会撞同一闸门。
-- 状态：待拍板。
+- 根因：静态污点分析不认正则守卫与 containment 校验——被 flag 的函数实际都已设防（`materialAbs` 有 fail-closed 文件名校验 + `path.relative` 二次防线；`spawnAgent` 对 model/sessionKey 有白名单字符集），属误报；扫描器自身缓冲溢出时闸门降级放行，行为不稳定。
+- **2026-09-20 深度审计复核（正式密封扫描）**：scanId `scan-2026-09-20T03-42-29.888Z-87591dd8a791`，seal `sha256:edf5ccf1…`，826 依赖包零告警；全仓 263 项发现中约 201 项在 gitignored 的 dsh-reference 第三方参考代码（不发布），首方 62 项（57H+5M）全部为同一族 path-traversal 误报——抽查 writeEvents/writeCollection 写死常量路径、writeJsonBak 调用方全传常量，**未发现真实漏洞**（覆盖度 partial/inconclusive，不据此宣称项目安全）。
+- 候选方案：A 接受现状；B 在 Mimosa 侧做窄抑制（仅按本次密封扫描的 finding 标识收敛 vite.config.ts 该族误报，留档 scanId，防止过宽抑制掩蔽未来真问题）。注意 `push-public.cmd` 一键推送会撞同一闸门。
+- 状态：已审计，处置待主人拍板（A/B）。
 
 ## \[已解决] 发行版打包三坑：cmd 中文注释炸解析 / OpenClaw 首启要两次 / workspace 必须显式（2026-09-19）
 
