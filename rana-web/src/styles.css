@@ -1143,6 +1143,20 @@ body.dragging iframe, body.dragging .chat-scroll { pointer-events: none; }
 .tab:hover { color: var(--accent-strong); background: var(--accent-soft); }
 .tab.on { background: var(--accent-soft); color: var(--accent-strong); border-color: var(--accent); }
 .tab.plus { opacity: 0.55; border-style: dashed; cursor: default; }
+/* 审批页角标：有待批的卡时页签右上角红色数字 */
+.tab .tab-badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  margin-left: -2px;
+  border-radius: 999px;
+  background: #e5484d;
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
 .nav-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .nav-btn {
   width: 34px;

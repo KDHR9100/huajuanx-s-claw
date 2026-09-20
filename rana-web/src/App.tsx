@@ -12,6 +12,7 @@ import Composer from "./components/Composer";
 import UsagePanel from "./components/UsagePanel";
 import SysPage from "./components/SysPage";
 import CronPage from "./components/CronPage";
+import ApprovalsPage from "./components/ApprovalsPage";
 import NewsPage from "./components/NewsPage";
 import PlanningPage from "./components/PlanningPage";
 import BangumiPage from "./components/BangumiPage";
@@ -39,6 +40,26 @@ export default function App() {
 
   // 学习计划到点弹窗提醒：开哪个页面都有效（权限/开关在课程表页控制）
   useEffect(() => startStudyNotifier(), []);
+
+  // 待审数角标：全局 30 秒轻量轮询（卡有 15 分钟寿命，30 秒粒度足够及时；失败静默不惊动）
+  useEffect(() => {
+    let stop = false;
+    const tick = async () => {
+      try {
+        const res = await fetch("/__rana/approvals");
+        const data = (await res.json()) as { pending?: unknown[] };
+        if (!stop) useAppStore.getState().setApprovalsPending(data.pending?.length ?? 0);
+      } catch {
+        /* 中间件暂不可用（vite 重启窗口等），下轮再说 */
+      }
+    };
+    void tick();
+    const timer = setInterval(() => void tick(), 30_000);
+    return () => {
+      stop = true;
+      clearInterval(timer);
+    };
+  }, []);
 
   return (
     <>
@@ -70,6 +91,12 @@ export default function App() {
             <main className="main">
               {connError && <div className="err-banner">⚠ {connError}</div>}
               {page("定时任务", <CronPage />)}
+            </main>
+          )}
+          {view === "approvals" && (
+            <main className="main">
+              {connError && <div className="err-banner">⚠ {connError}</div>}
+              {page("审批", <ApprovalsPage />)}
             </main>
           )}
           {view === "news" && (

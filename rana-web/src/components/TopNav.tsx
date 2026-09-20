@@ -21,6 +21,7 @@ export default function TopNav() {
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
   const tabOrder = useAppStore((s) => s.tabOrder);
   const setTabOrder = useAppStore((s) => s.setTabOrder);
+  const approvalsPending = useAppStore((s) => s.approvalsPending);
 
   const ordered = useMemo(
     () => NAV_TABS.filter((t) => tabOrder.includes(t.id)).sort((a, b) => tabOrder.indexOf(a.id) - tabOrder.indexOf(b.id)),
@@ -150,6 +151,11 @@ export default function TopNav() {
             }}
           >
             {t.label}
+            {t.id === "approvals" && approvalsPending > 0 && (
+              <span className="tab-badge" title={`${approvalsPending} 张审批卡在等您`}>
+                {approvalsPending > 9 ? "9+" : approvalsPending}
+              </span>
+            )}
           </button>
         ))}
         <button className="tab plus" disabled title="以后再加点什么…">

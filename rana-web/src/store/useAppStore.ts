@@ -49,6 +49,8 @@ interface AppState {
   cloudOpen: boolean;
   /** 系统会话清理面板（一键清心跳/梦境等定时任务留下的删不掉会话） */
   cleanupOpen: boolean;
+  /** 待审批数量（审批页角标，App 层 30 秒轻量轮询维护） */
+  approvalsPending: number;
 
   setConn: (conn: ConnState, connError?: string) => void;
   setSessions: (sessions: SessionRow[]) => void;
@@ -74,6 +76,7 @@ interface AppState {
   setLmOpen: (open: boolean) => void;
   setCloudOpen: (open: boolean) => void;
   setCleanupOpen: (open: boolean) => void;
+  setApprovalsPending: (n: number) => void;
 }
 
 export const PINNED_STORAGE_KEY = "rana-web.pinned";
@@ -134,6 +137,7 @@ export const useAppStore = create<AppState>((set) => ({
   lmOpen: false,
   cloudOpen: false,
   cleanupOpen: false,
+  approvalsPending: 0,
 
   setConn: (conn, connError) => set((s) => ({ conn, connError: connError ?? (conn === "connected" ? undefined : s.connError) })),
   setSessions: (sessions) => set({ sessions }),
@@ -225,4 +229,5 @@ export const useAppStore = create<AppState>((set) => ({
   setLmOpen: (lmOpen) => set({ lmOpen }),
   setCloudOpen: (cloudOpen) => set({ cloudOpen }),
   setCleanupOpen: (cleanupOpen) => set({ cleanupOpen }),
+  setApprovalsPending: (approvalsPending) => set({ approvalsPending }),
 }));

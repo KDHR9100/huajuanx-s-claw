@@ -67,7 +67,7 @@ export interface ModelInfo {
 export type ConnState = "connecting" | "connected" | "error" | "closed";
 
 /** 顶部导航的页面视图 */
-export type AppView = "chat" | "sys" | "cron" | "news" | "planning" | "bangumi" | "apps" | "groups" | "dsh";
+export type AppView = "chat" | "sys" | "cron" | "approvals" | "news" | "planning" | "bangumi" | "apps" | "groups" | "dsh";
 
 /** 规划页内部的子页签（总览 / 日历 / 课表 / 待办 / 内容库） */
 export type PlanningTab = "overview" | "calendar" | "schedule" | "goals" | "library";
@@ -77,6 +77,7 @@ export const NAV_TABS: Array<{ id: AppView; label: string }> = [
   { id: "chat", label: "💬 会话" },
   { id: "sys", label: "💠 Rana 的状态" },
   { id: "cron", label: "⏰ 定时任务" },
+  { id: "approvals", label: "🛡 审批" },
   { id: "news", label: "📰 早报" },
   { id: "planning", label: "🗺 规划" },
   { id: "bangumi", label: "📺 追番" },

@@ -21,6 +21,22 @@
 
 ## 登记区
 
+## \[已解决·绕行] 网关「回复投递」通道把内部代号拼进 QQ 地址——systemEvent 回复/心跳汇报发不出（2026-09-20）
+
+- 症状：学习睡前小结（22:30/22:41 两班）收据 error，QQ 报「请求的资源不存在(用户/群已注销)」；网关 heartbeat failed 同款（23:31/23:43 两班）。同时段早晚问候、git 三推送的 message 工具直发全部 200 送达——一通一断，病灶在投递路径不在 QQ 通道。
+- 根因：网关投递层把会话内部用户键 `user:c2c:<openid>` 整个当 QQ REST 路径参数（正确应传纯 openid），QQ 服务器查无此"用户"报已注销。**与 openid 大小写无关**——message 工具用同一个大写 openid 直发成功、拿到 messageId 为证。20:53 网关重启后首现，23:42 再重启不愈 = 持续性 bug（上游 issue 候选）。仅"回复投递"路径中招；message 工具直发路径健康。
+- 解决方案（全部绕行，不动上游）：① 睡前小结新建直发版 `edfbc9fe`「学习睡前小结·直发」（隔离+glm+message 显式 channel="qqbot"+全量目标，照早晚问候配方），旧任务 `94f0079f` 停用保留回滚，实测 58s 送达；② 心跳 prompt 改直发（备份 `openclaw.json.bak-hbdirect-20260920`）：有事时 message 工具直发，同时把原 `<对方openid>` 占位符换成真实目标（那占位符本来也发不出去）；实测 23:43 班 read 巡检 → message 直发成功 → 收尾；③ 心跳收尾词统一 NO_REPLY（不外发暗号）——避免最终回复再走坏投递通道制造 error 收据噪音。
+- ⚠️ 热重载坑（新证）：cron CLI 改动会产生"更新的 runtime 配置"，此后直接写 openclaw.json 触发的 reload 会被 `GatewayConfigReloadSupersededError` 静默取消（本轮日志只剩 superseded 一行、无 applied）——**CLI 动过配置后再改文件，必须重启网关才生效**。本次 23:42 重启后写文件立即正常热重载。
+- 遗留（待拍板）：health-patrol.mjs 的 eventloop 持续时间显示 bug（patrol-status.md 出现「已持续 29831970 分钟」≈56 年，疑似时间基准算错）；23:43 心跳已按该假异常给主人发过一条汇报，00:00 巡检班后异常条目消失即自愈，但显示 bug 待修。
+- 状态：已解决（绕行；上游 bug 登记候选）。
+
+## \[已解决] 主人画像·周报连续超时——360 秒上限差 34 秒（2026-09-20）
+
+- 症状：连续 5 次 `cron: job execution timed out (last phase: model-call-started)`；排查窗口内 glm 每轮调用 4~15s 全 200，模型端健康。
+- 根因：周报工作量实测需 394s，任务 `timeoutSeconds=360` 差一点，到点被掐。
+- 解决方案：`openclaw cron edit 15aadbf0… --timeout-seconds 600`，手动验证 394s 完成 ok。
+- 状态：已解决。
+
 ## \[已拍板·暂缓] OpenClaw 9.5 升级调查——QQ 插件无新版，CLI 发消息 bug 升级修不了（2026-09-20）
 
 - 调查结论：①`openclaw message send` 真实路径全坏（`outLog.debug is not a function`，任何长度、dry-run 假阳性）系 **QQ 插件 v2.0.0+ 自身 bug**（GitHub 8 月已有同款 issue），npm 最新插件仍为 2.0.3=本机现装版本，主程序升 9.5 修不了；②QQ 收图 bug 官方同样未修（插件无新版），升级触发插件重装即覆盖本地收图补丁（9-14 条目）；③升级收益（原子升级/插件热重载等）无硬需求，9.4 起 memory promotion 规则变严（minUniqueQueries）属未知影响项。
@@ -43,6 +59,7 @@
 - 根因：`.openclaw/.openclaw/state/openclaw.sqlite` 增长到 102MB、`backups/cron-surgery-*/openclaw.sqlite` 108MB——超过 GitHub 单文件 100MB 硬限制，服务端直接拒收（GH001；50MB 以上即有警告）。
 - 解决方案：filter-repo `--strip-blobs-bigger-than 100M` 剥离超限 blob；备份仓自有 `.gitignore`（robocopy `/XF .gitignore` 不会覆盖它）排除主库与手术备份目录，未来备份不再撞墙；分块推送全部落地。
 - 取舍与后效：主状态库不再经 git 远程备份（本地 robocopy 副本仍完整）；**改进方向（待做）**：备份链改为「sqlite 压缩转储后再入库」（压缩后通常只有原体积的 10-20%，可稳居限内）或改用 git-lfs。
+- **09-20 晚补记（robocopy「失败 1 目录」根因）**：当日 17:30 与手动班连续 robocopy exit 11——`workspace-main\.claude\skills\teach` 是 09-19 12:15 生成的**悬空 junction**（指向已搬走的 `.agents\skills\teach`），robocopy 进入即失败且不打印明细（/NFL /NDL 下统计 FAILED=1 却无 ERROR 行；「目标同名文件占位」假设可用剪枝遍历 Test-Path 排除，真因是链接不可读）。解法：`cmd /c rmdir` 删链接（真身 `skills\teach` 无恙）；robocopy /L 复核 FAILED=0，实跑 backup done + 推送成功（`2d3a24f..e8869bd`）。**注意：全树 7 个 junction 里 6 个是 plugin-skills 活链接，禁止给备份加 /XJ 一刀切**。另两坑：Git Bash 调 `cmd /c` 必须写 `cmd //c` 且整段引号，否则参数被拆静默不执行；当晚首验 push 曾撞 Clash 抖动 3 连败（老病，见 9-11 条目），重试一轮即恢复。
 
 ## \[状态：待拍板→已审计] Mimosa L3 提交闸门时拦时放——完整扫描强拦（多为已设防代码的误报），扫描器缓冲溢出时静默放行（2026-09-19；09-20 深度审计复核）
 
