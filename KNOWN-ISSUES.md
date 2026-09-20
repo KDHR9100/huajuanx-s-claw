@@ -21,6 +21,13 @@
 
 ## 登记区
 
+## \[已解决] 私有备份推送静默失败数日——主状态库超 GitHub 100MB 硬限制（2026-09-20）
+
+- 症状：`backup-private.cmd` 的 push 重试 3 次后失败但容易无人察觉；远程私有仓滞后。夜间排查时表现为「整包上传完成后指针更新丢失」「HTTP 408」等多种假象，一度误判为纯网络问题。
+- 根因：`.openclaw/.openclaw/state/openclaw.sqlite` 增长到 102MB、`backups/cron-surgery-*/openclaw.sqlite` 108MB——超过 GitHub 单文件 100MB 硬限制，服务端直接拒收（GH001；50MB 以上即有警告）。
+- 解决方案：filter-repo `--strip-blobs-bigger-than 100M` 剥离超限 blob；备份仓自有 `.gitignore`（robocopy `/XF .gitignore` 不会覆盖它）排除主库与手术备份目录，未来备份不再撞墙；分块推送全部落地。
+- 取舍与后效：主状态库不再经 git 远程备份（本地 robocopy 副本仍完整）；**改进方向（待做）**：备份链改为「sqlite 压缩转储后再入库」（压缩后通常只有原体积的 10-20%，可稳居限内）或改用 git-lfs。
+
 ## \[状态：待拍板] Mimosa L3 提交闸门时拦时放——完整扫描强拦 57 项（多为已设防代码的误报），扫描器缓冲溢出时静默放行（2026-09-19）
 
 - 症状：`git commit` 被「高危已强制拦截」拦截，指向 vite.config.ts study 中间件的 `materialAbs`/`writeSchedule`/`spawnAgent` 等 57 项 high（路径拼接/命令参数向量类）；同晚另三次 commit 因 `scanner_enobufs` 按兼容策略放行；`git push` 同样被扫。
