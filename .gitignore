@@ -43,3 +43,5 @@ rana-web/memory-bridge.privacy-patterns.json
 rana-web/memory-bridge.identity.json
 # 本机个人路径配置（WSL 用户名/项目目录等，不入公开仓库；模板见 local-config.example.json）
 rana-web/local-config.json
+# Git 活动报告产物（含 WSL 私人仓库提交标题，不入公开仓库）
+rana-web/.git-activity/

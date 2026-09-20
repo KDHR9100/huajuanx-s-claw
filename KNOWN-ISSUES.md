@@ -21,6 +21,22 @@
 
 ## 登记区
 
+## \[已拍板·暂缓] OpenClaw 9.5 升级调查——QQ 插件无新版，CLI 发消息 bug 升级修不了（2026-09-20）
+
+- 调查结论：①`openclaw message send` 真实路径全坏（`outLog.debug is not a function`，任何长度、dry-run 假阳性）系 **QQ 插件 v2.0.0+ 自身 bug**（GitHub 8 月已有同款 issue），npm 最新插件仍为 2.0.3=本机现装版本，主程序升 9.5 修不了；②QQ 收图 bug 官方同样未修（插件无新版），升级触发插件重装即覆盖本地收图补丁（9-14 条目）；③升级收益（原子升级/插件热重载等）无硬需求，9.4 起 memory promotion 规则变严（minUniqueQueries）属未知影响项。
+- 拍板（2026-09-20 主人）：**暂不升级**。触发条件：QQ 插件发布 2.0.4+（官方修复 CLI 发送/收图）时，连主程序一起升级。
+- 届时 runbook：备份 openclaw.json 与 state → 升级 → 重打 QQ 收图补丁（按 9-14 条目）→ 全链验证（心跳 glm 班 / git 直跑+glm 中继 / 早晚问候 / QQ 收图 / 微信通道）。git-activity-cron.mjs 的 `--notify` 零模型推送代码已备好，CLI 修好后可评估把 glm 中继换回直推。
+- 状态：暂缓（等插件 2.0.4+）。
+
+## \[已解决·对症] exec 审批在隔离会话送不到人 → 900 秒挂起死循环——心跳瘫痪半日、网关曾被拖死（2026-09-20）
+
+- 症状：心跳会话反复 `stalled session ... reason=blocked_tool_call activeTool=exec`，每轮约 920s 被 abort_embedded_run 强杀，cron 判 transient error 立即重试 → **约 15.5 分钟一轮死循环**（09-20 11:19–14:41 连续六轮；09-19 21:30/21:45 首发两轮，后者撞上网关进程无声退出）。日志铁证：`approval-handler: no QQ target for <id> (session=agent:main:main:heartbeat)` + `exec.approval.waitDecision 905~929s`，审批终态 `resolvedBy=approval-scope-closed`（run 被杀后自动 deny）。同病 09-19 下午还打过 dashboard 会话两发（14:04/14:43）。
+- 根因：09-19 exec 审批闸门上线后，心跳里的**老习惯「顺手跑 git-activity.mjs 出统计」**（闸门前能跑通、无害）变成必挂：隔离小会话没有 QQ 投递目标，审批卡送不出去、无人能批，waitDecision 干等到 run 级超时。机制缺口（上游 bug 候选）：**审批无受众时应快速 fallback deny**（对照：`wsl …`/PowerShell 管道这类"cannot safely bind"命令就是秒拒的），而不是挂 900 秒。第二层缺口：agent exec 审批只支持 allow-once/deny，allowlist 只认程序路径——解释器（node.exe）不能路径级放行，于是「固定命令的长期许可」在 agent exec 场景**没有落点**，只能提示词层禁。
+- 解决方案（09-20 落地）：①应急手法：`openclaw approvals pending` 抓现行 → 合法固定命令 `resolve <id> allow-once` 先解救当班（本次放行的即 git 周报脚本）；②根治：`agents.defaults.heartbeat.prompt` 追加禁 exec 纪律（写明"审批卡送不到主人、干等15分钟整班报废；git 统计/备份各有专门任务，失败只报告不代跑"），并补一句巡检文件**必须用 read 工具直读**（她用 memory_get 读 patrol-status.md 会 not_found → 误判"巡检停摆"误报）。prompt 热生效无需重启，备份 `openclaw.json.bak-hbnoexec-20260920`。验证：手动心跳班 49s ok、零挂起审批。
+- 排障抓手：`approvals pending`（挂着的就是卡点，Expires In 列看余命）→ agent 库 transcript_events 看她想跑什么 → `cron runs <jobId>` 区分本症（600/920s 超时+审批记录）与模型收尾病（超时但审批零记录）。`approvals grants list` 空属正常——standing grant 只来自 automation 载荷的 allow-always，agent exec 不产生。
+- 状态：已解决（对症：提示词纪律+应急手法；机制缺口登记为上游 issue 候选）。
+- **09-20 16:20 补记（提示词路线判死 + 执行后备）**：提示词禁令对 qwen3.8-flash **无效**——14:56/15:00 两次写入禁 exec 纪律并热生效后，15:48 班第一个动作仍去跑 `git-activity --period=today`、16:00 班又换成 `node -e` 内联脚本读课程表（每班换个花样，审批记录三连），均被 CLI 逐单 deny 解救。查证 2026.9.2 的 heartbeat 配置模式（dist/index.d.ts）只有 agentId/every/activeHours/model/session/target/directPolicy/channel/prompt/timeoutSeconds/lightContext/isolatedSession——**无 per-job tools 禁用口子**；allowlist 只认程序路径（解释器禁放）。最终执行 9-15 预留后备：`heartbeat.model` 回钉 `glm/glm-5.3-flash`（main 聊天仍 qwen 不动，备份 `openclaw.json.bak-hbglm-20260920`）+ 重启网关。验收班 glm 26s：read 巡检文件（用对了 read 而非 memory_get）→ NO_REPLY → 零 exec 零审批。**教训：凡"必须不做某事"的硬约束，提示词对弱模型不构成保障，要么工具层禁（本版无口子）要么换强纪律模型。**
+
 ## \[已解决] 私有备份推送静默失败数日——主状态库超 GitHub 100MB 硬限制（2026-09-20）
 
 - 症状：`backup-private.cmd` 的 push 重试 3 次后失败但容易无人察觉；远程私有仓滞后。夜间排查时表现为「整包上传完成后指针更新丢失」「HTTP 408」等多种假象，一度误判为纯网络问题。
@@ -52,6 +68,7 @@
 - 设计要点：**python.exe / node.exe / powershell.exe 这类解释器不能加路径级白名单**——放行整个程序等于连 `pip install`/`npm install`/任意脚本一起放行，闸门失效。它们靠自动审查器判断；固定常跑的（cron 里的 node 桥、备份）是 automation 载荷，走 standing grant（首次触发弹一次，allow-always 后对该任务长期有效）。
 - 预期摩擦：开启后头一两天，她的新命令/cron 任务首次运行可能弹审批，批 allow-always 即沉淀为长期许可；属一次性成本。
 - 配套：workspace-main/skills/skill-scout（觅食技能：搜索→评估→固定格式提案→明确批准才装；拒绝记录进 memory/ops-notes.md 台账）。原生自我学习（skills.workshop.autonomous.mode）维持默认 auto。
+- **09-20 补记（实测修正三处）**：①agent 的 exec 审批**不支持 allow-always**（实测 `resolve <id> allow-always` 报 "Decision allow-always is not allowed for exec approvals; allowed decisions: allow-once, deny"）——上文「批 allow-always 即沉淀为长期许可」对 agent exec 不成立；长期许可只有两条路：allowlist（程序路径级 glob，解释器禁用）与 automation 载荷（cron command-argv）的 standing grant（`openclaw approvals grants list` 可查）。②「预期摩擦」在**无审批受众的隔离会话**（心跳/dashboard）的实际形态 = 900 秒挂起死循环而非弹卡等批（见同日新条目）——凡跑在隔离会话的 agent turn，必须 prompt 层预禁 exec。③闸门对"无法安全绑定"的命令（PowerShell 管道、wsl 包装等）是秒拒（SYSTEM_RUN_DENIED），不会挂起；会挂起的是 node.exe 这类"可绑定但无人批"的。
 
 ## \[已解决] cron 主动消息的三条投递弯路——isolated+announce/systemEvent 都送不到，正路是「自己发」（2026-09-17）
 
@@ -62,6 +79,7 @@
 - **附带的坑（同晚第二例）：隔离会话+lightContext 没有 USER.md 身份档案，glm-5.3-flash 会瞎编主人名字**——两班问候把主人的名字写成了同音错字（内容全对、只名字错）。修法：cron 提示词里写死主人的正确名字与日常称呼并禁止同音字（真名只写在运行态 openclaw.json 的提示词里，不入台账不入库）；兜底心跳提示词同款加固。**凡是隔离会话里要称呼主人的 cron，名字必须写进提示词**，不能指望她从记忆文件里猜。
 - 附带修正②：巡检 tcpOk 只查 IPv4 `127.0.0.1`——重启后 vite 只绑 IPv6 `[::1]:5173` 时会误报「前端没监听」（网页明明开着还 QQ 委屈用户）。已改双栈任一可连即算活（2026-09-18）。
 - 排障抓手：QQ 有没有真发出去，看 `%TEMP%\openclaw\openclaw-当日.log` 的 `[qqbot:api]` 行（**日志按大小轮转，当天 4.9M 后重开**，老内容不保留）；会话里她回了什么，查 `agents/main/agent/openclaw-agent.sqlite` 的 transcript_events（session_key→current_session_id 要跟对，主会话每天 /reset 会换 id）。
+- **09-20 补记（第四条弯路）**：多通道环境（qqbot+微信并存）下 message 工具**必须显式带 channel 参数**（`"channel":"qqbot"`），只写全 target 不够——10:00 早问候班首发送被拒（`Channel is required when multiple channels are configured`），模型当轮自行补参重发才送达；已在问候任务提示词里写死该参数（顺带加了隔离会话禁 exec 条款）。
 - 状态：已解决（端到端验证通过）。
 
 ## \[未解决·有解法] Mimosa git 门钩拦截提交——静态规则只认「形状」不认守卫（2026-09-17）
@@ -285,6 +303,9 @@
 
 ## \[已解决] Git 活动统计口径（自动同步提交灌水）（2026-09-11）
 
+- **09-20 补记（形态改造）**：「让 main 会话模型跑脚本」的旧形态自 09-19 21:30 起四连 600s 超时（qwen 长工具链收尾病，与 exec 审批无关——审批记录零条），且只要模型跑命令就绕不开审批墙（agent exec 无长期许可）。已改为**直跑形态**：git-activity.mjs 新增 `--out=<绝对路径>` 落盘参数，三个任务（日报 21:30 / 周报周一 09:00 / 月报 1 号 09:00）以 `--command-argv` 直跑、报告写 `rana-web/.git-activity/report-<period>.md`（已进 .gitignore——含 WSL 私人仓库提交标题）；旧三任务已停用保留回滚。实测**978ms 完成、零审批**（CLI 创建的 command 载荷属 trusted automation，不走 exec 审批）。
+- **09-20 补记②（QQ 推送链 + CLI 假阳性坑）**：报告回话走两段式——直跑落盘 + 2 分钟后 glm 中继任务（`--message` 提示词仿早晚问候配方：read 报告 → message 工具带 `channel="qqbot"` 全量推送 → 只回「已送达」）实测 32s 端到端送达（QQ API 200）。**⚠ `openclaw message send` CLI 在 2026.9.2 的真实发送路径全坏**——任何消息（哪怕 2 字）都报 `outLog.debug is not a function`，而 `--dry-run` 正常返回（假阳性！dry-run 不走发送路径）；v2026.9.5 或已修复，升级验证后可把中继换回零模型推送（git-activity-cron.mjs 的 --notify 分段推送代码已备好）。升级时注意重打 qqbot 图片补丁（见 9-14 条目）。
+
 - 症状：直接 `git log --since` 统计"今天干了什么"会被 push-public.cmd / backup-private.cmd 的自动提交（`sync: <日期>` / `backup <日期>` 前缀）灌水，行数虚高到不可读。
 - 根因：本仓库日常由两个脚本全量自动提交推送，机器提交与人工提交混在同一 main。
 - 解决方案：`rana-web/git-activity.mjs` 按前缀正则（`^sync:` / `^backup\s`）把自动提交单独归栏（「实质工作」/「自动同步」两栏分开计数，代表性提交只取实质工作）；统计口径=origin/main 已推送提交（推送后本地 remote-tracking 引用即更新，无需联网 fetch）；边界写死本地时区（今日=00:00 起、周=上周一\~周日、月=自然月）。WSL 四项目走 UNC（`\\wsl.localhost\Ubuntu-22.04\...`）直读。仓库清单在 `git-activity.repos.json`（已 gitignore，含本地路径不外泄）。
@@ -503,12 +524,15 @@
   2. **vite 中间件**：spawn `curl -x 7897`（项目里状态页探测同款先例，`ranaBangumiMiddleware`）。
 - **bgm.tv v0 API（POST /v0/search/subjects、GET /v0/subjects）间歇 502**（nginx 网关抖动，重试可能好）：搜索用旧版 `GET /search/subject/{关键词}?type=2` 稳定；v0 详情在 bangumi.mjs 里做了 5xx 自动重试一次。旧接口封面给 `http://` 链接，转发时统一升 https。
 - **网关的 workspace skill 扫描是启动时全量 + 内存缓存，之后新增的 skill 目录不会动态出现**（`openclaw skills check` 一直 Total 不涨）。job-match 当时"立即可见"是撞上了缓存过期窗口。**新建/改 skill 后想立刻生效：重启网关**（taskkill + start-gateway.cmd）。判定特征：CLI 能看到老 skill、看不到新 skill、目录里文件确实在。
+- **teach 技能三态案例（09-20 收尾）**：①`.agents/skills/teach` 里装技能 + 往 `skills/` 里做 junction 想让它被扫到 → 每次扫描报 symlink-escape 被跳过（但 `.agents` 路径其实被 agents-skills-project 源原生扫到，junction 是画蛇添足）；②拆 junction 拷真目录进 `skills/` 后 → 两份同名，扫描报 precedence collision（winner=workspace，功能正常但会分叉）；③定版：技能规范位=workspace `skills/`，删除 `.agents/skills/teach` 原件去重（diff 确认一致后整棵 `.agents/` 移除），collision 消失。**结论：装技能直接放 `skills/`，别用链接、别用 `.agents/skills`。**
 
-## \[观察中] 心跳会话 exec 工具卡死 → 网关进程无声退出（2026-09-19 21:48，首次出现）
+## \[已定案·并档] 心跳会话 exec 工具卡死 → 网关进程无声退出（2026-09-19 21:48 首发案）
 
 - 症状：后台任务方式拉起的网关（`cmd //c start-gateway.cmd` 后台跑）运行约半小时后报 failed exit 1，18789 无监听。日志无崩溃堆栈，最后记录是两条 `stalled session: sessionKey=agent:main:main:heartbeat … reason=blocked_tool_call activeTool=exec`（exec 工具调用挂了 622 秒没动）。
 - 已做：重启网关恢复（Channel stable）。**死因未定**——候选：①心跳 cron 里某条 exec 命令挂起（如需出网的命令在 Clash 环境下死等）把进程拖死；②被外部终止。
 - 再遇到先看：`%TEMP%\openclaw\openclaw-当日.log` 尾部是否又是 `stalled session … activeTool=exec`。**若复现 2 次以上，去翻心跳/巡检 cron 里 exec 调的命令**（health-patrol.mjs / 问候 cron），给它们加超时。
 - 附带模式（非故障）：Git Bash 后台任务跑 start-gateway.cmd 时，cmd 把脚本里的 UTF-8 中文注释按 GBK 拆碎报"不是内部或外部命令"且任务退出码 1——**gateway 子进程照常起来**。判活只认 `netstat :18789 LISTENING`，别信后台任务退出码。
+- **09-20 19:12 第二起网关卡死（变体：进程活、服务死）**：18:39–19:12 之间发生，表现为 CLI/网页 WS 握手全部超时（`Opening handshake has timed out`）但 18789 端口仍在听、QQ 通道 18:25 前还健康；当期无任何任务运行、日志无任何异常（连 stalled 都没有）。19:14 标准重启恢复。与前晚 21:48 无声退出案是否同族未知。**若再现 2 次，考虑做网关健康看门狗（netstat+WS 握手探测→自动重启）。**
+- **09-20 定案并档**：死因链条实锤 = exec 审批无受众挂起（审批历史 09-19 21:30/21:45 两发均 no-target → 挂起 → gateway-restart/run-aborted 收场），09-20 11:19–14:41 复发六轮，已按本条目预案处置——详见同日新条目「exec 审批在隔离会话送不到人」。"给 exec 加超时"的路没走：真正缺的是审批层的快速失败，提示词层禁 exec 已够用。
 
 

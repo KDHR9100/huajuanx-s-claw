@@ -20,7 +20,7 @@
 | 连接方式 | 浏览器 WebCrypto 生成 **Ed25519 设备身份**，挑战-签名握手 + token 鉴权；直连失败自动回退同源 `/gateway` 代理 |
 | 「后端」 | **没有独立后端进程**——Vite dev/preview 插件挂了十八组 loopback-only 中间件（`/__rana/*`）充当本地后端 |
 | 编码外包 | acpx（ACP 协议）→ **DSH**：WSL 里的 DeepSeek 编码工人。「🔨派活」页发单，算力走 DSH 自己的云端 key，不占本地显存 |
-| 边车自动化 | 独立 Node 脚本：记忆桥（30 分钟，三腿）、私密记忆桥（每小时）、系统巡检（30 分钟，异常主动 QQ 汇报）、早报、Git 活动统计、学习睡前小结/周报（cron 驱动）；学习排课与问卜解卦走「专用会话桥」（页面按需触发）；embedding 看门狗随网关常驻 |
+| 边车自动化 | 独立 Node 脚本：记忆桥（每小时，三腿）、私密记忆桥（每小时）、系统巡检（30 分钟，异常主动 QQ 汇报）、早报、Git 活动统计、学习睡前小结/周报（cron 驱动）；学习排课与问卜解卦走「专用会话桥」（页面按需触发）；embedding 看门狗随网关常驻 |
 | 本地模型 | LM Studio `:1234`，`rana-rp-14b` 显式常驻（ctx 49152 / parallel 2 / KV 卸载到内存），embedding 用 qwen3-0.6b（`tools/embedding-watchdog.mjs` 看门狗锁单实例纯 CPU 常驻） |
 | 硬件约束 | RTX 4070 Ti 12GB + 48GB 内存——所有显存决策都围绕这张卡 |
 | 工程方法 | `KNOWN-ISSUES.md` 问题台账（症状/根因/方案/状态）、两层 AGENTS.md（人机共读规范）、`OPTIMIZATION-ROADMAP.md` 演进路线、公开镜像的 gitignore 隐私纪律 |
@@ -42,7 +42,7 @@
                                    ▼
 ┌─────────────────────── 调度层：OpenClaw 网关（:18789）──────────────────────┐
 │   bindings 三路路由（改绑定要重启） · cron 定时（画像/备份/学习/心跳/git日报） │
-│   记忆桥三腿（RP↔main 双向 + 群聊→main 单向，30 分钟一班） · 心跳 · 技能      │
+│   记忆桥三腿（RP↔main 双向 + 群聊→main 单向，每小时一班） · 心跳 · 技能      │
 │   插件 17 个（acpx/微信/qqbot/browser/lmstudio/memory-core…） · 配置热加载   │
 └──────────────────────────────────┬─────────────────────────────────────────┘
                                    ▼
@@ -87,7 +87,7 @@
   - `rana-rp` 是**陪你聊天的**：大脑在你自己显卡上跑的本地微调模型，**聊天内容一个字都不会发到云端**。你微信上聊的就是她。
   - `rana-qq-public` 是**群里营业的**：云端大脑，只有群聊公开记忆，物理隔离——她拿不到你任何私人档案。
 - **会话（session）** 就是一段一段的聊天记录，存在网关的 SQLite 数据库里。所以你在网页上发消息、在微信或 QQ 上发消息，记录都汇到同一个地方，网页上能同时看到。
-- **cron（定时任务）** 是闹钟。到点让网关自动干活：每半小时整理一次记忆、每天统计你写了多少代码，等等。
+- **cron（定时任务）** 是闹钟。到点让网关自动干活：每小时整理一次记忆、每天统计你写了多少代码，等等。
 - **记忆（memory）** 是她记事的本子。每个 agent 有自己的长期记忆；几个 agent 之间还有「记忆桥」定时互通近况（详见[记忆体系](#-深入三个智能体与记忆体系)）。
 - **rana-web（本仓库的主角）** 是你每天看到的那个网页：左边会话列表、中间聊天气泡、右边用量面板，顶部还有「Rana 的状态 / 定时任务 / 早报 / 规划 / 程序 / 群画像 / 派活」页签（可以按住左右拖动换位置，顺序记在本地）。
 
@@ -212,7 +212,7 @@ K:\OpenClaw
     ├── start-rana.cmd        一键启动（网关+vite+浏览器；路径全相对解析，换机器不用改）
     ├── start-gateway.cmd     网关启动器（状态目录相对推导 + node/openclaw.mjs 自动探测 + 配置含 LM Studio 时拉起 embedding 看门狗）
     ├── local-overrides.example.cmd ← 本机个性化覆盖模板（node 路径/状态目录；真实文件 gitignore）
-    ├── memory-bridge.mjs     三腿共享记忆桥（cron 每 30 分钟；真名/化名映射在 gitignore 的 identity 文件里）
+    ├── memory-bridge.mjs     三腿共享记忆桥（cron 每小时；真名/化名映射在 gitignore 的 identity 文件里）
     ├── news-report.mjs       早报生成器（联播抓取 + 博查搜索 + flash 总结；key 兼容密钥库 SecretRef）
     ├── study-agent.mjs       学习专用会话桥（排课/出题/判分/开课 → agent:main:study-planner）
     ├── fate-agent.mjs        问卜专用会话桥（解卦 → agent:main:fate-teller）
@@ -360,9 +360,9 @@ QQ 公共号**自己养出来的**群画像：群档案、群友档案、每周�
 
 定时自动化的形态刻意保持简单：**独立 Node 脚本 + cron 触发 + 文件契约**。脚本不依赖网关进程内的任何东西，输出落成本地 JSON 文件，前端只读文件——谁也不卡谁的脖子。
 
-### memory-bridge.mjs — 三腿共享记忆桥（每 30 分钟）
+### memory-bridge.mjs — 三腿共享记忆桥（每小时）
 
-三个 agent 各过各的日子，但她们应该知道该知道的事。这个脚本每半小时跑一趟，三条腿：
+三个 agent 各过各的日子，但她们应该知道该知道的事。这个脚本每小时跑一趟，三条腿：
 
 1. **腿 1/2（双向）**：main 与 rana-rp 的新增对话分别提炼成简短纪要，写入共享目录（经 NTFS junction 同时挂在两边 workspace 的记忆区，双边记忆索引都能检索到），并同步一份「共享近况」到两边 `MEMORY.md` 的标记区块（这个文件每回合整体注入，保证必见）；
 2. **腿 3（单向，群聊 → main）**：QQ 公共号的群聊新对话提炼成「群聊见闻」，**只写进 main 的记忆**——群里聊了什么她知道，main 的任何私货永远不会流向群聊侧；
@@ -401,6 +401,96 @@ QQ 公共号**自己养出来的**群画像：群档案、群友档案、每周�
 
 ---
 
+## 🧩 Skill 清单与系统运行方式（给人看，也给 code agent 看）
+
+> 本章是「能力清单 + 运行班表 + 排障路线」三合一。人看懂她都会什么；code agent 进场先读这章再动手——定位问题先对班表，再按排障路线走。
+
+### Skill 是什么、装在哪、怎么查
+
+OpenClaw 的 **skill（技能）** 是给 agent 的专项能力包：一个目录 + 一份 `SKILL.md`（写名称、用途、**触发词**），agent 在对话里听到匹配的语义就自动取用，不需要人点按钮。三个层次：
+
+- **自装技能**：状态目录 `workspace-<agent>/skills/` 下（gitignore，不入公开仓库）；本节清单即全部自装技能；
+- **内置技能**：随 OpenClaw npm 包分发（github、healthcheck 等通用件），按配置对 agent 可见；
+- **系统任务型**：`skill-collection-review`（每 7 天技能回顾）、心跳、记忆做梦——属 memory-core 系统任务，定时任务页标「⚙ 系统」，不可单独启停。
+
+实时清单两处可查：网页右侧「🛠 技能 / 🔌 MCP」卡（走 `/__rana/agent-info`），或命令行 `openclaw skills list --agent <id>`（需带 `OPENCLAW_STATE_DIR`）。
+
+### main 的自装技能（12 个）
+
+| 技能 | 干什么 | 谁叫醒 |
+| --- | --- | --- |
+| study-planner | 课程表管家：任务书排课、没完成的顺延、重排、增删改查、报今天的课 | 规划页·课表（`study-agent.mjs` → 专用会话）；聊天里说「排课/今天学什么」 |
+| study-quiz | 按资料出题、判分写评语、错题重考、期末考大卷 | 规划页·课表考核（`study-agent.mjs`）；聊天说「考我」 |
+| study-goal | 把大方向目标/待办拆成课程方案（**只出方案不改文件**，确认后才排入课表） | 规划页·待办（`/goals/parse`） |
+| life-planning | 人生规划师：大目标拆月度里程碑；内容库联网搜集、投喂提炼、材料消化成讲义 | 规划页·总览与内容库（`life-agent.mjs`，搜集链路放宽到 285s 超时） |
+| delegate-to-dsh | 编码重活派给 DSH（acpx/ACP 协议）；单文件小改自己干 | 派活页发单；聊天说「派给 DSH」 |
+| owner-analyst | 主人画像自学习：翻对话增量自己更新画像与周报，稳定结论沉淀进 USER/MEMORY | cron【画像·每日增量 4:30】【画像·周报 周日 21:00】 |
+| calendar-event | 日历管家：面试/约会/活动写进全局日历；查询今天/本周安排 | 聊天触发词（「帮我记下」「这周有什么安排」） |
+| job-match | JD×简历匹配分析 + 模拟面试 | 聊天触发词（发 JD、说「面我」） |
+| lesson-slide-deck | 每日课件 PPT（python-pptx 深底风格）并逐字校验材料口径 | 聊天/开课流程 |
+| pc-power | 关机/定时关机/取消/睡眠 | 聊天触发词 |
+| skill-scout | 觅食：发现新技能/插件/MCP 并向主人提案（**装东西必须主人明确批准**） | 心跳/聊天里发现能力缺口时 |
+| teach | OpenClaw 官方样例技能（教学流程），本项目未依赖 | 官方自带 |
+
+### rana-qq-public 的自装技能（2 个）
+
+| 技能 | 干什么 | 谁叫醒 |
+| --- | --- | --- |
+| group-analyst | 群画像自学习：翻群聊增量更新群档案、群友画像、周报（群画像页只读展示的就是它的产出） | cron【群画像·每日增量 4:30】【群画像·周报 周日 21:00】 |
+| moegirl-lookup | 聊到动漫角色/作品没把握时先查萌娘百科再回答，查完记本地档案 | 群聊语义触发（防幻觉条款） |
+
+### rana-rp：不挂自装技能
+
+本地模型上下文寸土寸金——RP 会话只保留人格与最小工具集，一个自装技能都不装（这是刻意的性能决策，不是遗漏）。
+
+### 页面 → 技能的调用链（code agent 重点）
+
+页面功能调到技能走的是同一条三段链：**中间件（`/__rana/*`）→ 专用会话桥脚本（`study-agent.mjs` / `fate-agent.mjs` / `life-agent.mjs`）→ 专用会话（`agent:main:study-planner` / `agent:main:fate-teller` / `agent:main:life-planner`）**，桥脚本把指令发进会话、等 final、抽 JSON 回页面；180~285 秒超时 + 进程互斥（同一会话一次只干一件事）。所以「页面上她没反应」的排查顺序：中间件在不在（浏览器 Network）→ 桥脚本输出（手动跑一遍看 stdout）→ 专用会话的 transcript（她收到指令没有、干了什么）。cron 触发的技能则直接看 `openclaw cron list` 状态与网关日志。
+
+### 全系统班表（cron 全景，排障先对这张表）
+
+> 以下是作者自用配置的实际班表（2026-09-20 核对，时区 Asia/Shanghai）。开箱用户没有这些任务，按需自建；code agent 排障时以 `openclaw cron list` 的实时输出为准。
+
+| 任务 | 时刻 | 干什么 | 模型 |
+| --- | --- | --- | --- |
+| 心跳 `heartbeat:main` | 每 3 小时 | 系统自检+轻问候（**隔离会话禁 exec**；模型钉在 `agents.defaults.heartbeat.model`） | glm/glm-5.3-flash |
+| 巡检（零成本） | 每 30 分钟 | `health-patrol.mjs` 四项体检，异常白天聚合发 QQ | 不用模型 |
+| 记忆桥 | 每小时 ：00 | 三腿纪要提炼（RP 腿走本地模型） | 腿各自 |
+| 私密记忆桥 | 每小时 :17 | 私密纪要 + 行为账本（全本地） | 本地 |
+| 早晚问候 | 10:00 / 21:00 | 定时问候推送（`channel="qqbot"` 必须带上） | glm |
+| 主人画像·每日增量 | 4:30 | owner-analyst 翻对话增量 | glm |
+| 群画像·每日增量 | 4:30 | group-analyst 翻群聊增量（qq-public 值守） | qwen |
+| 主人画像·周报 | 周日 21:00 | owner-analyst 周度汇总 | glm |
+| 群画像·周报 | 周日 21:00 | group-analyst 周度汇总 | qwen |
+| 学习周报 | 周日 21:00 | 课表周汇总推送 | main 主力 |
+| Git 活动日报（直跑） | 21:30 | `git-activity.mjs --out=` 直跑落盘（trusted automation 零审批，实测 <1s） | 不用模型 |
+| Git 日报·QQ 推送 | 21:32 | 读日报文件发 QQ | glm |
+| 学习睡前小结 | 22:30 | 今日课表小结推送 | main 主力 |
+| Daily Private Backup | 17:30 | 私有备份链路 | 不用模型 |
+| Memory Dreaming（⚙ 系统） | 3:00 | 记忆做梦固化 | 系统 |
+| skill-collection-review（⚙ 系统） | 每 7 天 | 技能收集回顾 | 系统 |
+
+### 进程拓扑：谁常驻、谁即起即灭
+
+- **常驻三件**：网关（含全部 cron、渠道连接、记忆索引）、Vite dev/preview（十八组中间件即后端）、embedding 看门狗（由 `start-gateway.cmd` 顺带拉起，端口锁防多开）；
+- **即起即灭**：边车脚本（cron 到点拉起，跑完退出）、专用会话桥（页面动作拉起）、`agent-info` 的 CLI 子进程；
+- **改动的生效方式**：`openclaw.json` 保存即热重载；`bindings` 渠道绑定要重启网关；前端代码 Vite 热更；`SOUL/AGENTS/MEMORY` 等人格记忆文件开新会话生效。
+
+### code agent 排障路线（10 分钟法则）
+
+1. **先查 [KNOWN-ISSUES.md](KNOWN-ISSUES.md)**——按症状关键词搜，命中直接照方抓药；
+2. **日志**：`%TEMP%\openclaw\openclaw-当日.log`（JSON-lines）。高频关键词速查：
+   - `stalled session` → 有会话卡住，看 `activeTool=` 是谁卡的；若配 `approval-handler` / `waitDecision` 即**审批卡死**（隔离会话审批送不到人，只能 `openclaw approvals resolve <id> allow-once` 解救或重启网关）；
+   - `cron: job execution timed out` → 任务撞执行上限（turn 可能仍在后台跑完，**以 transcript 为准**而非收据）；
+   - `cron: job run returned error status` / `scheduling recurring retry after transient error` → 任务失败与重试，紧跟的 `outcome=error duration=` 行有详情；
+   - `timer tick failed` → cron 调度层问题（典型：任务解析不出 owner）；
+   - `weixin getUpdates error` → 微信长连接抖动，连续出现才处理（重启网关即愈）；
+3. **`openclaw cron list`** 对班表看全班状态（`error (Nx)` = 连败 N 次），`openclaw cron run <id>` 手动补跑验证；
+4. **状态页巡检卡 / `.health/patrol.json`** 看端口/通道/备份新鲜度；
+5. **纪律**：排障超 10 分钟必须回写 KNOWN-ISSUES（AGENTS.md 铁律）；隔离会话（cron/isolated）禁 exec——审批卡送不出去就是 900 秒死循环；exec 审批白名单只放 git.exe，**解释器（node/python）永不放行**（路径级放行=闸门失效）；改配置前先备份；密钥只在密钥库与 gitignore 文件里。
+
+---
+
 ## 🧠 深入：三个智能体与记忆体系
 
 ### 三个 agent，一张清单
@@ -424,7 +514,7 @@ QQ 公共号**自己养出来的**群画像：群档案、群友档案、每周�
 │    RP:      SOUL.private（仅本地模型注入，云端永远读不到）+ 私密记忆桥
 │    公共号:  只有公开版记忆
 │
-├─ 三腿共享记忆桥（30 分钟一班）
+├─ 三腿共享记忆桥（每小时一班）
 │    main ⇄ rana-rp      双向：互相知道对方近况
 │    群聊 → main         单向：群里聊了什么她记着，私货绝不过去
 │    └─ 隐私规则：提炼在哪边、原文就在哪边；群纪要一律化名（映射外置 gitignore）

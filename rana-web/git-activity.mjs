@@ -16,7 +16,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -30,6 +30,8 @@ const REPOS_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), "git-
 // ---------- 参数 ----------
 const argv = process.argv.slice(2);
 const periodArg = argv.find((a) => a.startsWith("--period="))?.slice(9) || "today";
+// --out=<绝对路径>：报告额外写入文件（cron 直跑模式用，供网页/后续展示）
+const outArg = argv.find((a) => a.startsWith("--out="))?.slice(6);
 if (!["today", "week", "month"].includes(periodArg)) {
   console.error(`未知 --period=${periodArg}（可用 today|week|month）`);
   process.exit(2);
@@ -201,4 +203,12 @@ for (const r of results) {
 lines.push(`---`);
 lines.push(`**合计：实质工作 ${totalReal} 笔，自动同步 ${totalAuto} 笔**（共 ${repos.length} 个仓库${anySkipped ? "，部分跳过" : ""}）`);
 
-console.log(lines.join("\n"));
+const report = lines.join("\n");
+console.log(report);
+
+if (outArg) {
+  const outPath = path.resolve(outArg);
+  mkdirSync(path.dirname(outPath), { recursive: true });
+  writeFileSync(outPath, report + "\n", "utf8");
+  console.error(`已写入 ${outPath}`);
+}
