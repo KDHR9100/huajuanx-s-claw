@@ -21,6 +21,42 @@
 
 ## 登记区
 
+## \[已解决] 网页看不到她的思考流——网关默认丢弃推理内容，`reasoningDefault` 未配置（2026-09-21）
+
+- 症状：qwen3.8/deepseek 等思考型模型干活时，前端只有猫爪转圈，看不到"她在想什么"，无法区分"在想"还是"卡住"。rana-web 前端的「💭……在想」折叠块与 `<think>` 解析（`lib/reasoning.ts`）是现成的，缺的是网关侧根本没发。
+- 根因：openclaw 运行时对带 `isReasoning` 标记的流式载荷有总闸——`reasoningPayloadsEnabled !== true 就直接丢弃`，而它由会话级 `reasoningLevel`（默认 off）或 agent 级 `reasoningDefault` 决定；off=藏起、on=回复附思考、**stream=边想边发 `<think>`**（dist 里 `formatReasoningEvent` 明示三档语义）。
+- 解决方案：① 临时/单会话：在该会话里发斜杠命令 `/reasoning stream`（别名 `/reason`）——只写会话存储，不触发配置热重载，运行中也能安全用；② 永久/全部会话：openclaw.json 的 `agents.entries.main.reasoningDefault: "stream"`（2026-09-21 已配，热重载一次生效）。前提：顶栏 💭 开关开着（默认开）。注意 qwen3.8-flash 配置里 `params.enable_thinking:false` 并不拦推理 token（当日实测 reasoningTokens 照常计），只是不出正文——两码事。
+- 状态：已解决（配置生效；下一个回合起思考流实时可见）。
+
+## \[已解决] 云端模型弹窗里"把旧行 id 改成新模型"会残留旧名字——顶栏挂错名（2026-09-21）
+
+- 症状：在 ☁ 云端模型弹窗把过期模型的 id 直接改成新模型 id 后保存，右上角选择器里新模型顶着旧名字（如 id `qwen3.8-2.4t-a95b` 显示成「glm-5.2」），选名字实际用错人。
+- 根因：弹窗表单不显示也不让改 name，改 id 后表单里残留旧行的 name 一起提交；保存逻辑（vite.config.ts upsertProvider）原样采信表单 name。
+- 解决方案：① 根因——upsertProvider 改为"旧档案里没有的新 id 一律 name=id"，不再信任表单残留名（2026-09-21 已上线）；② 存量数据——qwenanliang 两行错位名手工归位（同日完成，热重载生效，顶栏已验证显示正确）。
+- 状态：已解决（根因+存量都处理完；同日上线的弹窗改动还有：未保存改动关闭/切换拦截、保存后 3.6s 自动核对网关目录并琥珀色警示）。
+
+## \[已解决·操作口径] 页面触发会话的 exec 审批送不到 QQ——去网页「审批」页手动批（2026-09-21）
+
+- 症状：排课等页面触发（study-planner 会话）的运行中，Rana 请求跑命令（exec/python），网关日志连刷 `approval-handler: no QQ target for <id> (session=agent:main:study-planner)`，会话 stalled 在 blocked_tool_call；命令既没批准也没拒绝，干等 15 分钟自动作废。
+- 根因：审批推送目标按会话来源解析——页面触发的会话没有 QQ 目标，审批通知无处投递（会话与 QQ 无绑定）。审批**记录本身正常落在 state 库**（`state/openclaw.sqlite` 的 `operator_approvals` 表），只是推送不出去。
+- 解决方案（操作口径）：**网页「🛡 审批」页能看到全部待批**（页签角标数字即待批数）。注意首屏要等 ~6 秒（`?withGrants=1` 要跑一次官方 CLI 查长期许可，别看是空的就关）；点「批准」走官方 `approvals resolve <id> allow-once`，她立刻续跑。2026-09-21 实测连批两条均生效。另：审批安全闸对"无法安全绑定"的命令（如 powershell 管道）直接 SYSTEM_RUN_DENIED，这类到不了审批页，Rana 会自己换 read 工具绕过，属设计内。
+- 关联：17:15 网关曾自行重启一次（前有 QQ WS 4009 超时），在飞的排课运行竟存活续跑，原因未查；再发生时先看 `%TEMP%\openclaw\openclaw-当日.log`。
+- 状态：已解决（手动批的操作口径；审批到达时 webchat 角标之外的主动提醒属于增强，未做）。
+
+## \[已解决] 排课/换课件后 Agent 连续「couldn't generate a response」——默认输出额度 8192 被思考 token 烧光（2026-09-21）
+
+- 症状：换新课件后「让Rana排课」，Rana 读完全部资料后停在思考；页面反复弹「⚠️ Exec failed」「Agent couldn't generate a response」。qwen3.8-flash、deepseek-v4.1-flash 换着用全部同样失败（用户已正确判断非模型问题）。日志特征：`incomplete turn detected ... stopReason=length ... surfacing error to user`，每轮约 100s。
+- 根因：openclaw 对未配置 `maxTokens` 的模型**默认输出上限 8192**（dist 代码 `maxTokens: model.maxTokens ?? 8192`）。思考型模型（qwen3.8/deepseek-v4.1）做大重排任务时，8192 输出额度被 reasoning 全部耗尽——转录 usage 实锤：`output: 8192, reasoningTokens: 8192`，正文 0 字，`stopReason: length` → 回合不完整 → 网关报错。输入侧健康（11 万/100 万）。另：她口中的「命令审批走不通」是 exec 安全闸 `SYSTEM_RUN_DENIED: approval cannot safely bind this command`（powershell 管道），属设计内保护，read 工具可正常替代，不是故障。
+- 解决方案：给 openclaw.json 里 **19 个云端模型条目补 `maxTokens`**（备份 `openclaw.json.bak-maxtokens-20260921`）：qwen3.8-*/glm-5.3/glm-5.2 = 131072（qwen3.8-max 实测 dashscope 接受 131072 返回 200；GLM 官方文档 128K）；qwen3.7/3.6/deepseek 系 = 65536；kimi-k2.7-code = 32768。lmstudio-local 4 个本地模型**不动**（contextWindow 是真实显存限制）。改后热重载逐 provider applied，无需重启。云端模型 contextWindow 原本已是 1000000（输入已是上限）。
+- 状态：已解决（2026-09-21 配置生效；排课重试验证输出侧不再截断）。
+
+## \[已解决] 排课被弹「prepared model runtime plugin generation was superseded」——页面切模型触发配置热重载，顶掉了在途请求（2026-09-21）
+
+- 症状：规划→课表→「让Rana排课」，约 1.5 秒即失败，页面显示「她那边出错了：Error: prepared model runtime plugin generation was superseded for K:\\OpenClaw\\.openclaw\\.openclaw\\agents\\main\\agent」。同一秒日志依次出现：config change detected (agents.entries.main.model) → config hot reload applied → persisted sticky model selection agentId=main model=glm/glm-5.3。
+- 根因：`study-agent.mjs` 每轮对排课专用会话 `sessions.patch` 粘性指定模型；当页面选的模型与 openclaw.json 里 `agents.entries.main.model` 不一致时，网关会把这个选择**持久化进配置文件** → 触发热重载 → 主 agent 的 prepared model runtime 整体换代 → 刚进来的排课请求还拿着旧一代 runtime，被判 superseded 直接弹回。自己触发的重载顶掉了自己，纯时序竞态；只在「模型与配置不一致的第一次」发生，配置落定后不再复现。
+- 解决方案：无需改码——同值重复 patch 不改文件、不触发重载（2026-09-21 实测：patch 前后 openclaw.json 哈希一致、日志无新 reload），**再点一次排课即过**。若换新模型再遇：先在网关配置里把 `agents.entries.main.model` 预先改成目标模型（或重启网关），再发起排课。
+- 状态：已解决（2026-09-21 定位根因，实测同值 patch 不触发重载；页面重试即可恢复）。
+
 ## \[已解决·绕行] 网关「回复投递」通道把内部代号拼进 QQ 地址——systemEvent 回复/心跳汇报发不出（2026-09-20）
 
 - 症状：学习睡前小结（22:30/22:41 两班）收据 error，QQ 报「请求的资源不存在(用户/群已注销)」；网关 heartbeat failed 同款（23:31/23:43 两班）。同时段早晚问候、git 三推送的 message 工具直发全部 200 送达——一通一断，病灶在投递路径不在 QQ 通道。
@@ -551,5 +587,18 @@
 - 附带模式（非故障）：Git Bash 后台任务跑 start-gateway.cmd 时，cmd 把脚本里的 UTF-8 中文注释按 GBK 拆碎报"不是内部或外部命令"且任务退出码 1——**gateway 子进程照常起来**。判活只认 `netstat :18789 LISTENING`，别信后台任务退出码。
 - **09-20 19:12 第二起网关卡死（变体：进程活、服务死）**：18:39–19:12 之间发生，表现为 CLI/网页 WS 握手全部超时（`Opening handshake has timed out`）但 18789 端口仍在听、QQ 通道 18:25 前还健康；当期无任何任务运行、日志无任何异常（连 stalled 都没有）。19:14 标准重启恢复。与前晚 21:48 无声退出案是否同族未知。**若再现 2 次，考虑做网关健康看门狗（netstat+WS 握手探测→自动重启）。**
 - **09-20 定案并档**：死因链条实锤 = exec 审批无受众挂起（审批历史 09-19 21:30/21:45 两发均 no-target → 挂起 → gateway-restart/run-aborted 收场），09-20 11:19–14:41 复发六轮，已按本条目预案处置——详见同日新条目「exec 审批在隔离会话送不到人」。"给 exec 加超时"的路没走：真正缺的是审批层的快速失败，提示词层禁 exec 已够用。
+
+## \[已落地+已验证] 群聊幻觉二轮：评价类发言射程缺口 + 正面条款补丁与对照测试（2026-09-21）
+
+- 症状：群聊答"某声优配过哪些角色"暴露两个 09-15 方案没盖住的新翻车形态——①评价声优真人（"角色的声音跟 TA 本人挺像"；声优真人的声音她根本听不到，只有角色内的声音是人设内真实的）；②列名单时瞎排名次、顺嘴下"纯XX专业户""出道早"式断言，被群友追问才承认"瞎排的"。被追问后认账（SOUL 里"顺嘴的，收回去"执行到位），但拦在了事后。
+- 根因：09-15 那套条款全部针对"事实细节"（发色/声优归属/关系/记忆旧账），**评价性、比较性、总结性发言落在射程之外**——模型把这类话当聊天氛围而非知识点，"先查再答"流程根本不触发。当日会话日志证实名单本身确实查过萌百（有 moegirl 工具调用），翻的是查完之后的自由发挥。flash 级模型学得会行为规则（先查再答），学不会"说话前自省"式元认知——SOUL 里"说之前过一遍"写得到位但 flash 不执行。
+- 落地：SOUL.md「不懂别装」节追加三条**正面行为指令**（按拍板意见用"给动作"不用禁令，避免"粉色大象"效应）：声优真人手里只有名字和角色表、"像不像 TA 本人"接不了直说「我只听过角色」；列名单照百科/档案顺序念、自己挑着说排的垫「我瞎印象的」；说印象评价先垫「我印象里」「我瞎说的」。备份 `SOUL.md.bak-eval-20260921`，改后重启网关生效。
+- 对照测试（dashscope 端点，7 组 = qwen3.8-flash / qwen3.8-max / deepseek-v4-pro-0813 × 新旧提示词 × 温度档，测题为当日真实问答 5 轮连问；`qwenanliang` 的 key 上 qwen3.7-plus 与 glm-5.2 免费额度 403，store key 只写不可读，故砍掉这两列）：
+  - **新条款可执行性成立**：flash 与 max 在对应场景均主动引用新条款（"我瞎印象的""我只听过角色"），正面动作指令 flash 也接得住。
+  - **温度 0.3 明确伤人设**：同题回复复读机化、出现攻击性发言（"你记错了""你在套我的话"），验证了"低温压幻觉同时压死人设"的预判 → **不动温度**。
+  - **换大模型不治幻觉**：无工具环境下 max（旧提示词）会伪造整套 `<tool_call>`+`<tool_result>` 查询记录撑场面（编造百科摘要，比 flash 的"没听过"闪避更激进）。真实环境有真工具、该形态不会原样出现，但足以否决"换强模型=少瞎说"的直觉；无工具时 flash/max/deepseek 被追问均不翻供。
+  - 方法学局限：纯 API 无工具测试造不出"查到素材后自由发挥"的翻车链路（当日真实翻车发生在工具返回之后的附和阶段），名单发挥类翻车**只能靠真实群聊观察**。
+- 决定：**保持 qwen3.8-flash 不换模型、不动温度**；验证靠真实群聊观察——观察点：声优/名单类问题是否垫「我瞎印象的」、是否还评价真人。测试脚本与逐字结果存 `.openclaw/.openclaw/tmp-eval/`（gitignore 区域，含人设提示词与群聊内容，不进公开仓库）。
+- 附带发现：`qwenanliang` 明文 key 的免费额度已耗尽（qwen3.7-plus / glm-5.2 均 403），`bailian` 同 key 疑似同源——旁路任务若还在用这套额度会静默失败，待巡检确认。
 
 

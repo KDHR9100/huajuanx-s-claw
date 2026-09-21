@@ -194,8 +194,9 @@ function ranaProviderConfigMiddleware(): Plugin {
         .map((m) => ({
           ...(oldById.get(m.id.trim()) ?? {}),
           id: m.id.trim(),
-          // runtime 校验 name 必填：没填就用 id 兜底，否则整个配置会被判 invalid
-          name: (m.name && m.name.trim()) || m.id.trim(),
+          // name 兜底：id 是旧的沿用表单名（=旧条目名）；id 是新的（把过期行直接改成新模型）一律归位成 id——
+          // 表单不显示也不让改名字，新 id 身上的"名字"只能是旧行残留，跟着存进去顶栏就会挂错名
+          name: oldById.has(m.id.trim()) ? (m.name && m.name.trim()) || m.id.trim() : m.id.trim(),
           ...(typeof m.contextWindow === "number" && m.contextWindow > 0 ? { contextWindow: m.contextWindow } : {}),
         }));
     }
@@ -931,7 +932,7 @@ function ranaNewsMiddleware(): Plugin {
  * - GET    /__rana/study                  读课程表 schedule.json（v1 自动迁移 v2）
  * - POST   /__rana/study/save             保存 {courses?, plans?, contract?}（materials 由上传/删除端点管理）
  * - POST   /__rana/study/material?name=   上传学习资料（raw body ≤10MB）
- * - DELETE /__rana/study/material?id=     删除资料（仍被课程引用时拒删）
+ * - DELETE /__rana/study/material?id=     删除资料（挂着它的课自动解绑，课本身不动）
  * - POST   /__rana/study/plan             排课（Rana 按 study-planner skill 直接改 schedule.json）
  * - POST   /__rana/study/lesson-start    开始今天的课：{context:{history,schedule,materials,mistakes,reports,contract}, model?}
  *                                        勾什么附什么（信息直接写进指令，不让她读文件）；不带历史=一次性干净会话
@@ -1705,8 +1706,15 @@ function ranaStudyMiddleware(): Plugin {
         const s = readSchedule();
         const m = s.materials.find((x) => x.id === id);
         if (!m) throw new Error(`资料不存在：${id || "(空id)"}`);
-        const usedBy = s.courses.filter((c) => (c.materialIds ?? []).includes(id));
-        if (usedBy.length) throw new Error(`还有 ${usedBy.length} 节课挂着这份资料（先在课程里解绑或删课）`);
+        // 课件更新是常态：删登记+文件，挂着它的课自动解绑（课本身不动）
+        let unbound = 0;
+        for (const c of s.courses) {
+          if (!(c.materialIds ?? []).includes(id)) continue;
+          const rest = c.materialIds!.filter((x) => x !== id);
+          if (rest.length) c.materialIds = rest;
+          else delete c.materialIds;
+          unbound++;
+        }
         s.materials = s.materials.filter((x) => x.id !== id);
         try {
           fs.rmSync(materialAbs(m));
@@ -1714,7 +1722,7 @@ function ranaStudyMiddleware(): Plugin {
           // 文件没了也不阻塞登记清理
         }
         writeSchedule(s);
-        json(res, 200, { ok: true, deleted: id });
+        json(res, 200, { ok: true, deleted: id, unbound });
       } catch (e) {
         json(res, 400, { error: (e as Error).message });
       }

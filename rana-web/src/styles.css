@@ -951,6 +951,16 @@ body.dragging iframe, body.dragging .chat-scroll { pointer-events: none; }
   font-size: 12.5px;
 }
 
+/* 保存成功但网关没吃进去这类"结果存疑"的提示（琥珀色，介于成功绿与失败红之间） */
+.set-warn {
+  background: color-mix(in srgb, #e6a23c 14%, var(--bg-panel));
+  color: #e6a23c;
+  border: 1px solid color-mix(in srgb, #e6a23c 35%, transparent);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+}
+
 .modal-foot { display: flex; justify-content: flex-end; gap: 10px; }
 
 /* 云端模型多 provider 配置 */

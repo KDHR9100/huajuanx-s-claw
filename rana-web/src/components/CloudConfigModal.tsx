@@ -36,12 +36,27 @@ export default function CloudConfigModal() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+  // 保存成功但网关目录迟迟没跟进时的琥珀色警示（区别于 err 的红）
+  const [warn, setWarn] = useState("");
   // 手动添加模型的小表单
   const [mId, setMId] = useState("");
   const [mCtx, setMCtx] = useState("");
 
   const sel = providers.find((p) => p.id === selId);
   const isNew = selId === NEW_ID;
+
+  /** 有没有没保存的改动：表单值 vs 选中档案的原始值（新增模式只要填了东西就算）。
+   *  背景是真实踩过的坑：每行的小「添加」只改表单，不点底部「保存并生效」就关窗，改动全部蒸发。 */
+  const isDirty = () => {
+    if (isNew) return Boolean(newId || baseUrl.trim() || apiKey.trim() || models.length);
+    if (!sel) return false;
+    if (apiKey.trim()) return true;
+    if (baseUrl.trim() !== sel.baseUrl) return true;
+    const norm = (ms: ProviderModelRow[]) => JSON.stringify(ms.map((m) => [m.id, m.contextWindow ?? 0]));
+    return norm(models) !== norm(sel.models);
+  };
+  /** 关窗/切档案前拦一道：脏了先问，别让改动无声丢失 */
+  const askIfDirty = (act: string) => !isDirty() || window.confirm(`有未保存的改动，${act}会丢弃——确定继续？`);
 
   const load = () => {
     fetch("/__rana/provider-config")
@@ -58,6 +73,7 @@ export default function CloudConfigModal() {
     if (!open) return;
     setMsg("");
     setErr("");
+    setWarn("");
     setApiKey("");
     setFetched([]);
     setFetchPick({});
@@ -76,6 +92,7 @@ export default function CloudConfigModal() {
     setFetchPick({});
     setMsg("");
     setErr("");
+    setWarn("");
     setMId("");
     setMCtx("");
   }, [selId]);
@@ -97,6 +114,7 @@ export default function CloudConfigModal() {
     setBusy(true);
     setMsg("");
     setErr("");
+    setWarn("");
     try {
       const res = await fetch("/__rana/provider-config", {
         method: "POST",
@@ -109,6 +127,21 @@ export default function CloudConfigModal() {
       setApiKey("");
       load();
       gateway.refreshModelsSoon();
+      // 保存后验证：refreshModelsSoon 最后一刷在 3s，稍等再核对网关目录里这批模型是否真出现了。
+      // 没出现 = 热重载被 superseded 静默取消（点过「⟳ 从接口拉取」后常见）：配置已进文件，但运行中的网关没吃进去。
+      const pid = isNew ? newId : selId;
+      const savedIds = models.map((m) => m.id.trim()).filter(Boolean);
+      window.setTimeout(() => {
+        const list = useAppStore.getState().models;
+        const suffix = (s: string) => (s.includes("/") ? s.split("/").slice(1).join("/") : s);
+        const missing = savedIds.filter(
+          (mid) => !list.some((m) => (m.provider ?? m.id.split("/")[0]) === pid && suffix(m.id) === mid),
+        );
+        if (missing.length)
+          setWarn(
+            `网关目录里还没看到：${missing.join("、")}。配置已写入文件，但运行中的网关没热重载成功（点过「⟳ 从接口拉取」后常见）——重启网关（start-gateway.cmd）后即生效。`,
+          );
+      }, 3600);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -167,11 +200,11 @@ export default function CloudConfigModal() {
   const picked = Object.entries(fetchPick).filter(([, v]) => v).map(([k]) => k);
 
   return (
-    <div className="modal-overlay" onClick={() => setOpen(false)}>
+    <div className="modal-overlay" onClick={() => { if (askIfDirty("直接关闭")) setOpen(false); }}>
       <div className="modal cloud-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h3>云端模型（多接口档案）</h3>
-          <button className="up-collapse" title="关闭" onClick={() => setOpen(false)}>
+          <button className="up-collapse" title="关闭" onClick={() => { if (askIfDirty("直接关闭")) setOpen(false); }}>
             ✕
           </button>
         </div>
@@ -182,14 +215,16 @@ export default function CloudConfigModal() {
               <button
                 key={p.id}
                 className={`cloud-prov${p.id === selId ? " active" : ""}`}
-                onClick={() => setSelId(p.id)}
+                onClick={() => {
+                  if (askIfDirty("切换档案")) setSelId(p.id);
+                }}
                 title={p.baseUrl}
               >
                 <span className="cloud-prov-id">{p.local ? "🖥" : "☁"} {p.id}</span>
                 <span className="cloud-prov-meta">{p.models.length} 模型</span>
               </button>
             ))}
-            <button className={`cloud-prov${isNew ? " active" : ""}`} onClick={() => setSelId(NEW_ID)}>
+            <button className={`cloud-prov${isNew ? " active" : ""}`} onClick={() => { if (askIfDirty("切换档案")) setSelId(NEW_ID); }}>
               <span className="cloud-prov-id">➕ 新增接口档案</span>
             </button>
           </div>
@@ -325,6 +360,7 @@ export default function CloudConfigModal() {
 
         {err && <div className="set-error">⚠ {err}</div>}
         {msg && <div className="set-ok">✓ {msg}</div>}
+        {warn && <div className="set-warn">⚠ {warn}</div>}
 
         <div className="modal-foot">
           {!isNew && sel && !sel.local && (

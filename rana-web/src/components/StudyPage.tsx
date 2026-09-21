@@ -12,7 +12,8 @@ import { modelSuffix } from "../lib/types";
 
 /** 排课/出题/判分共用的专用会话 key（study-agent.mjs 里的 SESSION_KEY 同款） */
 const STUDY_SESSION_KEY = "agent:main:study-planner";
-const MODEL_PREF_KEY = "study.model.v1";
+/** 主控模型所在会话：网页里所有调模型的地方都同步它（会话页选择器＝主控制台） */
+const MAIN_SESSION_KEY = "agent:main:main";
 /** 「开始今天的课」勾选面板的偏好（发给云端模型的上下文自选） */
 const LESSON_CTX_KEY = "study.lessonCtx.v1";
 type LessonHistory = "none" | "tail5" | "all";
@@ -205,17 +206,18 @@ export default function StudyPage({ embedded = false }: { embedded?: boolean } =
   const [lazyDay, setLazyDay] = useState("");
   // 到点弹窗提醒开关
   const [, setNotifyVersion] = useState(0);
-  // 排课/出题用的模型（""=跟随专用会话当前模型；选择存 localStorage，会话已存在时立即热切）
-  const [pickModel, setPickModel] = useState(() => {
-    try {
-      return localStorage.getItem(MODEL_PREF_KEY) ?? "";
-    } catch {
-      return "";
-    }
-  });
   const models = useAppStore((s) => s.models);
   const sessions = useAppStore((s) => s.sessions);
   const studySession = sessions.find((s) => s.key === STUDY_SESSION_KEY);
+  // 排课/出题用的模型＝主会话当前模型（与会话页选择器同一数据源，双向同步，不再单独存偏好）
+  const mainSession = sessions.find((s) => s.key === MAIN_SESSION_KEY);
+  const pickModel = mainSession?.model ?? "";
+  // 旧版 localStorage 排课模型偏好已废弃，进页面顺手清掉，避免残留误导
+  useEffect(() => {
+    try {
+      localStorage.removeItem("study.model.v1");
+    } catch { /* 清不掉就算了 */ }
+  }, []);
   const modelGroups = useMemo(() => {
     const g = new Map<string, typeof models>();
     for (const m of models) {
@@ -224,13 +226,15 @@ export default function StudyPage({ embedded = false }: { embedded?: boolean } =
     }
     return [...g.entries()];
   }, [models]);
+  /** 换模型＝改主会话（与会话页选择器同一条通路，改哪边两边都一致）；排课专用会话顺手一起切，侧栏显示不漂移 */
   const changeModel = (id: string) => {
-    setPickModel(id);
-    try {
-      localStorage.setItem(MODEL_PREF_KEY, id);
-    } catch { /* 存不进就算了 */ }
-    // 会话已在：立即切，侧栏和这里同步显示；还没建会话：下次排课时生效
-    if (id && studySession) void gateway.setModel(STUDY_SESSION_KEY, id).catch(() => {});
+    if (!id) return;
+    void gateway.setModel(MAIN_SESSION_KEY, id).then(
+      () => {
+        if (studySession) void gateway.setModel(STUDY_SESSION_KEY, id).catch(() => {});
+      },
+      (e) => alert(`切换模型失败：${(e as Error).message}`),
+    );
   };
   // "现在该学什么"每分钟刷新一次
   const [, setTick] = useState(0);
@@ -404,7 +408,7 @@ export default function StudyPage({ embedded = false }: { embedded?: boolean } =
   };
 
   const delMaterial = async (m: StudyMaterial) => {
-    if (!window.confirm(`删掉资料「${m.name}」？`)) return;
+    if (!window.confirm(`删掉资料「${m.name}」？挂着它的课会自动解绑，课本身不动。`)) return;
     try {
       const r = await fetch(`/__rana/study/material?id=${encodeURIComponent(m.id)}`, { method: "DELETE" });
       const j = (await r.json()) as { ok?: boolean; error?: string };
@@ -1107,13 +1111,11 @@ export default function StudyPage({ embedded = false }: { embedded?: boolean } =
             <div className="cc-acts" style={{ marginTop: 8 }}>
               <select
                 className="set-input study-model"
-                value={pickModel || studySession?.model || ""}
+                value={pickModel}
                 onChange={(e) => changeModel(e.target.value)}
-                title="排课/出题/判分用哪个脑子（作用于「📚 学习计划」专用会话，选完立即生效）"
+                title="排课/出题/判分用哪个脑子——与会话页的模型选择器同步：这里改＝那边改，两边永远一致"
               >
-                <option value="">
-                  跟随会话{studySession?.model ? `（${modelSuffix(studySession.model)}）` : "（她的默认）"}
-                </option>
+                {!pickModel && <option value="">读取当前模型…</option>}
                 {modelGroups.map(([provider, items]) => (
                   <optgroup key={provider} label={provider}>
                     {items.map((m) => (
