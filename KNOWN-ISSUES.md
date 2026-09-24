@@ -21,12 +21,13 @@
 
 ## 登记区
 
-## \[已解决] 网页看不到她的思考流——网关默认丢弃推理内容，`reasoningDefault` 未配置（2026-09-21）
+## \[上游限制] 网页（webchat）看不到她的实时思考——网关广播层不支持转发推理载荷（2026-09-22 修正）
 
-- 症状：qwen3.8/deepseek 等思考型模型干活时，前端只有猫爪转圈，看不到"她在想什么"，无法区分"在想"还是"卡住"。rana-web 前端的「💭……在想」折叠块与 `<think>` 解析（`lib/reasoning.ts`）是现成的，缺的是网关侧根本没发。
-- 根因：openclaw 运行时对带 `isReasoning` 标记的流式载荷有总闸——`reasoningPayloadsEnabled !== true 就直接丢弃`，而它由会话级 `reasoningLevel`（默认 off）或 agent 级 `reasoningDefault` 决定；off=藏起、on=回复附思考、**stream=边想边发 `<think>`**（dist 里 `formatReasoningEvent` 明示三档语义）。
-- 解决方案：① 临时/单会话：在该会话里发斜杠命令 `/reasoning stream`（别名 `/reason`）——只写会话存储，不触发配置热重载，运行中也能安全用；② 永久/全部会话：openclaw.json 的 `agents.entries.main.reasoningDefault: "stream"`（2026-09-21 已配，热重载一次生效）。前提：顶栏 💭 开关开着（默认开）。注意 qwen3.8-flash 配置里 `params.enable_thinking:false` 并不拦推理 token（当日实测 reasoningTokens 照常计），只是不出正文——两码事。
-- 状态：已解决（配置生效；下一个回合起思考流实时可见）。
+- 症状：qwen3.8/deepseek 等思考型模型干活时，网页只有转圈动画，看不到思考流；`/reasoning stream` 命令"看似无效"。
+- 实测证据链（2026-09-22）：① 命令与会话级设置**生效**（`/reasoning on/stream` 回执正常，state 库 session_nodes.entry_json 的 reasoningLevel 如实写入）；② 模型**真的在思考**（一轮"只回一个字"的测试 usage.reasoningTokens=141）；③ 但 webchat 的 chat 事件 delta **一个思考字节都没有**——dist 里 server-chat（webchat 广播模块）全文零 reasoning 处理，isReasoning 载荷在该路径被丢弃；④ 想让思考以 `<think>` 内联进文本流需要 provider 走"tagged"输出模式，而该模式由 provider 插件决定（`resolveReasoningOutputMode` 无插件时恒为 native），openclaw.json 自定义 provider 无从配置。
+- 缓解：① rana-web 前端的「💭」折叠块只对**内联** `<think>`/`<details>` 的模型有效（本地 RP 系），云端原生推理模型无解；② 实用的替代是前端"安静计时器"（运行中超时无动静就提示可能在想/在等审批）＋审批页签角标联动（待做）；③ 根解等 openclaw 上游给 webchat 通道加推理车道（官方 issue 候选）。
+- 关联：`agents.entries.main.reasoningDefault` 目前设为 "stream"——对 webchat 无效果但也无害；其他渠道（QQ）未见思考外发。此前 2026-09-21 把本条登记为"已解决"是**错误结论**，特此修正。
+- 状态：上游限制（前端侧缓解方案待用户拍板）。
 
 ## \[已解决] 云端模型弹窗里"把旧行 id 改成新模型"会残留旧名字——顶栏挂错名（2026-09-21）
 
@@ -35,13 +36,13 @@
 - 解决方案：① 根因——upsertProvider 改为"旧档案里没有的新 id 一律 name=id"，不再信任表单残留名（2026-09-21 已上线）；② 存量数据——qwenanliang 两行错位名手工归位（同日完成，热重载生效，顶栏已验证显示正确）。
 - 状态：已解决（根因+存量都处理完；同日上线的弹窗改动还有：未保存改动关闭/切换拦截、保存后 3.6s 自动核对网关目录并琥珀色警示）。
 
-## \[已解决·操作口径] 页面触发会话的 exec 审批送不到 QQ——去网页「审批」页手动批（2026-09-21）
+## \[已解决·操作口径] 页面触发会话的 exec 审批送不到 QQ——去网页「审批」页手动批（2026-09-21；2026-09-22 已按主人决定整体关闭审批）
 
 - 症状：排课等页面触发（study-planner 会话）的运行中，Rana 请求跑命令（exec/python），网关日志连刷 `approval-handler: no QQ target for <id> (session=agent:main:study-planner)`，会话 stalled 在 blocked_tool_call；命令既没批准也没拒绝，干等 15 分钟自动作废。
 - 根因：审批推送目标按会话来源解析——页面触发的会话没有 QQ 目标，审批通知无处投递（会话与 QQ 无绑定）。审批**记录本身正常落在 state 库**（`state/openclaw.sqlite` 的 `operator_approvals` 表），只是推送不出去。
-- 解决方案（操作口径）：**网页「🛡 审批」页能看到全部待批**（页签角标数字即待批数）。注意首屏要等 ~6 秒（`?withGrants=1` 要跑一次官方 CLI 查长期许可，别看是空的就关）；点「批准」走官方 `approvals resolve <id> allow-once`，她立刻续跑。2026-09-21 实测连批两条均生效。另：审批安全闸对"无法安全绑定"的命令（如 powershell 管道）直接 SYSTEM_RUN_DENIED，这类到不了审批页，Rana 会自己换 read 工具绕过，属设计内。
+- 解决方案：**2026-09-22 起审批已整体关闭**（主人拍板：自动化优先）——openclaw.json 的 `agents.entries.main.tools.exec = { security: "full", ask: "off" }`，执行不再询问、全放行；配套在工作区 AGENTS.md 加了「过程直播纪律」（她每个动作前先在会话说一句），弥补网页看不到思考流的上游缺口。实测：dir 命令直跑零审批、边干边说生效。历史口径（审批页手动批、首屏等 6 秒）保留备查——若日后想恢复审批，删掉 tools.exec 那段即回原状。
 - 关联：17:15 网关曾自行重启一次（前有 QQ WS 4009 超时），在飞的排课运行竟存活续跑，原因未查；再发生时先看 `%TEMP%\openclaw\openclaw-当日.log`。
-- 状态：已解决（手动批的操作口径；审批到达时 webchat 角标之外的主动提醒属于增强，未做）。
+- 状态：已解决（审批关闭 + 过程直播替代可见性）。
 
 ## \[已解决] 排课/换课件后 Agent 连续「couldn't generate a response」——默认输出额度 8192 被思考 token 烧光（2026-09-21）
 
