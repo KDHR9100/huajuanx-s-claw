@@ -34,4 +34,12 @@ rem Port-locked against multi-start. Log: %TEMP%\openclaw\embedding-watchdog.log
 findstr /C:"localhost:1234" "%OPENCLAW_STATE_DIR%\openclaw.json" >nul 2>nul
 if not errorlevel 1 start "" /B "%RANA_NODE%" "%~dp0..\tools\embedding-watchdog.mjs"
 
+rem SSE fix proxy: the sillytraven relay never terminates SSE streams with
+rem finish_reason/[DONE], and openclaw drops such replies as failed runs.
+rem Started only when the rp-nsfw provider points at the proxy (port 18801).
+rem Port-locked against multi-start. Log: %TEMP%\openclaw\sse-fix-proxy.log
+rem See KNOWN-ISSUES.md entry 2026-09-25.
+findstr /C:"127.0.0.1:18801" "%OPENCLAW_STATE_DIR%\openclaw.json" >nul 2>nul
+if not errorlevel 1 start "" /B "%RANA_NODE%" "%~dp0..\tools\sse-fix-proxy.mjs"
+
 "%RANA_NODE%" --tls-max-v1.2 "%OPENCLAW_MJS%" gateway

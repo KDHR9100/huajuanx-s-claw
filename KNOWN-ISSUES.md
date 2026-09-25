@@ -21,6 +21,15 @@
 
 ## 登记区
 
+## \[已解决·本机补丁] 微信 RP 无回复——sillytraven 中转站 SSE 流从不发结束标记，openclaw 把已生成完毕的回复整段判失败丢弃（2026-09-25）
+
+- 症状：微信发消息给乐奈无回复（微信端最多收到一条 55 字符的 `⚠️ Agent run failed` 报错文本）；网页端能看到消息镜像进来，看起来像"网页好微信坏"。网关日志：weixin inbound 正常，embedded run 报 `Stream ended without finish_reason`（model rp-nsfw/nalang-turbo-0826），dispatch outcome=error。`channels status` 微信 running、in 实时——收信链路无恙，坏在模型调用层。
+- 实测证据链：出事时刻精确对齐 09-25 04:43 把 RP 模型切到 rp-nsfw（该供应商 09-24 14:33 才加入）之后——中转站 api.sillytraven.dev 的 SSE 流**内容完整但从不发 finish_reason 块与 [DONE]**，openclaw 严格按协议收流，等不到结束标记即判整次 run 失败并丢弃全文。绕开 openclaw 直连该站实测八次（nalang-turbo-0826/1115、x-apex-dash-0826 三种型号 × 长短输出 × stream_options × Accept/UA 请求头）全部复现"内容完整+缺结束标记" → 服务端流式实现残缺，与我方无关（钥匙有效：假钥匙被拒 HTTP 400；本机无代理环境变量、hosts/DNS 干净、证书校验通过）。
+- 为什么"之前直连脚本生成训练数据是好的"：rp-tune/st-continue.py、rp-eval/llm_client.py 收流方式宽容——读到对端关闭为止、拼 delta、[DONE] 有没有无所谓——结束标记缺失对它们无感；且脚本用的是 x-apex-dash-0826（实测同样无结束标记），分界在**客户端严格性**而非型号。内容本身从未丢过。
+- 解决方案（2026-09-25 落地）：本机架"补暗号"代理 `tools/sse-fix-proxy.mjs`（127.0.0.1:18801，零依赖 Node）：SSE 响应缺结束标记时在流末尾补 `finish_reason:"stop"` 块 + `[DONE]`；非 SSE（JSON 报错等）原样透传；上游若修复自动退化为纯透传；钥匙不经手仍由 openclaw 持有。openclaw.json `models.providers.rp-nsfw.baseUrl` → `http://127.0.0.1:18801/v1`（备份 `.bak-ssefix-20260925`），热重载即生效无需重启网关；`start-gateway.cmd` 挂条件自启动（配置含 `127.0.0.1:18801` 才拉起；端口锁防多开，同 embedding-watchdog 规矩）。验证：代理三态测试（注入 / 400 透传 / JSON 透传）全过，微信实测回复成功。
+- 排障抓手：代理日志 `%TEMP%\openclaw\sse-fix-proxy.log`（每请求一行，FIXED/passthrough/empty-sse 三态）；网关日志搜 `Stream ended without finish_reason`。换上游站点或端口需同步代理的 SSEFIX_PORT/SSEFIX_UPSTREAM 环境变量与 start-gateway.cmd 里的 findstr 条件。回退 = 还原 .bak + 杀代理进程。
+- 状态：已解决（2026-09-25 微信实测恢复）。上游协议缺陷未反馈站长（主人拍板不反馈）。
+
 ## \[上游限制] 网页（webchat）看不到她的实时思考——网关广播层不支持转发推理载荷（2026-09-22 修正）
 
 - 症状：qwen3.8/deepseek 等思考型模型干活时，网页只有转圈动画，看不到思考流；`/reasoning stream` 命令"看似无效"。
@@ -587,6 +596,7 @@
 - 再遇到先看：`%TEMP%\openclaw\openclaw-当日.log` 尾部是否又是 `stalled session … activeTool=exec`。**若复现 2 次以上，去翻心跳/巡检 cron 里 exec 调的命令**（health-patrol.mjs / 问候 cron），给它们加超时。
 - 附带模式（非故障）：Git Bash 后台任务跑 start-gateway.cmd 时，cmd 把脚本里的 UTF-8 中文注释按 GBK 拆碎报"不是内部或外部命令"且任务退出码 1——**gateway 子进程照常起来**。判活只认 `netstat :18789 LISTENING`，别信后台任务退出码。
 - **09-20 19:12 第二起网关卡死（变体：进程活、服务死）**：18:39–19:12 之间发生，表现为 CLI/网页 WS 握手全部超时（`Opening handshake has timed out`）但 18789 端口仍在听、QQ 通道 18:25 前还健康；当期无任何任务运行、日志无任何异常（连 stalled 都没有）。19:14 标准重启恢复。与前晚 21:48 无声退出案是否同族未知。**若再现 2 次，考虑做网关健康看门狗（netstat+WS 握手探测→自动重启）。**
+- **09-24 第 4 起且最重：凌晨卡死 6.5 小时**——03:40 后日志死寂至 10:17 苏醒，期间 04:30 画像正班与清晨记忆桥/巡检全错过（苏醒后自动补跑成功）；回溯 09-23 周一 09:00 时段同样死寂过 → **当天 Git 周报新链路首秀被吞**（无收据无报错，下次自动在下周一）。10:49 重启恢复。另注：卡死后 CLI 查大响应（如备份收据）偶发 WS 1006 断连，DB 直读可绕过。主程序 9.3+ 修了会话重连/更新恢复，**升级 9.5（QQ 插件 2.0.4 已发布，触发条件已满足）是候选根治路**；主人 09-24 拍板：暂不动、先观察，看门狗/升级/补跑周报三项均挂起待唤。
 - **09-20 定案并档**：死因链条实锤 = exec 审批无受众挂起（审批历史 09-19 21:30/21:45 两发均 no-target → 挂起 → gateway-restart/run-aborted 收场），09-20 11:19–14:41 复发六轮，已按本条目预案处置——详见同日新条目「exec 审批在隔离会话送不到人」。"给 exec 加超时"的路没走：真正缺的是审批层的快速失败，提示词层禁 exec 已够用。
 
 ## \[已落地+已验证] 群聊幻觉二轮：评价类发言射程缺口 + 正面条款补丁与对照测试（2026-09-21）
