@@ -106,6 +106,9 @@ export default function NewsPage() {
                 : "今天还没生成过。"}
             {error && <span className="sys-err">（{error}）</span>}
           </p>
+          <button className="news-regen" disabled={generating} onClick={() => void generate()}>
+            {generating ? "……在印，稍等十几秒" : "🔍 手动生成 / 刷新"}
+          </button>
         </div>
 
         {generating && !fresh && (

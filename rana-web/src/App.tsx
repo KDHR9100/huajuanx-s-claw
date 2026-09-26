@@ -19,6 +19,7 @@ import BangumiPage from "./components/BangumiPage";
 import AppsPage from "./components/AppsPage";
 import GroupsPage from "./components/GroupsPage";
 import DshPage from "./components/DshPage";
+import MemoryPage from "./components/MemoryPage";
 import ErrorBoundary from "./components/ErrorBoundary";
 import SettingsModal from "./components/SettingsModal";
 import LmStudioModal from "./components/LmStudioModal";
@@ -133,6 +134,12 @@ export default function App() {
             <main className="main">
               {connError && <div className="err-banner">⚠ {connError}</div>}
               {page("派活", <DshPage />)}
+            </main>
+          )}
+          {view === "memory" && (
+            <main className="main">
+              {connError && <div className="err-banner">⚠ {connError}</div>}
+              {page("记忆", <MemoryPage />)}
             </main>
           )}
         </div>
