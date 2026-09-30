@@ -112,6 +112,11 @@ function ZwLines({ zw, mode }: { zw: ZiweiResult; mode: ZwMode }) {
                 {isYunSoul && (
                   <i className={`zw-yun-tag ${mode === "decadal" ? "dy" : "ln"}`}>{mode === "decadal" ? "大限命宫" : "流年命宫"}</i>
                 )}
+                {!isYunSoul && scope?.palaceNames?.[p.zhi] && (
+                  <i className={`zw-yun-tag ${mode === "decadal" ? "dy" : "ln"} pname`} title={`${scope.label}盘的${scope.palaceNames[p.zhi]}宫`}>
+                    {scope.label}·{scope.palaceNames[p.zhi]}
+                  </i>
+                )}
               </span>
               <span className="zw-gz">
                 {p.gan}

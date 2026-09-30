@@ -1,6 +1,6 @@
 {
  "ok": false,
- "reason": "本地已备份但远端落后 2 个提交（push 失败）",
+ "reason": "本地已备份但远端落后 6 个提交（push 失败）",
  "detail": "修复：挂好代理后 git -C K:/openclaw-backup push origin main",
- "checkedAt": "2026-09-25T22:02:57.855Z"
+ "checkedAt": "2026-09-29T16:39:15.181Z"
 }

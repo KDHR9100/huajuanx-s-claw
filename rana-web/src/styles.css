@@ -2425,3 +2425,6 @@ label.lib-cand { cursor: pointer; }
   background: var(--accent); color: #fff; font-size: 13px; font-weight: 600;
 }
 .news-regen:disabled { opacity: 0.5; cursor: default; }
+
+/* 运限盘十二宫名重排角标（次于本命宫名，弱化显示） */
+.zw-yun-tag.pname { opacity: 0.82; font-weight: 400; letter-spacing: 0.5px; }

@@ -21,6 +21,13 @@
 
 ## 登记区
 
+## \[已解决] 每晚日报把没办成的事写成办成了——日报无核实步骤，照日记字面润色升级（2026-09-26）
+
+- 症状：22:00 双人晚报「今天的工作」出现「按约把三笔账一起算清」，实际当天只向对方发过一条计划提纲消息、对方始终未回，事情根本没办——没做成被写成了做成了。
+- 根因（两层叠加）：① 日记只记动作不记结果——亲历事件的主会话写了「我按约定去谈了」，没写「对方未回、未闭环」，唯一信源缺状态；② 晚报是隔离小会话，只读三个记忆文件、工具调用≤6次，提示词仅约束「不确定的不编」，没有「必须区分做没做成」的纪律，而列点格式天然诱导模型把动作润色成成绩；隔离会话禁 exec、聊天记录在 agent sqlite 里，日报任务也**没有能力**回查原始对话核实。
+- 解决方案（2026-09-26 落地，A+B 组合 = 亲历者先确认、汇报再保真）：**A.** evening-report cron 提示词加「状态红线」：只有文件明确写「完成/办成了」才准写完成态；「发了没回／约了没进行／谈了一半没结论」必须照实写；从文件看不出结果的写「进行了/待进行」，禁止升级成完成。**B.** workspace-main/AGENTS.md 记忆三件套加「日记必须记结果」规矩：每记「我做了X」必须跟实际结果（办成/没回/没谈拢/约了未进行），未闭环的标注「未闭环」。
+- 状态：已落地，待连看几晚日报确认不再出现完成态美化（首个观察样本：当晚 22:00 日报）。
+
 ## \[已解决·本机补丁] 微信 RP 无回复——sillytraven 中转站 SSE 流从不发结束标记，openclaw 把已生成完毕的回复整段判失败丢弃（2026-09-25）
 
 - 症状：微信发消息给乐奈无回复（微信端最多收到一条 55 字符的 `⚠️ Agent run failed` 报错文本）；网页端能看到消息镜像进来，看起来像"网页好微信坏"。网关日志：weixin inbound 正常，embedded run 报 `Stream ended without finish_reason`（model rp-nsfw/nalang-turbo-0826），dispatch outcome=error。`channels status` 微信 running、in 实时——收信链路无恙，坏在模型调用层。
@@ -613,3 +620,25 @@
 - 附带发现：`qwenanliang` 明文 key 的免费额度已耗尽（qwen3.7-plus / glm-5.2 均 403），`bailian` 同 key 疑似同源——旁路任务若还在用这套额度会静默失败，待巡检确认。
 
 
+
+## [已解决] 第三方插件安装四连坑：TS-only 链式装 / load.paths 残留 / ClawSec 双错位 / ClawBridge 全网卡（2026-09-27）
+
+装 env-guard、snippet-store（awesome-openclaw-plugins）、ClawSec、ClawBridge 时踩的全套：
+
+1. **awesome 仓库插件只有 TS 源码**（index.ts 无 dist）：包安装模式拒收（"requires compiled runtime output"）。**用链接模式 `plugins install -l ./<name> --force --accept-capabilities`**（开发路径允许 TS 直载）；--force 过未审计警告，--accept-capabilities 过能力授权。
+2. **链接安装会往 `plugins.load.paths` 追加路径且不去重**：目录改名/重链后旧路径残留 → 整个 openclaw.json 判 invalid（CLI 全挂）。修法：手改 load.paths 去重（备份 .bak-plugins）+ `config validate`。**克隆目录别用 tmp-* 名再改名，一次放到位。**
+3. **ClawSec（skills CLI）两处硬编码 HOME**：`INSTALL_ROOT` 实测不生效（照样装 ~/.openclaw/skills）；advisory hook 脚本把 HOOKS_ROOT 写死 ~/.openclaw/hooks 且 spawnSync 调 `openclaw` bash shim 必 ENOENT。修法：装完手动 `mv` skill 目录到 `<state>\skills\`、hook 目录手动 cp 到 `<state>\hooks\`、再 `openclaw hooks enable <名> --agent main`（多 agent 必须 --agent）。本机正确根：K:\OpenClaw\.openclaw\.openclaw\{skills,hooks}。
+4. **ClawBridge 默认 listen(PORT, '::') 绑全网卡**，唯一鉴权是 URL ?key=。本机化：index.js 改 BIND env 默认 127.0.0.1；.env 配 OPENCLAW_STATE_DIR + OPENCLAW_WORKSPACE（否则 workspace 误指仓库根）；启动脚本 .openclaw\start-clawbridge.cmd，手动跑不开机自启。
+
+通用教训：**凡是默认写 ~/.openclaw 的第三方安装器，在本机（OPENCLAW_STATE_DIR 覆盖）都会装错地方**——装完必查文件真落在哪，错了手动搬。
+
+## [已落地] QQ 官方 bot 群消息撤回链路 + 邮件私密送达 + 算命档案（2026-09-30）
+
+群聊算卦三件套（撤回/邮件/档案）落地过程中的坑与解法：
+
+1. **撤回可行性与权限**：官方接口 `DELETE /v2/groups/{group_openid}/messages/{message_id}`（hidetip 参数控制小灰条）。前提：**bot 被设为群管理员**（群主在 QQ 客户端设置，官方 bot 可以当）。文档写"超 2 分钟不可撤"，**实测发出约 6 分钟仍 200 成功**，管理员身份窗口比文档宽。
+2. **message_id 拿法**：qqbot 插件不把 msgId 落盘（内存 msgid-cache 只供被动回复）。可靠来源 = 该 agent 自己的 `agents/<id>/agent/openclaw-agent.sqlite` 表 `transcript_events`，字段路径 `event_json → message.__openclaw.transport.messageId`（同层还有 senderId/senderName 可做 --sender 精准过滤）。node:sqlite（node 24）只读打开在线库无锁问题（别碰 vec0 虚拟表即可）。
+3. **官方 token 接口是 JSON 驼峰 body**：`POST https://bots.qq.com/app/getAppAccessToken` 用 `{"appId":...,"clientSecret":...}`；用 form 格式（grant_type/appid/secret）会报 `100007 appid invalid`，别被误导去查配置。
+4. **agent 跑命令的安全收口**：exec 白名单模式（`tools.exec.mode=allowlist`）+ 每个脚本配 `.cmd` 启动器，allowlist 只放 `**/workspace-rana-qq-public/skills/*/*.cmd` 一条——node 本身不放行，公开群聊场景防诱导。深色细节：`openclaw approvals allowlist add --agent <id> "<glob>"`。
+5. **cmd 传参 `\n` 坑**：SKILL.md 教 agent"换行写 \n"，但命令行传参 `\n` 是字面两字符，邮件正文全是 `\n`。修法在脚本侧兜底：`body.replace(/\n/g,'\n')`——agent 侧永远教不会，脚本必须自己转。
+6. **官方 bot 未发布时的私聊限制**：除管理员 QQ 外无人能加 bot 好友 → C2C 私聊对普通群友不可用（40054004 无好友关系）；群里拿到的 member openid 与 c2c openid 不是一套体系。私密送达唯一现实通道 = 邮件（群友主动留邮箱）。卡片消息全员可见，无按人可见性，别试图用卡片做私密返回。

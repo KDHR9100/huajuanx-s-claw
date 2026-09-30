@@ -403,6 +403,8 @@ export interface YunScope {
   mutagenAt: Array<{ star: string; tag: string; zhi: string }>;
   /** 每宫的流耀（运X/流X），按地支 */
   flowStars: Record<string, string[]>;
+  /** 运限十二宫名重排（大限/流年自己的命宫兄弟夫妻…落在哪个地支宫），按地支 */
+  palaceNames: Record<string, string>;
   /** 小限虚岁（decadal 时附带） */
   nominalAge?: number;
 }
@@ -422,6 +424,14 @@ function yunScopeOf(h: any, palaces: ZwPalace[], kind: "decadal" | "yearly"): Yu
     const zhi = palaces[idx]?.zhi;
     if (zhi && arr?.length) flowStars[zhi] = arr.map((s) => String(s.name ?? "")).filter(Boolean);
   });
+  // 运限十二宫名重排：palaces 按地支固定序（寅起顺布），宫名序列（命→兄→夫…）逆数组方向；
+  // 运限命宫落 seg.index，则宫 i 的运限宫名 = SEQ[(segIndex - i + 12) % 12]
+  const SEQ = ["命宫", "兄弟", "夫妻", "子女", "财帛", "疾厄", "迁移", "仆役", "官禄", "田宅", "福德", "父母"];
+  const palaceNames: Record<string, string> = {};
+  const segIdx = Number(seg.index ?? -1);
+  palaces.forEach((p, i) => {
+    if (segIdx >= 0) palaceNames[p.zhi] = SEQ[(segIdx - i + 12) % 12];
+  });
   return {
     kind,
     label: kind === "decadal" ? "大限" : "流年",
@@ -430,6 +440,7 @@ function yunScopeOf(h: any, palaces: ZwPalace[], kind: "decadal" | "yearly"): Yu
     mutagen,
     mutagenAt,
     flowStars,
+    palaceNames,
     ...(kind === "decadal" && h?.age ? { nominalAge: Number(h.age.nominalAge) } : {}),
   };
 }
