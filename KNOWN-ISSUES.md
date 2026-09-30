@@ -642,3 +642,16 @@
 4. **agent 跑命令的安全收口**：exec 白名单模式（`tools.exec.mode=allowlist`）+ 每个脚本配 `.cmd` 启动器，allowlist 只放 `**/workspace-rana-qq-public/skills/*/*.cmd` 一条——node 本身不放行，公开群聊场景防诱导。深色细节：`openclaw approvals allowlist add --agent <id> "<glob>"`。
 5. **cmd 传参 `\n` 坑**：SKILL.md 教 agent"换行写 \n"，但命令行传参 `\n` 是字面两字符，邮件正文全是 `\n`。修法在脚本侧兜底：`body.replace(/\n/g,'\n')`——agent 侧永远教不会，脚本必须自己转。
 6. **官方 bot 未发布时的私聊限制**：除管理员 QQ 外无人能加 bot 好友 → C2C 私聊对普通群友不可用（40054004 无好友关系）；群里拿到的 member openid 与 c2c openid 不是一套体系。私密送达唯一现实通道 = 邮件（群友主动留邮箱）。卡片消息全员可见，无按人可见性，别试图用卡片做私密返回。
+
+## [已落地] /helps 秒回帮助文档：qqbot 插件 dist 补丁 + 回滚法（2026-09-30）
+
+**需求**：群里 `/helps` 直接回算命帮助文档，不过模型。
+
+**终局方案（当前生效）**：qqbot 插件 dist 本地补丁——`npm/projects/tencent-connect-openclaw-qqbot-a7ec020d86/node_modules/@tencent-connect/openclaw-qqbot/dist/index.cjs` 的 `buildCommandList` 加 `suanHelpEcho()` 命令（name=`helps`，AI 队列前拦截）。**文案文件（改这里，热生效免重启）：`K:\OpenClaw\.openclaw\.openclaw\extensions-local\suan-help-echo\help.md`**。dist 备份：同目录 `index.cjs.bak-helps-20260930`。**插件升级会覆盖补丁，`/helps` 失效即重打**（插入函数+push 一行，见备份 diff）。
+
+**回滚法（改走模型，免维护补丁）**：① 备份拷回 dist/index.cjs；② 面板第三项 PUT 改回 `/suan help`（POST/PUT /v2/panels，panel_id `p_Ywe8pHe8u40JDxBLqfpLGB`）；③ 重启网关。回滚后**文案源头换人：`workspace-rana-qq-public/skills/suan-help/SKILL.md`**（模型照它复述，改完即时生效但每次回复过模型 3~5 秒）。
+
+**弯路存档（别再走）**：
+- 网关不加载 `plugins.load.paths` 链接插件（启动日志 17 插件清单可验证；env-guard/snippet-store 同样不在内），`openclaw plugins install -l` 只有 CLI 进程能加载；
+- `/help` 是宿主内置命令，AI 队列前就被吃，自定义钩子抢不到——用 `/helps` 避开；
+- internal hooks 的 `message:received` 只能观察不能拦截直回。
