@@ -79,7 +79,9 @@ async function check() {
       && insts[0].config?.context_length === STANDARD_CTX;
     if (!ok) {
       log(`偏离目标态（实例数=${insts.length}，各ctx=${insts.map(i => i.config?.context_length ?? '?').join(',')}），开始纠正`);
-      await enforce();
+      await enforce(insts);
+      // [2026-10-02 fix] JIT 竞态追杀：纠正后 15s/45s 各快查一次，JIT 抢跑的份在裂出的十几秒内就摘掉
+      scheduleFastFollowUp();
       // 纠正后立刻复查，把结果记下来
       const after = await getLoadedInstances();
       log(`纠正完成，复查：实例数=${after?.length ?? 0}，ctx=${(after ?? []).map(i => i.config?.context_length ?? '?').join(',')}`);
@@ -107,10 +109,14 @@ async function getLoadedInstances() {
   return m ? m.loaded_instances ?? [] : [];
 }
 
-// 纠正：unload 全部 + 纯 CPU 重载一份
-async function enforce() {
-  const insts = await getLoadedInstances().catch(() => []);
-  for (const inst of insts) {
+// [2026-10-02 fix] 纠正升级：优先保留标准实例（ctx 正确的那份），只摘非标份——
+// 全清重载会造成无模型空档，OpenClaw 的请求恰在空档进来就会 JIT 抢跑裂份（12:46 现场实证）。
+// 仅当不存在标准实例时才全清 + 重载。
+async function enforce(insts) {
+  const cur = Array.isArray(insts) ? insts : await getLoadedInstances().catch(() => []);
+  const std = cur.find(i => i.config?.context_length === STANDARD_CTX);
+  const targets = std ? cur.filter(i => i.id !== std.id) : cur;
+  for (const inst of targets) {
     try {
       const res = await fetch(`${BASE}/api/v1/models/unload`, {
         method: 'POST',
@@ -123,7 +129,18 @@ async function enforce() {
       log(`unload ${inst.id} 失败：${e.message}`);
     }
   }
-  await lmsLoad();
+  if (!std) {
+    await lmsLoad();
+  } else if (targets.length > 0) {
+    log(`已保留标准实例（ctx=${STANDARD_CTX}），仅摘除 ${targets.length} 个非标份，不触发重载空档`);
+  }
+}
+
+// [2026-10-02 fix] 纠正后的快速追杀定时器（15s/45s 各一轮）
+function scheduleFastFollowUp() {
+  for (const delay of [15_000, 45_000]) {
+    setTimeout(() => { check().catch(() => {}); }, delay);
+  }
 }
 
 function lmsLoad() {
