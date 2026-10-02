@@ -23,6 +23,12 @@ rana-web/tmp-*
 rana-web/openclaw.*
 rana-web/wechat-mode-*.cmd
 rana-web/fix-ws-path.mjs
+
+# 私有备份健康自检产物（运行时状态文件：含本地备份目录与推送落后计数，每天自动重写，不入公开仓库）
+rana-web/.backup-check/
+
+# 第三方库自动生成的训练编译缓存（Unsloth 运行时产物，非本项目源码，不入公开仓库）
+unsloth_compiled_cache/
 # 私密记忆桥（NSFW 场景基础设施，不入公开仓库；共享桥 memory-bridge.mjs 保持公开）
 rana-web/private-memory-bridge.mjs
 # RP 评估脚手架与语料/转写（含私人向素材与生成对话，整体本地化）

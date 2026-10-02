@@ -21,6 +21,27 @@
 
 ## 登记区
 
+## \[已解决·本机修复] 9.7 后兜底心跳连班虚报"巡检脚本停摆"——心跳 cwd 变成通用 workspace，提示词相对路径全凭模型拼、时对时错（2026-10-03）
+
+- 症状：10-02 当天 4 班心跳（11:51/14:51/17:51/23:51）向主人 QQ 虚报「巡检状态文件 memory/patrol-status.md 不存在，零成本巡检脚本疑似停摆」；实际 health-patrol.mjs 全程健在（状态文件每 30 分钟照常更新，23:30 仍有新班）。同日 21:00 班用 optional 读取沉默放过、22:00 晚报班又碰巧读对——**同一提示词时对时错**是最大线索。
+- 根因：心跳提示词让读**相对路径** `memory/patrol-status.md`。升级 2026.9.7 后心跳隔离会话的 cwd 是 `state/workspace`（通用目录），不是 main 的 `workspace-main`；旧版系统能把相对路径按 agent workspace 正确解析，9.7 下模型拿到错误 cwd 后自己拼绝对路径，拼成 `workspace\memory\patrol-status.md` → File not found → 按纪律报"停摆"。诊断路径：agent 库 `agents/main/agent/openclaw-agent.sqlite` 的 `transcript_events` 表按 session 拉心跳班次原文（session 事件 cwd 字段 + read 调用实锤；注意 `heartbeat_outcomes` 表是空的，别在那白等）。
+- 解决方案：心跳提示词里的路径写死绝对路径 `K:/OpenClaw/.openclaw/.openclaw/workspace-main/memory/patrol-status.md`（openclaw.json `agents.defaults.heartbeat.prompt`，备份 `openclaw.json.bak-hbpath-20261003`）。**教训：心跳/cron 类提示词里引用文件一律写绝对路径，绝不依赖相对路径解析——升级后 cwd 基准可能悄无声息地变**。
+- 状态：已解决（2026-10-03 落地；下一班心跳自然验证，若仍读错再查配置热载、必要时重启网关）。
+
+## \[已解决·平台限制] RP 偶发 "provider rejected the request schema or tool payload"——SillyTraven 免费中转间歇性 400 空错误体，与内容/本地改动无关（2026-10-02）
+
+- 症状：RP 会话（rp-nsfw/nalang-turbo-0826）偶发整回合失败，报 `LLM request failed: provider rejected the request schema or tool payload.`；日志签名 `400: [Malformed diagnostic JSON redacted]` + failoverReason=format + rawErrorHash `sha256:341298593183`（注意：此 hash 与 10-01 问卜阿里云审查 400 同指纹，但那只说明"错误体不是合法 JSON"，两案上游完全不同，勿混淆）。sse-fix-proxy 侧对应 `-> 400 empty-sse`。实例：10-01 14:04/14:06、10-02 15:07（转录里留下的空 assistant 消息 seq 即失败残骸）。
+- 排除过程（内容假说逐条证伪）：①同款 400 在本地任何改动之前就有（10-01 14:04）；②直打中转 A/B 对照——干净最小请求、历史带 openclaw.inbound_meta 信封回显的请求、普通历史请求三发全 200，信封内容与 SOUL 新句子都不是扳机；③平台不稳直拍：10-02 白天内同一端点先后出现 `getaddrinfo ENOTFOUND`（DNS 瞬断自愈）、代理 502 `upstream connect failed`、空错误体 400，几分钟后又全通——免费档（50次/天）后端过载/抖动形态。真实 RP 回合（16k 上下文大请求，响应曾慢到 27s）易撞上，小探针请求都能过。
+- 解决方案：无需修本地；失败那发重发即可（13:39 失败后无重试但下一发正常）。可选加固（未拍板）：给 rana-rp 配 fallback 模型让 400 自动切换；或换免费档模型 id（nalang-turbo-1115 等）绕开单池抖动。
+- 状态：已解决（定性为平台间歇故障，观察即可；若频发再考虑 fallback/换模型）。诊断注意：同 hash 400 ≠ 同根因，先看 provider 字段再归案。
+
+## \[已解决] RP 回复开头复读 openclaw.inbound_meta/outbound_meta JSON 信封——系统提示词 Message Context 被 RP 模型整段抄进正文（2026-10-02）
+
+- 症状：网页 RP 聊天里 Rana 回复开头原样复读 ```json 信封（`openclaw.inbound_meta.v2`，channel/provider/surface=webchat），前端如实显示。同一会话库共四例：09-09 rana-rp-7b（webchat 版）、09-14 rana-rp-14b（微信 v3 版）、10-01 与 10-02 nalang-turbo-0826（云端，outbound/inbound 各一）。短输入（"hi"）+ 刚 /reset 的全新上下文最易触发；10-02 这次 reset 后第一句就犯，证明污染源是系统提示词本身、不是聊天历史。
+- 根因：OpenClaw 每回合在系统提示词注入「### Message Context」可信元数据（防提示注入用，core dist `inbound-meta-*.mjs` 的 buildInboundMetaSystemPrompt）。RP 专精模型（本地微调 7b/14b、云端 nalang）指令服从松，偶尔把它当台词复读——不是网关/前端/中转代理的 bug（sse-fix-proxy 逐块透传不碰内容），模型输出里本来就带着。
+- 解决方案（主人拍板「1+2 一起」）：**①显示层剥离**——`rana-web/src/lib/reasoning.ts` 的 `stripOpenclawEnvelope` 增补两条规则：完整 ```json 信封围栏（可带 `[时间]` 头）剥除；流式中围栏已开、出现 `"openclaw.in/out"` 前缀即整段按回显处理（信封是逐 token 吐的，等全名到齐会闪现一两秒原始 JSON）。整条只剩信封 → 走原有 sys-echo 折叠占位；`ChatStream.tsx` 的 sysEcho 占位加 `&& !streaming`（流式期间显示等待动画而非占位）。store 存原始数据不动，历史加载/落库去重零影响。esbuild 打包实测 9 用例全过（4 条真实污染样本 + 3 条既有规则回归 + 2 条不误杀），`tsc -b` 零错。**②提示词抑制**——`workspace-rana-rp/SOUL.md` 说话方式节加一句「Message Context 是背景不是台词，永远不要复读进回复」。vite dev HMR 即生效（刷新页面即可）；SOUL 下一轮对话生效。
+- 状态：已解决（显示层兜底必中，复发也只是被剥掉看不见；提示词层降频率、服从性不打包票）。旁证：`private-memory-bridge.mjs:80` 与 `rp-tune/build_dataset.py:59` 早有同款规避——此怪癖是 RP 模型家族病，换 RP 模型后留意复发。
+
 ## \[已解决·本机补丁] 升级 2026.9.7 后 QQ 入站/心跳全死 "DataCloneError"——process.env 原生对象塞进 worker 任务过不了克隆边界；9.2 回滚被 agent 库 schema 24 堵死（2026-10-02）
 
 - 症状：升级当晚 22:00 起心跳每班必死（`heartbeat failed: DataCloneError: #<Object> could not be cloned`，49ms 内暴毙）；**主人 QQ 私聊消息 00:59/01:19 两条全无回复**（`[default][handle] dispatch error: WorkerTaskError: DataCloneError`）。对照：钉 glm 的 cron（晚报/睡前小结/问候）全正常，CLI `openclaw agent` 直发同会话也正常——一度误导向"aliyun 模型运行时毒物"。
@@ -44,7 +65,7 @@
 
 ## \[已解决] 网关升级 2026.9.2→2026.9.7 + QQ 插件 2.0.4 + 三张补丁重打（2026-10-01）
 
-- 做了什么：按轩瑜工单（`workspace-main/tasks/zcode-workorder-20261001-openclaw-upgrade.md`，执行结果已回写该文件 RESULT 节）升级主程序、doctor --fix、QQ 插件升 2.0.4、重打全部 dist 补丁、重启验收。验收全绿：migrations 警告清零、superseded 零复发、openclaw 工具正常、RP 模型链路无 400、早晚问候强跑 ok、private-memory-gate 双项测试通过。
+- 做了什么：按主人工单（`workspace-main/tasks/zcode-workorder-20261001-openclaw-upgrade.md`，执行结果已回写该文件 RESULT 节）升级主程序、doctor --fix、QQ 插件升 2.0.4、重打全部 dist 补丁、重启验收。验收全绿：migrations 警告清零、superseded 零复发、openclaw 工具正常、RP 模型链路无 400、早晚问候强跑 ok、private-memory-gate 双项测试通过。
 - **版本线事实**：npm 稳定渠道 latest = **2026.9.7**（beta 同版）；「2026.9.22」是 ClawHub 商店渠道编号，与 npm 不同线——工单预期「≥2026.9.22」实为渠道混淆，2026.9.7 即本渠道最新。
 - **升级网络路**：Clash 半死（端口在听 TLS 全断，连百度不出——09-11 老病形态）时 `openclaw update` 必败于 npm ECONNRESET 且会留「update in progress」烂尾状态；正路 = **npmmirror 直连**（不走代理）：`npm i -g openclaw@<ver> --registry=https://registry.npmmirror.com --allow-scripts=@google/genai,esbuild,koffi,protobufjs,openclaw`（不带 allow-scripts 会静默跳过 postinstall 内置插件安装）；烂尾状态用「重跑一次 update（同样指镜像）让它判定 already-current」收敛。
 - **2026.9.7 dist 重构**：read 工具从 `sessions-*.js` 搬到 **`tools-*.mjs`**（模块化拆分，7529 个文件，大量 .mjs），execute 签名参数名加下划线（`_toolCallId`/`_onUpdate`）。**private-memory-gate 重打脚本已通用化**：`state tmp/apply-pmgate-patch-v2.cjs`（自动按「function createReadToolDefinition + name:"read"」定位文件、正则锚定 execute 行，多候选优选 tools-\*；更新恢复环境 `package-update-activation-recovery.mjs` 里还有一份 read 拷贝未打——恢复环境仅升级期运行，接受）。备份 `tools-BIHgerau.mjs.bak-pmgate-20261001`。
@@ -57,7 +78,7 @@
 - 症状：网页问卜会话（`agent:main:fate-teller`，会话钉 `aliyun-maas/deepseek-v4.1-flash`、fallback 随用户钉模型一起被禁用）10:40/10:48/12:39 三次 "The agent run failed before producing a reply"；日志签名恒定：`400: [Malformed diagnostic JSON redacted]` + failoverReason=format + rawErrorHash `sha256:341298593183`（与 09-14 qwen 隔离 turn 事件同指纹）。诡异点：11:12 连通性测试一发通过、12:36 同会话两次后台运行 4 发全 200，显得随机玄学。
 - 根因：当天 10:38 记忆任务中她用 read 把 `workspace-main/memory/shared-rana-2026-09.md`（1.96 万字、双 agent 陪伴记忆、含私密向内容）**全文读进会话上下文**（转录 seq 171 工具结果），此后该会话每次请求都带着这段内容 → 阿里云 token-plan 的 data inspection（内容审查）大概率拦截，真实错误码 `data_inspection_failed`（"Input text data may contain inappropriate content"）。**审查是概率性的**（同载荷偶有放行——11:12 与 12:36 即漏网样本）。日志里的 "Malformed diagnostic JSON" 是二次假象：流式模式下 400 错误体是 SSE 包着的 JSON（`data: {...}`），openclaw 按 JSON 解析失败才显示红字。**本条修正 09-14 条目「端点日间不健康已自愈」的结论：同指纹事件实为上下文内容撞审查闸门，不是端点随机病。**
 - 实证（重放实验：密钥从 state 库 `secret_store_entries` 读入内存直打 token-plan 端点，不落盘不打印）：① 用转录重建当日失败载荷直发 → 6/6 复现 `data_inspection_failed`（流式/非流式皆拦）；② 同载荷把 shared-rana 文件内容替换为占位符 → 200；③ 该文件前 8000 字单独发 → 200（扳机在文件内容，且与「文件+会话历史」的组合相关）。附带发现：空 assistant 消息以 `content:null` 回传会被该端点 400（"The content field is a required field."），发 `content:""` 则过——openclaw 实际序列化为后者。
-- 解决方案（2026-10-01 主人拍板）：`openclaw sessions delete agent:main:fate-teller --agent main --yes` 删会话（转录已级联归档到 `agents/main/sessions/*.jsonl.deleted.*.zst`；问卦记录删除前已汇编进 `personal/querents/张轩瑜.md`），下次页面触发自动开全新会话；即便不动，次日 daily reset 也会自愈。防复发：求测人档案 README 加规——问卜会话禁止 read 整读 shared-rana 共享记忆文件，要引用先 grep 定位只读命中行。
+- 解决方案（2026-10-01 主人拍板）：`openclaw sessions delete agent:main:fate-teller --agent main --yes` 删会话（转录已级联归档到 `agents/main/sessions/*.jsonl.deleted.*.zst`；问卦记录删除前已汇编进 `personal/querents/<求测人>.md`），下次页面触发自动开全新会话；即便不动，次日 daily reset 也会自愈。防复发：求测人档案 README 加规——问卜会话禁止 read 整读 shared-rana 共享记忆文件，要引用先 grep 定位只读命中行。
 - 排障抓手（可复用）：转录在 `agents/main/agent/openclaw-agent.sqlite` 的 transcript_events（assistant 的 toolCall 块→`tool_calls`、toolResult→`role:"tool"`、空 assistant 发 `content:""`）；每轮编译载荷快照在 trajectory_runtime_events 的 context.compiled / model.completed（大字段截成 "[Truncated]"）；网关 WS 最小客户端见 state 目录 `tmp/send-new.mjs`（纯 token 连接握手能过但只有读权，chat.send 必 FORBIDDEN missing scope:operator.write——与 system-presence 缺 scope 条目同族；`openclaw tui --message` 在 stdin 非 TTY 时连上即退、不会真发；对运行中会话做手术直接 `sessions delete --yes` 最省事）。
 - **同日第二接（硬闸门落地）**：主人要求「工具层拦截整读私密记忆」的硬闸门。探路记录：① 内部钩子（hooks/ 目录）不支持工具事件，只有插件钩子 `before_tool_call` 能拦；② `plugins.load.paths` 是已登记的死路——目录可见（`plugins list` 显示 enabled）但 register() 从不执行，`env-guard`/`snippet-store` 一直空转（本次实测坐实）；③ 官方 `openclaw plugins install <tarball> --accept-capabilities` 可装入 `state extensions/` 管理区并执行 register()，但 `before_tool_call` 分发始终不发生（debug 日志可见其他钩子在跑、工具循环处 hasHooks=false，时有时无）——**上游 bug 候选，插件源码保留在 `awesome-openclaw-plugins/private-memory-gate/`（api 契约+调试埋点齐全），升级后可重试**；④ **最终生效方案=本地补丁 read 工具**（QQ 收图补丁同款模式）：在 dist `sessions-BdNAJTEP.js` 的 `createReadToolDefinition` execute 入口插入私密路径检查（`/private-memory/`、`workspace-main/memory/shared-rana*`、`workspace-rana-rp/soul.private.md`，相对路径先按 cwd 解析），命中即抛错、报错原文直达模型。备份 `sessions-BdNAJTEP.js.bak-pmgate-20261001`，补丁脚本 `state tmp/apply-pmgate-patch.cjs`（可重复执行、版本变了会拒插）。**重打流程：升级 openclaw → 停网关 → 跑补丁脚本（锚点不匹配时按新版本重新定位 execute 入口）→ 起网关 → 用"读 private-memory/ledger.json 应被拦 + 读 MEMORY.md 应正常"双项验证**。⑤ 测试注意：`openclaw agent` CLI 的测试轮与网关共用日志文件，验证网关内行为要用 cron 触发；测试 cron/会话已清理。
 - 状态：已解决（会话已删档重建；硬闸门补丁已生效并双项验证通过：私密文件被拦、普通文件正常）。
