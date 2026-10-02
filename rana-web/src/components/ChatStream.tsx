@@ -90,7 +90,7 @@ function Bubble({ role, text, streaming, error, model, ts, status, attachments }
   const { reasoning, thinking, text: body } = role === "assistant"
     ? splitReasoning(stripped ? stripped.text : text)
     : { reasoning: "", thinking: false, text };
-  const sysEcho = stripped?.echo ?? false;
+  const sysEcho = (stripped?.echo ?? false) && !streaming;
   const statusLine = streaming && status ? PHASE_LABELS[status] ?? status : "";
   return (
     <div className={`msg ${role}`}>

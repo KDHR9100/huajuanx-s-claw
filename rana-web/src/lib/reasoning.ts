@@ -119,6 +119,13 @@ export function stripOpenclawEnvelope(raw: string): StripEnvelope {
   }
   // 每回合注入的内部上下文块（<<<BEGIN/END_OPENCLAW_INTERNAL_CONTEXT>>>）偶尔被模型抄进回复
   out = out.replace(/<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>[\s\S]*?<<<END_OPENCLAW_INTERNAL_CONTEXT>>>/g, "");
+  // 消息上下文信封复读：```json 围栏装 openclaw.inbound_meta / outbound_meta
+  // （系统提示词里的 Message Context 被 RP 模型整段抄进回复开头，可带 [时间] 头）
+  out = out.replace(/^[ \t\n]*(?:\[[^\]\n]*\][ \t]*\n)?```[a-z]*[ \t]*\n\{[^`]*?"schema"[ \t]*:[ \t]*"openclaw\.(?:inbound|outbound)_meta[^`]*?```[ \t]*\n?/i, "");
+  // 流式中信封已开未闭：从围栏起点整段按回显处理，闭合后由上一条完整规则收尾。
+  // 判定放到 "openclaw.in/out" 前缀即可——信封是逐 token 吐的，等全名到齐会闪现一两秒原始 JSON
+  const metaPending = /^[ \t\n]*(?:\[[^\]\n]*\][ \t]*\n)?```[a-z]*[ \t]*\n\{[^`]*"openclaw\.(?:in|out)/i.exec(out);
+  if (metaPending) out = out.slice(0, metaPending.index);
   // RP 模型偶发的元块模仿：```代码块里装 "## Chat history"/"## Memory" 等档案结构
   out = out.replace(/```[a-z]*\n## (?:Chat history|Memory|Private|Runtime)[\s\S]*?```/gi, "");
   // 回复开头的日期/时间标题头（"## Fri 2026-09-10 …" / "## [23:04 RP]"）
