@@ -21,6 +21,91 @@
 
 ## 登记区
 
+## \[已解决·本机补丁] 升级 2026.9.7 后 QQ 入站/心跳全死 "DataCloneError"——process.env 原生对象塞进 worker 任务过不了克隆边界；9.2 回滚被 agent 库 schema 24 堵死（2026-10-02）
+
+- 症状：升级当晚 22:00 起心跳每班必死（`heartbeat failed: DataCloneError: #<Object> could not be cloned`，49ms 内暴毙）；**主人 QQ 私聊消息 00:59/01:19 两条全无回复**（`[default][handle] dispatch error: WorkerTaskError: DataCloneError`）。对照：钉 glm 的 cron（晚报/睡前小结/问候）全正常，CLI `openclaw agent` 直发同会话也正常——一度误导向"aliyun 模型运行时毒物"。
+- 定位（阶梯排除法 + dist 探针实锤）：① 无模型钉 cron 复现器**通过**→排除模型/provider；② 换无补丁 2.0.4→仍死；③ 换 2.0.3→仍死→排除插件与本地补丁；④ CLI 挂 QQ 投递上下文→通过→排除投递上下文。**结论=核心 9.7 回归**。给 `worker-task-pool-*.mjs` 的 `start()` postMessage catch 打探针补丁（失败时递归 structuredClone 体检 input），一次心跳拿到病理：`input.request.env`（112 键，**每键单独可克隆、整体不可**）= Node `process.env` 原生拦截器对象——9.7 把它原样放进 worker 任务，`structuredClone`/`postMessage` 天生不收（CLI/cron-glm 的任务不带 env 所以幸免）。
+- **修复（dist 本地补丁 env-clone-fix）**：`worker-task-pool-CqZMVo9-.mjs` start() 里 postMessage 前加一道——`structuredClone(input)` 失败且 `input.request.env` 存在时摊平 `{...input.request.env}`（求值成纯字符串普通对象）再发。**探针一并保留**（再失败会写 `state tmp/clone-probe.log` 病理）。备份 `worker-task-pool-CqZMVo9-.mjs.bak-probe-20261002`。验证：心跳 ok 77s 正常完成、探针零记录、新 cron 派发正常。**openclaw 升级后需重打**（重打脚本 `state tmp/apply-clone-probe-v2.cjs` 后再跑 env-fix 注入，或按本条目手工）。
+- **9.2 回滚被堵死的过程（重要教训）**：9.7 首启把 **4 个 agent 库迁到 schema 24**（9.2 只认 19，启动即拒）+ state 库迁 contentVersion 19 + openclaw.json 写 `meta.lastTouchedVersion`。逐层恢复（state 库有 `pre-startup-migration-*.bak` 自动快照✓、config 有手工备份✓）仍卡在 agent 库——**昨 17:47 的私有备份 robocopy 镜像到的已是迁移后的 schema 24 库**（备份任务在升级窗口后跑的），9.2 时代 agent 库无备份（仅有 main 的晨间备份）→ 回滚=丢 RP/群聊历史，不可接受，被迫走前进路修复。**教训：①升级前必须先手动备份全部 agent 库（`agents/*/agent/openclaw-agent.sqlite`），自动快照只保 state 库；②robocopy 备份任务别排在升级窗口附近，镜像到的可能是中间态。**
+- 连带状态：核心现为 2026.9.7（重装后 pmgate 补丁已重打）；qqbot 插件目录已复位 2.0.4+三块补丁（排障期间临时换过 2.0.3）；acpx 在 9.2 排障期曾被禁用、恢复 9.7 config 后已回到 enabled（9.2 跳过 acpx 是因 9.7 安装器把捆绑插件升到要 ≥9.5/9.7 API 的新版）。心跳 activeHours 临时拉长后又还原 01:00。
+- 状态：已解决（补丁生效、心跳验证通过；**QQ 入站待主人实测**——同派发路径，预期已通）。
+- **10-02 早追记（第二层余震）**：主人 07:25-07:27 的 QQ/网页消息报 `Async work scope is closed`（2 秒即败，前置 `failed to record session participant` 警告）——env 修复后主会话车道暴露的**运行时状态残留**（疑似 01:50 安装替换期的混乱关闭+多次换库所致；库完整性与会话节点均验证完好，非数据病）。~~标准重启即愈~~ **⚠️10-02 上午证伪：当时"系统事件测试 11s ok"的验收有盲区——系统事件走 `isSystemEvent` 分支跳过 participant 记录，恰好绕过病点，等于没测**。后续见下一条目。
+
+## \[已解决·本机补丁] 9.7 通道入站消息全死 "Async work scope is closed"——GatewayScheduler wake 作用域提前 drain，消息 turn 挂在死作用域上三连撞（2026-10-02）
+
+- 症状：主人全部 QQ 私聊入站 2 秒暴毙（网页同会话同步显示错误），前置 `failed to record session participant` 警告；**网页直发/CLI 直发/心跳/cron 全通**——病只在"通道入站→主会话"路径。当日 7 条入站全败、日志落盘结局 40 条全 error 零 ok。重启无效（每次启动复发），当晚"重启即愈"结论即由此证伪。
+- 排除清单：插件版本（`plugins list` 实跑 qqbot 2.0.4/微信 2.4.9；update-checker 报 2.0.3 是读旧目录误报）、数据库（4 库完整性全过）、env-clone-fix 补丁（其 postMessage 失败分支从未跑过，`tmp/clone-probe.log` 根本不存在）、qqbot 2.0.4 三补丁（逐一对账在位）、启动降级（下述）。
+- **"降级→死证"假说已推翻**：启动日志两次出现 `prepared model runtime startup degraded after 120000ms`（插件装载阻塞事件循环 124s > 120s 窗口），一度锁定为根因；主人拍板路线 B 禁用 10 个未用插件（anthropic/xai/ollama/talk-voice/geolocation/canvas/linux-node/cua-computer/file-transfer/device-pair，保 qqbot/weixin/memory-core/openai/lmstudio/acpx/browser/github），装载 253.7s→180s、降级消失——**10:12 消息照死同款**。降级只是伴随症状。插件瘦身收益保留（启动 6.5min→4.7min）。
+- **真凶（探针实锤）**：给 `async-work-scope-ClifbwQr.mjs` 的 track/run closed 分支打探针（记录 closed 作用域的出生+命中堆栈 → `state tmp/scope-probe.log`），一条消息两条铁证——**死证出生=`GatewayScheduler.run`←`GatewayScheduler.wake`←Timeout 定时器**；命中① `recordSessionParticipantBestEffort`→`trackAsyncWork`、命中② `runContextEngineFactoryResolution`→`captureAsyncWorkTracker`。即 9.7 通道入站消息 turn 的异步上下文挂在某次 wake 作用域延续上，**该作用域提前 drain 而 turn 未完**，turn 前两个"加入当前作用域"检查点当场撞死。网页/CLI/心跳/cron 不经调度器驱动的通道队列所以全活。
+- **修复（dist 本地补丁 scope-closed-fallback，主人拍板）**：`async-work-scope-ClifbwQr.mjs` 加 `__scopeUsable=(scope)=>!!scope&&scope.phase!=="closed"`，四处兜底——`trackAsyncWork`（closed→直跑）、`captureAsyncWorkTracker`（closed→脱离上下文跑）、`getAsyncWorkSignal`（closed→返回 undefined；**第二刀**：补丁一后 turn 走深，10:56 死在 `This operation was aborted | 20` = lane task 挂上死证已 abort 的 signal，191ms 即败）、`runWithTrackedCancellation`（closed 父→按无父直跑）。open/closing 语义未动；探针保留观察其余直接调用点。备份 `async-work-scope-ClifbwQr.mjs.bak-scope-probe-20261002`（干净原版）；语法验证 `node -e "import('file:///…mjs')"`。
+- 验证：补丁二版 11:04 ready、QQ READY，主人实测 QQ 回复正常，日志零 error。✅已解决。
+- **升级 9.7+ 需重打**：全套四补丁=env-clone-fix / scope-closed-fallback / pmgate / qqbot 三补丁（重打脚本在 `state tmp/`）。上游 issue 证据链已齐（出生+命中堆栈）未发。
+- 连带观察（10-02）：①04:34/04:45 两单 cron 超时（rana-qq-public 240s、main 900s，均死在 model-call-started）台账首记，主人需核对有无漏收推送；②内存 RSS 1.51GiB WARN（新实例 11 分钟涨 622MiB）观察即可；③系统事件验收法有结构性盲区（isSystemEvent 跳过 participant 记录），验"入站消息车道"必须真实消息，`cron --system-event` 只能当烟测。
+
+## \[已解决] 网关升级 2026.9.2→2026.9.7 + QQ 插件 2.0.4 + 三张补丁重打（2026-10-01）
+
+- 做了什么：按轩瑜工单（`workspace-main/tasks/zcode-workorder-20261001-openclaw-upgrade.md`，执行结果已回写该文件 RESULT 节）升级主程序、doctor --fix、QQ 插件升 2.0.4、重打全部 dist 补丁、重启验收。验收全绿：migrations 警告清零、superseded 零复发、openclaw 工具正常、RP 模型链路无 400、早晚问候强跑 ok、private-memory-gate 双项测试通过。
+- **版本线事实**：npm 稳定渠道 latest = **2026.9.7**（beta 同版）；「2026.9.22」是 ClawHub 商店渠道编号，与 npm 不同线——工单预期「≥2026.9.22」实为渠道混淆，2026.9.7 即本渠道最新。
+- **升级网络路**：Clash 半死（端口在听 TLS 全断，连百度不出——09-11 老病形态）时 `openclaw update` 必败于 npm ECONNRESET 且会留「update in progress」烂尾状态；正路 = **npmmirror 直连**（不走代理）：`npm i -g openclaw@<ver> --registry=https://registry.npmmirror.com --allow-scripts=@google/genai,esbuild,koffi,protobufjs,openclaw`（不带 allow-scripts 会静默跳过 postinstall 内置插件安装）；烂尾状态用「重跑一次 update（同样指镜像）让它判定 already-current」收敛。
+- **2026.9.7 dist 重构**：read 工具从 `sessions-*.js` 搬到 **`tools-*.mjs`**（模块化拆分，7529 个文件，大量 .mjs），execute 签名参数名加下划线（`_toolCallId`/`_onUpdate`）。**private-memory-gate 重打脚本已通用化**：`state tmp/apply-pmgate-patch-v2.cjs`（自动按「function createReadToolDefinition + name:"read"」定位文件、正则锚定 execute 行，多候选优选 tools-\*；更新恢复环境 `package-update-activation-recovery.mjs` 里还有一份 read 拷贝未打——恢复环境仅升级期运行，接受）。备份 `tools-BIHgerau.mjs.bak-pmgate-20261001`。
+- **QQ 插件 2.0.4 未原生修收图**（buildCtxPayload 仍 audio-only）——收图补丁继续必要。2.0.4 装进 **generation 目录**（`…qqbot-a7ec020d86__openclaw-generation__g-…`，旧目录闲置）；补丁重打脚本 `state tmp/apply-qqbot-patches-204.cjs`（四处锚点与 2.0.3 逐字一致，实测全中）；2.0.4 原版备份 + 2.0.3 已打补丁参考版 + 完整 diff 存 `state/backups/qqbot-dist-refs-20261001/`。09-20 条目挂的「CLI 发送修复待验」现在可验（2026.9.7 > 2026.9.5）。
+- **新版本行为**：首启多约 90s canonical-validation 迁移（reclamation worker 阵发，正常）；插件 18 个（新增 github）；「SSE 修复代理」是外挂进程**不是 dist 补丁**，升级不影响（本次又验证：随网关自启、RP 链路经它无 400）。插件钩子 `before_tool_call` 在 2026.9.7 **仍不分发**（private-memory-gate 插件版/env-guard/snippet-store 均无 register 痕迹）——上游 bug 候选继续挂，闸门由 dist 补丁承担。微信插件已随后升 2.4.8→**2.4.9**（2026-10-01 主人拍板；无本地补丁依赖；`plugins update` 报"runtime application failed"属热应用失败、重启网关即装载——注意 qqbot 的 update-checker 仍会读旧目录报"current 2.0.3"，实际运行的是 generation 目录里的 2.0.4，以 plugins list 为准）。
+- 状态：已解决（doctor 报的 7 条 cron 连败全是升级前旧账：qwen3.7 配额 403×2（模型已改写自愈中）、备份 git 推送撞死 Clash×2（代理复活即愈）、9-30 网络错误×3（当晚正班验证）——计数器随各自下次成功清零）。
+
+## \[已解决] 问卜会话整天 "agent run failed"——deepseek 上下文撞阿里云内容审查闸门，扳机是整读进上下文的 shared-rana 记忆文件（2026-10-01）
+
+- 症状：网页问卜会话（`agent:main:fate-teller`，会话钉 `aliyun-maas/deepseek-v4.1-flash`、fallback 随用户钉模型一起被禁用）10:40/10:48/12:39 三次 "The agent run failed before producing a reply"；日志签名恒定：`400: [Malformed diagnostic JSON redacted]` + failoverReason=format + rawErrorHash `sha256:341298593183`（与 09-14 qwen 隔离 turn 事件同指纹）。诡异点：11:12 连通性测试一发通过、12:36 同会话两次后台运行 4 发全 200，显得随机玄学。
+- 根因：当天 10:38 记忆任务中她用 read 把 `workspace-main/memory/shared-rana-2026-09.md`（1.96 万字、双 agent 陪伴记忆、含私密向内容）**全文读进会话上下文**（转录 seq 171 工具结果），此后该会话每次请求都带着这段内容 → 阿里云 token-plan 的 data inspection（内容审查）大概率拦截，真实错误码 `data_inspection_failed`（"Input text data may contain inappropriate content"）。**审查是概率性的**（同载荷偶有放行——11:12 与 12:36 即漏网样本）。日志里的 "Malformed diagnostic JSON" 是二次假象：流式模式下 400 错误体是 SSE 包着的 JSON（`data: {...}`），openclaw 按 JSON 解析失败才显示红字。**本条修正 09-14 条目「端点日间不健康已自愈」的结论：同指纹事件实为上下文内容撞审查闸门，不是端点随机病。**
+- 实证（重放实验：密钥从 state 库 `secret_store_entries` 读入内存直打 token-plan 端点，不落盘不打印）：① 用转录重建当日失败载荷直发 → 6/6 复现 `data_inspection_failed`（流式/非流式皆拦）；② 同载荷把 shared-rana 文件内容替换为占位符 → 200；③ 该文件前 8000 字单独发 → 200（扳机在文件内容，且与「文件+会话历史」的组合相关）。附带发现：空 assistant 消息以 `content:null` 回传会被该端点 400（"The content field is a required field."），发 `content:""` 则过——openclaw 实际序列化为后者。
+- 解决方案（2026-10-01 主人拍板）：`openclaw sessions delete agent:main:fate-teller --agent main --yes` 删会话（转录已级联归档到 `agents/main/sessions/*.jsonl.deleted.*.zst`；问卦记录删除前已汇编进 `personal/querents/张轩瑜.md`），下次页面触发自动开全新会话；即便不动，次日 daily reset 也会自愈。防复发：求测人档案 README 加规——问卜会话禁止 read 整读 shared-rana 共享记忆文件，要引用先 grep 定位只读命中行。
+- 排障抓手（可复用）：转录在 `agents/main/agent/openclaw-agent.sqlite` 的 transcript_events（assistant 的 toolCall 块→`tool_calls`、toolResult→`role:"tool"`、空 assistant 发 `content:""`）；每轮编译载荷快照在 trajectory_runtime_events 的 context.compiled / model.completed（大字段截成 "[Truncated]"）；网关 WS 最小客户端见 state 目录 `tmp/send-new.mjs`（纯 token 连接握手能过但只有读权，chat.send 必 FORBIDDEN missing scope:operator.write——与 system-presence 缺 scope 条目同族；`openclaw tui --message` 在 stdin 非 TTY 时连上即退、不会真发；对运行中会话做手术直接 `sessions delete --yes` 最省事）。
+- **同日第二接（硬闸门落地）**：主人要求「工具层拦截整读私密记忆」的硬闸门。探路记录：① 内部钩子（hooks/ 目录）不支持工具事件，只有插件钩子 `before_tool_call` 能拦；② `plugins.load.paths` 是已登记的死路——目录可见（`plugins list` 显示 enabled）但 register() 从不执行，`env-guard`/`snippet-store` 一直空转（本次实测坐实）；③ 官方 `openclaw plugins install <tarball> --accept-capabilities` 可装入 `state extensions/` 管理区并执行 register()，但 `before_tool_call` 分发始终不发生（debug 日志可见其他钩子在跑、工具循环处 hasHooks=false，时有时无）——**上游 bug 候选，插件源码保留在 `awesome-openclaw-plugins/private-memory-gate/`（api 契约+调试埋点齐全），升级后可重试**；④ **最终生效方案=本地补丁 read 工具**（QQ 收图补丁同款模式）：在 dist `sessions-BdNAJTEP.js` 的 `createReadToolDefinition` execute 入口插入私密路径检查（`/private-memory/`、`workspace-main/memory/shared-rana*`、`workspace-rana-rp/soul.private.md`，相对路径先按 cwd 解析），命中即抛错、报错原文直达模型。备份 `sessions-BdNAJTEP.js.bak-pmgate-20261001`，补丁脚本 `state tmp/apply-pmgate-patch.cjs`（可重复执行、版本变了会拒插）。**重打流程：升级 openclaw → 停网关 → 跑补丁脚本（锚点不匹配时按新版本重新定位 execute 入口）→ 起网关 → 用"读 private-memory/ledger.json 应被拦 + 读 MEMORY.md 应正常"双项验证**。⑤ 测试注意：`openclaw agent` CLI 的测试轮与网关共用日志文件，验证网关内行为要用 cron 触发；测试 cron/会话已清理。
+- 状态：已解决（会话已删档重建；硬闸门补丁已生效并双项验证通过：私密文件被拦、普通文件正常）。
+
+## \[已解决] 2026-10-01 早「重启后连锁故障」——degraded state 是总病根，doctor --fix 一并清掉（2026-10-01）
+
+- 症状（同一时段五连）：① `openclaw` 工具（系统 agent 子回合）三连败 `prepared model runtime plugin generation was superseded for ...\agents\rana-rp\agent`，外层报 "could not reach working inference" 且 Cause 嵌套重复；② `automations` 工具 get 任务报 "cron job not found"（任务实际存在，CLI `cron edit` 却能改到）；③ 群画像两任务 `qwenanliang/qwen3.7-flash-2026-07-15` 403 Free quota exhausted，fallback `next=none`；④ `[system-agent/setup-inference]` 探测失败 `No API key found for provider "aliyun-maas"`（agent auth store 是空的）；⑤ 启动日志 `continuing with degraded state` + `Failed migrating legacy device identity`。
+- 根因：⑤ 是总病根——启动迁移失败进 degraded state（09-11/09-14 两条目挂账的大小写 store 遗留 + 设备身份迁移冲突），模型运行时代际管理在 degraded 期反复被顶掉，一切依赖 runtime preparation 的路径随机死；`automations` 工具读的是过期快照（CLI 直连库无此病）。④ 是独立的设计行为：setup-inference 探测只认 agent auth store 的静态 profile，不解析 SecretRef/中央密钥库，而 main 的 aliyun-maas key 只存在密钥库里。③ 独立：qwenanliang 账户该型号免费额度耗尽（同账户 deepseek-v4-pro-0813 实测 200 可用）。
+- 解决方案（2026-10-01，术前备份 state 库+main agent 库到 `state/backups/zcode-fix-20261001/`）：① 停网关跑 `openclaw doctor --fix --non-interactive` 再重启——重启后 ①②④⑤ 全部消失（degraded/migration/superseded/No API key/cron not found 零命中），doctor 顺带把 main 的 exec 配置迁到新写法（`{security,ask}`→`{mode:"full"}`，语义不变）；② main agent auth store 落静态 profile：`openclaw models auth paste-api-key --provider aliyun-maas --agent main`（key 从 state 库 `secret_store_entries` 取；该命令会在 openclaw.json 登记 `auth.profiles["aliyun-maas:manual"]` 节点，provider 的 SecretRef 本体不动）；③ 群画像两任务模型保持 `qwenanliang/deepseek-v4-pro-0813`（实测 200）；qwen3.7-flash 想复活去 dashscope 控制台充值或关「仅免费」。
+- cron 核对结论（对应当天「cron: job updated」×5 的疑云）：问候任务 106785cf 的 payload.message 由 main agent 当天早班用 `openclaw cron edit` 正确更新（新增课程播报流程），schedule/sessionTarget/delivery/model 一字未动；当日另 3 个任务 updated_at 变化均非误改——854405fc=运行状态回写（收据 ok），b566bd64+ebecc6f3=调度层在 error backoff 时把模型从 qwen3.7-flash 改写为同供应商 deepseek-v4-pro-0813（相隔 17ms 的成批写、非 agent 手笔，改写者未最终定案、结果已实测可用）。无新建、无重复、无其他任务被动。
+- 状态：已解决（2026-10-01 重启验收：degraded/migration/superseded/No API key/403/clawsec ENOENT/权限拒绝/策略警告八项负向检查全绿 + 完整性校验 5 库通过）。
+- **同日第二接（重要更正）**：上午的"全绿"验收有误——检查窗口从 `loading configuration` 起截，漏看了它**之前**的迁移横幅；09:39 重启后 `degraded state` 实际仍在。且 `doctor --fix --force --non-interactive` 也拒绝处理（疑似要在交互终端问"谁赢"，非交互直接放弃）。最终手术（2026-10-01 11:0x）：矛盾真相是 `state/identity/device.json`（9-13 生成的孤儿身份 `5c3e703c…`，无任何配对引用）与 state 库 `device_identities` 的正式身份（9-8 建，`b3a987c8…`，CLI 配对在用）不一致，迁移拒绝裁断→每次启动降级。修法=把正式身份从库里写回 device.json（字段：version/deviceId/publicKeyPem/privateKeyPem/createdAtMs），两边一致后迁移即过；旧文件术前备份 `backups/zcode-fix-20261001/device.json.bak-legacy`。验证：`doctor --lint` 启动迁移零警告 + 第三次重启文件日志 `state-migrations`/`degraded` 零新增。**连带确认：当天 10:40/10:48 fate-teller 会话两个 400（"provider rejected the request schema or tool payload"，reason=format）也是降级期连带伤**——修好后同会话同模型测试 turn 一次成功；"空 assistant 消息毒化历史"假说已实测证伪（token-plan 对含空 assistant 消息的请求返回 200）。**教训：验收降级横幅必须从启动第一行看起（横幅在 `loading configuration` 之前打）；node:sqlite 的查询参数绑在 `.all()/.get()` 上，`prepare()` 第二参不是参数位。**
+
+## \[已解决·环境变量] clawsec-advisory-guardian 每次扫描 ENOENT feed-signing-public.pem——钩子硬编码 ~/.openclaw，套件实际在 state 目录（2026-10-01）
+
+- 症状：启动后周期性 `failed to load advisory feed: ENOENT ...C:\Users\Administrator\.openclaw\skills\clawsec-suite\advisories\feed-signing-public.pem`，安全公告功能降级。
+- 根因：09-27 装 ClawSec 时套件被手动搬进 state 目录（`K:\OpenClaw\.openclaw\.openclaw\skills\clawsec-suite`），但钩子 handler 默认按 `os.homedir()/.openclaw/skills` 找（与 09-27 登记的 skills CLI 硬编码同族病）。PEM 本体一直在 state 套件里，从未丢失。
+- 解决方案：不改钩子代码（升级会被覆盖）——钩子自带环境变量逃生口（HOOK.md 有文档）。新建 `rana-web/local-overrides.cmd`（gitignored；start-gateway.cmd 首段自动 call）：设 `CLAWSEC_INSTALL_ROOT` / `CLAWSEC_SUITE_DIR` / `CLAWSEC_SUITE_STATE_FILE` 三个变量指向 state 目录。重启网关生效，**PEM 的 ENOENT 消失**。
+- **同日第二接**：路径修好后报错换了个文件——`ENOENT ...advisories\checksums.json`。真相：套件的 advisories 目录本来就没带校验清单（feed.json/feed.json.sig/PEM 齐全，checksums.json+签名缺失）；自己生成需要套件作者的 ed25519 私钥（本地只有公钥），不可行。修法=再设一档钩子文档里的逃生开关 `CLAWSEC_VERIFY_CHECKSUM_MANIFEST=0`（只跳过校验清单层，feed.json 本体的签名校验仍然生效——公钥钉死在 PEM）。两开关都在 local-overrides.cmd 里，重启后零 ENOENT。
+- 状态：已解决（2026-10-01，两段式：路径环境变量 + 校验清单开关）。
+
+## \[已解决] rana-qq-public 策略警告：minimal profile 的 tools.exec 不再隐式扩权，需显式 alsoAllow process（2026-10-01）
+
+- 症状：日志重复刷 `tools policy: profile "minimal" (agent "rana-qq-public") has configured tool sections (tools.exec) that no longer implicitly widen the profile. Add alsoAllow: ["process"] ... See #47487.`
+- 根因：openclaw 上游行为变更（#47487）——minimal profile 下 `tools.exec` 配置段不再隐式授予 process 工具。群聊算卦 skill 靠 exec 跑 .cmd 脚本，等于被静默降权，警告每会话刷屏。
+- 解决方案：openclaw.json `agents.entries.rana-qq-public.tools.alsoAllow` 数组增加 `"process"`（热重载即生效）。重启后警告消失。
+- 状态：已解决（2026-10-01）。
+
+## \[未解决·良性] system-presence 偶发 "missing scope: operator.read"——无设备身份的纯 token webchat 连接被拒（2026-10-01）
+
+- 症状：全天仅一次 `[ws] res ✗ system-presence ... FORBIDDEN missing scope: operator.read`（conn=b7b81d1b…，client=webchat-ui）。
+- 根因：rana-web 每次连接都申请 `operator.read/write/admin`（`src/lib/gateway.ts` 两处），配对表里两台浏览器设备的 approved_scopes 也都含 operator.read——被拒的这条应为**没有设备身份**的纯 token 连接（新浏览器档案或清过站点数据的页面），网关对无设备连接不授 operator.read。调用方不在 rana-web 现行源码中（全文 grep 无 system-presence），疑为旧构建缓存页面发起。
+- 缓解：无实害（单次状态探测被拒，页面自行兜底）；让该页面刷新或重新配对设备即消失。**不要**为此放宽网关默认 scope。
+- 状态：未解决（良性观察；高频出现再查调用方）。
+
+## \[待拍板] acpx `permissionMode=approve-all` 安全警告——三档取值没有"询问"档，收紧会打断无人值守派活（2026-10-01）
+
+- 症状：每次启动 `security warning: dangerous config flags enabled: plugins.entries.acpx.config.permissionMode=approve-all. Run openclaw security audit`。
+- 事实（读 acpx 插件 dist 实证）：合法值仅 `approve-all` / `approve-reads` / `deny-all` 三档，且本机 `nonInteractivePermissions: "fail"`——后两档会让 DSH 派活中的写入/执行类权限请求直接失败，无人值守派活基本不可用。09-15 落地派活页时选 approve-all 是当时的合理取舍。
+- 选项：A 维持现状（接受警告，派活可用，推荐——除非 DSH 已不用）；B `approve-reads`（派活只能干只读活）；C 停用 acpx 插件（彻底不用 DSH 时）。
+- 状态：**已拍板（2026-10-01 主人）：维持 approve-all**——DSH 派活仍在用，接受该警告为已知取舍；除非 DSH 弃用，不再重议。
+
+## \[观察] P2 性能杂音：heartbeat 延迟 20s / memory-core lane 排队 12s / bootstrap 6-13s / timeoutMs=undefined（2026-10-01）
+
+- 症状：全部集中在 08:39-08:40——断电补跑（群画像 catch-up）+ 记忆做梦 + 画像班 + 会话删除风暴同窗并发时出现一次；`[model-fetch] timeoutMs=undefined` 则每条请求日志都带。
+- 判断：前三者是负载瞬时挤兑（lane 等待与心跳延迟在并发回落后自行消失），非持续病；`timeoutMs=undefined` 是日志字段显示"未显式配 fetch 超时"，当天所有 provider 请求均正常返回，不构成故障。不给 provider 盲配超时（RP 经中转站本来就慢，见 09-25 SSE 条目）。
+- 状态：观察项。若空闲时段再现再查；不为此动配置。
+
 ## \[已解决] 每晚日报把没办成的事写成办成了——日报无核实步骤，照日记字面润色升级（2026-09-26）
 
 - 症状：22:00 双人晚报「今天的工作」出现「按约把三笔账一起算清」，实际当天只向对方发过一条计划提纲消息、对方始终未回，事情根本没办——没做成被写成了做成了。
@@ -95,7 +180,7 @@
 - 调查结论：①`openclaw message send` 真实路径全坏（`outLog.debug is not a function`，任何长度、dry-run 假阳性）系 **QQ 插件 v2.0.0+ 自身 bug**（GitHub 8 月已有同款 issue），npm 最新插件仍为 2.0.3=本机现装版本，主程序升 9.5 修不了；②QQ 收图 bug 官方同样未修（插件无新版），升级触发插件重装即覆盖本地收图补丁（9-14 条目）；③升级收益（原子升级/插件热重载等）无硬需求，9.4 起 memory promotion 规则变严（minUniqueQueries）属未知影响项。
 - 拍板（2026-09-20 主人）：**暂不升级**。触发条件：QQ 插件发布 2.0.4+（官方修复 CLI 发送/收图）时，连主程序一起升级。
 - 届时 runbook：备份 openclaw.json 与 state → 升级 → 重打 QQ 收图补丁（按 9-14 条目）→ 全链验证（心跳 glm 班 / git 直跑+glm 中继 / 早晚问候 / QQ 收图 / 微信通道）。git-activity-cron.mjs 的 `--notify` 零模型推送代码已备好，CLI 修好后可评估把 glm 中继换回直推。
-- 状态：暂缓（等插件 2.0.4+）。
+- 状态：暂缓（等插件 2.0.4+）。**2026-10-01 补：插件 update-checker 已报 2.0.4 发布——拍板触发条件达成**，升级（连主程序+重打收图补丁+全链验证）待主人点头后按本条 runbook 执行。**2026-10-01 晚已执行完毕**：主程序 2026.9.7 + 插件 2.0.4 + 三张补丁重打，全链验收绿（见当日升级条目）；CLI 发送修复待日常验证。**同日验货（拉 2.0.4 包逐文件 diff，官方 CHANGELOG 未写 2.0.4 条目）**：①**CLI 发送 bug 已修**（`createOutLog` 在网关缺席时从"返回空对象"改为兜底创建真 PluginLogger）——runbook 里"git 直推替代 glm 中继"可评估了；②**收图 bug 未修**（`ctx-builder.ts` 媒体过滤仍只认 `audio/`），升级后必须按 9-14 条目重打 dist 补丁；③出站投递车道化重构（新增 dispatch-deliver/reply-options/bot-streaming 指令，static-blocks 与 native-stream 互斥去重防双发）——行为有变，全链回归不能省；④`user:c2c:` 拼 URL 是主程序侧 bug，与插件版本无关，直发绕行继续。**注意：升级命令须带 npm 代理 env（Clash 没开时 ECONNREFUSED，9-13 条目）。**
 
 ## \[已解决·对症] exec 审批在隔离会话送不到人 → 900 秒挂起死循环——心跳瘫痪半日、网关曾被拖死（2026-09-20）
 
@@ -248,7 +333,7 @@
 
 - 症状：会话列表里一批 cron 产生的会话（前端显示 Automation 开头）删不掉；点 ✕ 或 CLI `sessions delete` 报错。两类症状：①`agent:main:cron:<jobId>:run:<runId>` 的 **run 级会话** → `Session not found`（gateway 的 delete 接口不认 run 级 key，哪怕 `sessions list` 能列出来）；②`agent:main:cron:<jobId>` 的**父会话** → `could not safely stop ... cloud worker placement identity changed`（state 主库 `worker_session_placements` 里 13 行 run 级残留 `terminal_reason=NULL`，"删除前安全停止"校验永远不过）。`sessions cleanup` 只是常规维护，不清这些。
 - 根因：cron 每次执行产生 run 会话；run 的 placement 在任务结束后不清（残留），父/子删除路径都被它卡死或排除。多数涉事 job id 已不在现役 cron 表（死任务遗骸）。
-- 解决方案（09-09 手术法的 2026 复用+扩展）：①停网关 → 备份 `state/openclaw.sqlite` 与 `agents/main/agent/openclaw-agent.sqlite` → `DELETE FROM worker_session_placements WHERE session_key LIKE '%:cron:%'`（**只删 cron 类，main/群聊等活跃 placement 别动**）→ 重启网关；②父会话 `openclaw sessions delete <key> --agent main --yes` 逐个删（会级联归档；删除确认必须 --yes，且**全局 key 必须带 --agent**，否则误报 Session not found）；③**run 级会话 delete 依旧 not found（gateway 不认，上游限制）**——placement 已清、不再占用，列表残留交给前端「系统会话」隐藏开关（Sidebar 默认隐藏 `:cron:`）。残留小写 store\_key 行（09-14 已登记）留给 doctor --fix。
+- 解决方案（09-09 手术法的 2026 复用+扩展）：①停网关 → 备份 `state/openclaw.sqlite` 与 `agents/main/agent/openclaw-agent.sqlite` → `DELETE FROM worker_session_placements WHERE session_key LIKE '%:cron:%'`（**只删 cron 类，main/群聊等活跃 placement 别动**）→ 重启网关；②父会话 `openclaw sessions delete <key> --agent main --yes` 逐个删（会级联归档；删除确认必须 --yes，且**全局 key 必须带 --agent**，否则误报 Session not found）；③**run 级会话 delete 依旧 not found（gateway 不认，上游限制）**——placement 已清、不再占用，列表残留交给前端「系统会话」隐藏开关（Sidebar 默认隐藏 `:cron:`）。残留小写 store\_key 行（09-14 已登记）留给 doctor --fix（2026-10-01 已跑完）。
 - 一键化（2026-09-15 落地）：上述手术流程脚本化为 `rana-web/cron-session-cleanup.mjs`（自动停网关→备份含 -wal/-shm→清 placement→重启网关→按 agent 枚举删 cron/heartbeat 父会话；`--dry-run` 只盘点不动刀），进度落盘 `%TEMP%\openclaw\cron-session-cleanup.json`；界面入口在会话页左下角「🧹 清理系统会话」（`/__rana/sessions-cleanup` 中间件拉起+轮询）。**脚本会短暂停止网关（约 30-60 秒），微信/QQ 通道期间暂停**。上游 bug（run 级 delete 不认 + placement 不清）拟向上游报 issue，已登记进 OPEN-SOURCE-ROADMAP.md 阶段一。
   - 首日两 bug 修复实录（都可复用）：①`node:sqlite` 的 DatabaseSync **没有顶层** **`db.run()`**，增删改必须 `db.prepare(sql).run(params)`（参数绑定）；②JS **正则字面量不做变量插值**——`/:${PORT}\s/` 匹配的是字面文本 `${PORT}`，端口拼接必须 `new RegExp()` 或改用 `includes(":18789 ")`。②的副作用曾让"停网关"静默失效（手术在 WAL 模式下热做居然也成功，说明该 DELETE 对运行中的库也安全，但流程仍按先停后做设计）；taskkill 失败已从静默 catch 改为写进进度日志。
   - 已知常态：`agent:main:main:heartbeat` 会话节点删后会被心跳系统自动重建（实测 10 分钟内回来），属上游行为非故障；真正占列表的大头是梦境/cron 积累，清理后增长缓慢，随手点一下即可。
@@ -362,7 +447,7 @@
 - 症状：想把 rana-rp 侧的 `skill-collection-review`（每周技能收集回顾）单独停用（本地 RP 模型上下文紧张、不挂 skill，跑了纯浪费），`openclaw cron disable <id>` 与网关 WS `cron.update` 均被拒；`cron list` 默认还看不到停用任务，早报一度以为"失踪"。
 - 根因：OpenClaw 把 `skillCollectionReview` / `heartbeat` 两类 payload 定义为 **system-owned monitor jobs**，"gateway-converged and cannot be created or edited through the CLI or API"；其唯一开关是全局配置 `skills.workshop.autonomous.mode`（`auto`/`propose`/`off`，默认 auto，改 `propose`/`off` 后网关收敛时把任务置 disabled）——**没有 per-agent/per-workspace 粒度**。另外 `cron list` 默认只列 enabled，`--all` 才含停用行（早报 `morning-report` 任务完好，只是 `enabled=false`，重启用 `openclaw cron enable c4d2dc88-6cab-4592-8747-aae95136547b`）。
 - 解决方案：rana-web 定时任务页（CronPage）对 system-owned 任务显示「⚙ 系统」标注并禁用开关/手动运行；全局开关待用户拍板（`propose` 模式仍保留纠正提案，`off` 全关）。附带发现：cron 存储存在大小写双 store\_key（`K:\openclaw` vs `K:\OpenClaw`）遗留，官方建议另找时间跑 `openclaw doctor --fix` 规范化，勿与功能改动混做。**2026-09-11 补**：早报已改为独立页面方案（`news-report.mjs` cron 任务每天 08:00 抓 CCTV 新闻联播文字版 + 博查四类目搜索，写本地 `.news/report.json`，前端「📰 早报」页渲染，不再经任何会话）；旧会话版任务保留 disabled 状态、显示名标注"旧·会话版"。
-- 状态：上游限制，UI 已标注；全局开关与 doctor --fix 待用户安排。
+- 状态：上游限制，UI 已标注；全局开关待用户安排。（2026-10-01 补：doctor --fix 已跑完，store 规范化/迁移挂账清掉。）
 
 ## \[已解决] Mimosa 安全钩子一刀切拦截 cron trigger-script 文件（2026-09-11）
 
@@ -655,3 +740,7 @@
 - 网关不加载 `plugins.load.paths` 链接插件（启动日志 17 插件清单可验证；env-guard/snippet-store 同样不在内），`openclaw plugins install -l` 只有 CLI 进程能加载；
 - `/help` 是宿主内置命令，AI 队列前就被吃，自定义钩子抢不到——用 `/helps` 避开；
 - internal hooks 的 `message:received` 只能观察不能拦截直回。
+
+**2026-09-30 补**：同款第二个命令 `/指北`（能力边界与 FAQ，文档 `extensions-local\suan-help-echo\zhinan.md`，同样热改生效）；面板 v5 四入口（命盘/摇卦/helps/指北）。升级插件两个补丁一起重打。
+
+**2026-09-30 再补（防刷屏终版）**：helps/指北合并为腾讯文档（https://docs.qq.com/doc/DWk92bWVwTGNEb2p0，唯一权威版，改文档只改在线版）；面板 v6 收三项（命盘/摇卦/📖使用说明-link项直达文档，PanelItem type=link 可放 https 链接）；dist 两个命令（/helps、/指北）handler 都改读 short.md（三五行速览+文档链接）。本地 help.md/zhinan.md/merged-guide.md 均为历史稿。
