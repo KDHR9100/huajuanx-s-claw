@@ -160,14 +160,24 @@ const main = async () => {
       // 事件循环单独成行：模型调用/会话写入的瞬间会闪断（问候班 10:00/21:00 与巡检 :00 必然撞车），
       // 只报持续性的——网关自报降级超过 2 分钟，或上一班也降级（连续两班）
       const degradedSince = typeof ev?.degradedSinceMs === "number" ? ev.degradedSinceMs : null;
+      // [2026-10-02 fix] 网关自报的 degradedSinceMs 曾出现"约一年前"的坏时间戳（升级前就有），
+      // 时长会炸成 2985 万分钟这类天文数字。超过 24h 一律视为坏数据，按"瞬时降级/连续两班"口径处理。
+      const sinceSane = degradedSince !== null && Date.now() - degradedSince <= 24 * 3600_000;
+      const sinceUseful = sinceSane ? degradedSince : null;
       const prevEvBad = prev.checks?.find((c) => c.id === "eventloop")?.ok === false;
-      const evBad = degraded && (degradedSince !== null ? Date.now() - degradedSince > 120000 : prevEvBad);
-      addCheck("eventloop", "事件循环", !degraded, degraded ? (degradedSince !== null ? `降级中，已 ${Math.round((Date.now() - degradedSince) / 1000)}s` : "降级中（瞬时）") : "正常");
+      const evBad = degraded && (sinceUseful !== null ? Date.now() - sinceUseful > 120000 : prevEvBad);
+      addCheck("eventloop", "事件循环", !degraded, degraded ? (sinceUseful !== null ? `降级中，已 ${Math.round((Date.now() - sinceUseful) / 1000)}s` : "降级中（瞬时）") : "正常");
       if (evBad)
         addAnomaly(
           "eventloop",
           "网关事件循环",
-          `网关事件循环持续降级（卡顿/内存压力），盯一眼日志${degradedSince !== null ? `，已持续 ${Math.round((Date.now() - degradedSince) / 60000)} 分钟` : "，连续两班"}`,
+          `网关事件循环持续降级（卡顿/内存压力），盯一眼日志${
+            sinceUseful !== null
+              ? `，已持续 ${Math.round((Date.now() - sinceUseful) / 60000)} 分钟`
+              : sinceSane
+                ? "，连续两班"
+                : "，连续两班（网关自报的开始时间戳异常，时长未知）"
+          }`,
         );
     } else {
       channelsDetail = `查不到：${ch.error}`;

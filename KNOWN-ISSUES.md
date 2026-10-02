@@ -419,6 +419,10 @@
   - 想**手动清掉**模型（比如临时挤内存）：先停看门狗（关网关窗口，或 `taskkill /F /IM node.exe` 前先按端口找 PID：`netstat -ano | findstr 47611`），再 unload；否则下一轮会被拉回。
   - 附注：本次排查确认裂开**与 QQ 不同群聊无关**——openclaw\.json 的 `memory.search` 全局一份，main / rana-rp / rana-qq-public 三个 agent 共用；裂点始终是"JIT 默认参数(ctx 8192, GPU) ≠ 常驻参数(32768, CPU)"。API 的 `loaded_instances[].config` 只回报 ctx 不回报 GPU 属性，看门狗靠"重载永远 --gpu off + ctx 校验捕获 JIT 裂份"闭环。
 - **2026-09-18 新篇章：显存 10.7GB 尸体的真凶是后端版本行为**。重启后 LM Studio（llama.cpp CUDA 2.40.0）加载嵌入模型时**强制 batch=ctx**（服务端日志有明示警告），计算缓冲随 ctx 线性膨胀且**上 GPU——`--gpu off` 完全拦不住**：实测 ctx32768=10.7GB / 8192=6.6GB / 2048=2.3GB（模型本体仅 609MB）。处置：看门狗 STANDARD_CTX 32768→**2048**（嵌入输入是记忆小块 ≤千余 token，足够；OpenClaw 嵌入请求实测复用 2048 实例不裂开），显存占用 11.6GB→3.2GB。另：卸载模型后显存不还的情况也存在（进程级残留），整树重启 LM Studio（`taskkill /PID <根> /T`，注意 Electron 多进程、杀子进程没用）可清零。
+- **2026-10-02 终章：裂份循环的发动机找到了——LM Studio 的 JIT TTL 在背后拆看门狗的台**。主人在 LM Studio GUI 亲眼看到"第二个同样的 embedding 模型"拉起（几秒后即被看门狗摘除）。取证（server 日志 `~/.lmstudio/server-logs/2026-10/`）：12:46:29 OpenClaw embeddings 请求进来时 qwen3 不在内存 → 12:46:39 LM Studio JIT 按模型级残留参数抢跑加载 → 12:46:41 看门狗 lms load 并行重载 → 双份并存约 4 秒 → 12:46:43 看门狗纠正回单份。**模型为何总缺席：`~/.lmstudio/settings.json` 的 `jitModelTTL {enabled:true, ttlSeconds:180}`——lms.exe CLI 加载的份同样被 180 秒 TTL 回收**（主人 >3 分钟不发消息，常驻份即被拆，下一条消息必触发 JIT 抢跑）；`unloadPreviousJITModelOnLoad:true` 再补一刀（JIT 拉新份时卸掉在驻份）。看门狗日志里 04:00-04:46 UTC 的 4 次"偏离纠正"即此循环的中间帧。
+  - **修复（两层）**：①`settings.json` 两键关闭——`jitModelTTL.enabled=false`、`unloadPreviousJITModelOnLoad=false`（备份 `settings.json.bak-watchdog-fix-20261002`；**LM Studio 重启后生效**，重启会断微信 RP 的本地模型，择空闲时机手动做）；②看门狗 `tools/embedding-watchdog.mjs` 升级：纠正时**保留标准实例（ctx=2048）只摘非标份**（全清重载制造的空档正是 JIT 抢跑的窗口），仅无标准份才全清+重载；纠正后 15s/45s 各快查一次追杀竞态裂份。看门狗已于 10-02 12:59 换新进程（旧 49244 → 新 63532）。
+  - 残留谜团：JIT 裂份的 ctx=32768 来源未定位（全局 defaultContextLength=8192，config-presets/models 目录均无 32768）——疑似模型级"上次加载参数"记忆，不影响上述修复（看门狗按 ctx 校验兜底）。
+  - **连带修：巡检时长天文数字**。`rana-web/health-patrol.mjs` 引用网关自报 `degradedSinceMs` 算"已持续 N 分钟"，该时间戳坏过（报 2985 万分钟≈57 年，升级前就有），已加 24h 合理性闸——超时按"连续两班（开始时间戳异常，时长未知）"口径处理。
 
 ## \[已解决·会复发] Clash 7897 被 Windows 动态端口保留段圈占 → 代理失效 → git 推送 GitHub 挂死（2026-09-11）
 
