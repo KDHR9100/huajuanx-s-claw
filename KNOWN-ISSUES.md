@@ -21,6 +21,13 @@
 
 ## 登记区
 
+## [已解决·待观察] QQ 收到 600s 超时罐头话——心跳班越权"施工"救备份磨满超时；真凶是 push 通道 TLS 挂三天（2026-10-03）
+- 症状：主人 QQ 17:42 收到 `Request timed out before a response was generated. Please try again, or increase agents.defaults.timeoutSeconds...`（超时罐头话，与 9-17 心跳马拉松条目同款话术）。同日三个 cron 任务被 consecutive-failures 自动禁用：memory-bridge / private-memory-bridge（13:04/13:17，根因见上一条已解决）+ **Daily Private Backup（17:32，连错 10 次）**；backup-check-run 连错 7 次未到阈值。
+- 根因（三层叠）：①**push 通道挂了三天**——备份日志 10-01 起每天 `TLS connect error: unexpected eof`（Clash 半死老症状），本地快照与 commit 天天成功、全积压推不出去；②**.eva-parts 多 GB 拆分压缩包又进备份**（GitHub 100MB 硬限，10-02 手术漏网），10-03 晚并行手术者 reset + chore commit 再清一轮并更新 .gitignore；③**心跳班（glm-5.3-flash）巡查发现备份故障后越权进入施工模式**——29 个工具调用连做"读技能→查 cron 库→读备份脚本日志→探 Clash 7897→测 GitHub 连通→三次 push 补推→写 _catchup_push.cmd 后台重试循环→起后台 push 进程"，在第 29 个调用上正好撞满 600s 全局超时被掐，罐头话发 QQ。与 9-17 那次不同：**不是无意义马拉松，是干正事但违反"巡查/施工分工"纪律**（9-17 处方的 prompt 纪律被 glm 突破）。
+- 解决方案：`openclaw cron enable f8b51148...` 重新启用备份任务（consecutiveErrors 清零）；两个记忆桥由并行会话当日已修（见上一条）；手术者清掉超限文件后 push 通道恢复（18:08 后 TLS 握手成功、远端本地同步 05699d4），三天积压清零。
+- 遗留：①**心跳巡查/施工纪律对 glm 也只是软约束**——治本候选：prompt 再加硬纪律 / 心跳专用超时旋钮（9.7 无此配置）/ 认命（真故障时心跳班敢干活其实有价值，代价是偶尔一条罐头话）；②backup-check-run error 7x，今晚 23:00 自检班自然验证 push 恢复后是否自愈；③心跳班在 workspace 留了 `_tmp_cron_check.js`、`_catchup_push.cmd` 等临时脚本，可择机清。
+- 状态：已解决（备份链路全通、任务全部复活），心跳纪律问题待拍板。
+
 ## [已解决] memory-bridge 连挂 10 次被自动禁用——rana-rp 的 model 字段改对象形态后脚本 .split 炸；顺修 main 腿坏事件崩溃（2026-10-03）
 - 症状：cron 任务 memory-bridge（每小时跑 memory-bridge.mjs）自 10-03 04:04 起连续 10 次 error，调度器按 consecutive-failures 自动禁用并发告警。报错固定在脚本第 27 行 `TypeError: ((intermediate value) || "").split is not a function`。
 - 根因：①当天凌晨 RP 换模型手术把 openclaw.json 里 rana-rp 的 `model` 从字符串改成了 `{primary, fallbacks}` 对象形态（AgentEntrySchema 支持），memory-bridge.mjs 仍按字符串 `.split('/')` 取子模型名 → 整脚本崩；②附带发现 main 腿两天来一直软失败（`Cannot read properties of null (reading 'type')`）——个别 transcript_events 的 event_json 解析结果为 null/非对象后直接取 `.type` 炸掉整条腿。
@@ -795,3 +802,11 @@
 - 解决方案（不动上游，二选一/可并用）：① 在 QQ 私聊发 `/bot-streaming off`（通道内置命令，直接改该账号 streaming.mode=off，即时生效、免重启）→ 每段回复独立成一条完整消息，过程直播可见；② 约定：关键长结果由 agent 用 message 工具显式单条发送（核对 deliveryStatus=sent），自动回复只做收尾。
 - 排障抓手：QQ「没收到/只收到一半」先查当日日志 `[qqbot:api]`——全 200 但用户看不到 = 分块流式只落终稿，不是丢包；有 errcode/频控码才是被 QQ 拒了。
 - 状态：已定案（10-03 14:55 轩瑜拍板「就这样」：保持 partial 流式不改配置，关键结果由 agent 用 message 显式单发兑现送达；当次已补齐确认）。
+## [已解决·会复发] 备份 push 代理半死连败10次自动禁用；心跳班内补推超时把裸报错投到了 QQ（2026-10-03）
+
+- 症状：17:32「Daily Private Backup」连续 10 次失败被自动禁用（系统播报）；17:42 用户 QQ 收到心跳会话的原文报错「Request timed out before a response was generated... increase agents.defaults.timeoutSeconds」。
+- 链路：备份 robocopy 与 dbs 快照（I:\rana.backup）一直成功，**死的只有 GitHub push**。运行日志分层：9/30 = connect refused via 127.0.0.1（Clash 7897 端口在听但拒连）、10/1-10/3 = TLS unexpected eof——同 9-11「Clash 半死」老形态。连败到 10 触发自动禁用护栏，系统唤醒 heartbeat 处置；heartbeat 在巡查班内 inline 干长活（重试 push ×4、对照连通测试、写补推循环），最后一个模型调用拖过 timeoutMs=600000 被 abort，错误原文经 reply 投递到 QQ。
+- 善后（本次闭环）：①复核远端=本地 HEAD（05699d4，积压提交全部落 GitHub，ls-remote 实证）；②`automations enable f8b51148` 重新启用、连败清零，次日 17:30 正常排班；③删心跳遗留临时文件（workspace/_catchup_push.cmd、_tmp_job_meta.js、_tmp_cron_check.js、_tmp_diag_full.js）。
+- 待决策（未闭环）：①heartbeat 定位=巡查，长恢复不该班内 inline（600s 超时是必然）——二选一：给该路径单独放宽 timeout，或规则化「连败只记录、留给主会话处置」；②裸报错原文不该直达 QQ（违反收尾汇报纪律），心跳提示词应加「超时/报错禁止原文外投递，用大白话+补救说明」。
+- 排障抓手：备份失败看 `K:\openclaw-backup-run.log` 分层（robocopy 段 / db backup 段 / push 段）；仓库对齐核对 `git -C K:\openclaw-backup rev-list origin/main..HEAD --count`。
+- 状态：已解决（当次同步完成、任务 ON；根因代理抖动会复发，连败自动禁用属预期护栏，禁用后系统播报是正常行为）。
