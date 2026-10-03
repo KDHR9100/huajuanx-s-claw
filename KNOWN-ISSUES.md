@@ -21,6 +21,11 @@
 
 ## 登记区
 
+## [已解决] memory-bridge 连挂 10 次被自动禁用——rana-rp 的 model 字段改对象形态后脚本 .split 炸；顺修 main 腿坏事件崩溃（2026-10-03）
+- 症状：cron 任务 memory-bridge（每小时跑 memory-bridge.mjs）自 10-03 04:04 起连续 10 次 error，调度器按 consecutive-failures 自动禁用并发告警。报错固定在脚本第 27 行 `TypeError: ((intermediate value) || "").split is not a function`。
+- 根因：①当天凌晨 RP 换模型手术把 openclaw.json 里 rana-rp 的 `model` 从字符串改成了 `{primary, fallbacks}` 对象形态（AgentEntrySchema 支持），memory-bridge.mjs 仍按字符串 `.split('/')` 取子模型名 → 整脚本崩；②附带发现 main 腿两天来一直软失败（`Cannot read properties of null (reading 'type')`）——个别 transcript_events 的 event_json 解析结果为 null/非对象后直接取 `.type` 炸掉整条腿。
+- 解决方案：memory-bridge.mjs 新增 `modelStr()` 规整函数（字符串原样、对象取 .primary、其余回空串），RP 侧 RP_DISTILL_MODEL 与 glmChatConfig() 的 qq 侧 model 读取统一走它；readNewEvents() 解析 event_json 后补 `j` 非空判断，坏事件跳过不炸腿。手动试跑 exit 0（main 34 msgs -> 0 entries），`openclaw automations enable 1960c470-7f87-4d95-a057-95252cda5cfd` 重新启用，consecutiveErrors 清零。
+- 状态：已解决（脚本崩溃已修，14:04 下一班自然验证）。注意：RP 腿的 400 "No models loaded" 是 LM Studio 未加载模型的既有软故障，脚本设计为下轮重试、RP 恢复使用本地模型后自愈，不算本条病灶；同日 automations list 里 private-memory-bridge / Daily Private Backup / backup-check-run 等任务也在 error 状态，根因与本条无关，待另行排查。
 ## \[已解决·本机手术] RP 全线拒答两天——SSE 代理静默死亡、RP 无 fallback、会话钉死压配置三病叠加，真病根=中转站不认 content 块数组（2026-10-03）
 
 - 症状：凌晨 02:04 微信 "hi" 无回复（87 秒后报 `connection refused by the provider endpoint`——本地 18801 代理进程已死，网关连不上它）；02:27 微信+网页、02:50 网页的三发真实聊天回合全报 `provider rejected the request schema or tool payload`（`400 empty-sse`，rawErrorHash `sha256:341298593183`，与 10-02 条目同指纹）。同期小探针请求（1k 级）全 200——「大请求必挂、小探针全过」比 10-02 记录的间歇抖动凶得多。网关侧另有事件循环延迟 180ms+ 持续半小时的亚健康（一个 Memory Dreaming cron 卡过 295s 后自释放）。
@@ -789,4 +794,4 @@
 - 取证：当日网关日志 11:01–11:08 一串严格 ~50s 间隔的 `[qqbot:api] <<< Status: 200 OK`，无 errcode、无限流报错——出站 API 全部成功，不是网络丢包/频控丢包。插件源码 `npm/projects/tencent-connect-openclaw-qqbot-*`/dist/index.cjs：`defaults = { streaming: { mode: "partial" } }`——qqbot 通道未写 streaming 配置即默认分块流式；`src/outbound/streaming-controller.ts` 逻辑：流激活时中间块走 `stream_messages`（`streamOwnsText` 分支跳过静态发送，`deliveredTexts` 还会去重吞同文），只有 finalize 的终稿落成一条可见消息。QQ 客户端对 stream_messages 中途更新渲染不稳 → 中间过程段用户侧不可见，只看到终稿。
 - 解决方案（不动上游，二选一/可并用）：① 在 QQ 私聊发 `/bot-streaming off`（通道内置命令，直接改该账号 streaming.mode=off，即时生效、免重启）→ 每段回复独立成一条完整消息，过程直播可见；② 约定：关键长结果由 agent 用 message 工具显式单条发送（核对 deliveryStatus=sent），自动回复只做收尾。
 - 排障抓手：QQ「没收到/只收到一半」先查当日日志 `[qqbot:api]`——全 200 但用户看不到 = 分块流式只落终稿，不是丢包；有 errcode/频控码才是被 QQ 拒了。
-- 状态：已解决（当次结果已显式单发补齐并确认送达；是否关流式等轩瑜拍板）。
+- 状态：已定案（10-03 14:55 轩瑜拍板「就这样」：保持 partial 流式不改配置，关键结果由 agent 用 message 显式单发兑现送达；当次已补齐确认）。
