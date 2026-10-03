@@ -49,6 +49,26 @@ function makeScanner() {
   };
 }
 
+// [blocks-fix-20261003] 中转站后端（Gemini 系）不认 OpenAI 的 content 块数组，
+// 报 "generationConfig.prompts[N].content must be a string"（详见 KNOWN-ISSUES 2026-10-03 条目）。
+// 纯文本块数组拍平成字符串；含非文本块（图片等）的消息原样放过，不碰。
+function normalizeBody(buf) {
+  try {
+    const body = JSON.parse(buf.toString('utf8'));
+    if (!Array.isArray(body.messages)) return buf;
+    let changed = false;
+    body.messages = body.messages.map((m) => {
+      if (!Array.isArray(m.content)) return m;
+      if (!m.content.every((b) => b && typeof b === 'object' && b.type === 'text' && typeof b.text === 'string')) return m;
+      changed = true;
+      return { ...m, content: m.content.map((b) => b.text).filter((s) => s.length).join('\n') };
+    });
+    return changed ? Buffer.from(JSON.stringify(body), 'utf8') : buf;
+  } catch {
+    return buf;
+  }
+}
+
 const server = http.createServer((req, res) => {
   const started = Date.now();
   if (!req.url.startsWith('/v1/')) {
@@ -58,19 +78,45 @@ const server = http.createServer((req, res) => {
   }
   const upstreamPath = UP.pathname + req.url.slice('/v1'.length);
 
+  // [dump-20261003 调试补丁] 抓请求体+上游错误体，存 sse-fix-proxy-last-exchange.json（每次覆盖）
+  const DUMP = path.join(logDir, 'sse-fix-proxy-last-exchange.json');
+  const reqChunks = [];
+  req.on('data', (c) => reqChunks.push(c));
+
   const headers = { ...req.headers };
   delete headers.host;
   delete headers.connection;
   // 强制上游返回未压缩响应，否则字节级扫描会扫到 gzip 乱码
   delete headers['accept-encoding'];
+  // 请求体可能被改写（块数组拍平），长度声明不能照抄
+  delete headers['content-length'];
+  delete headers['transfer-encoding'];
 
   const upReq = https.request(
     { hostname: UP.hostname, port: 443, path: upstreamPath, method: req.method, headers },
     (upRes) => {
       const isSSE = String(upRes.headers['content-type'] || '').includes('text/event-stream');
+      const dumpExchange = (resBodySample) => {
+        try {
+          const auth = String(headers.authorization || '');
+          fs.writeFileSync(DUMP, JSON.stringify({
+            time: new Date().toISOString(),
+            method: req.method, url: req.url, status: upRes.statusCode,
+            reqBody: Buffer.concat(reqChunks).toString('utf8'),
+            resBodySample: (resBodySample || '').slice(0, 4000),
+            authShape: auth ? auth.slice(0, 10) + '…(len=' + auth.length + ')' : '(none)',
+          }, null, 1));
+        } catch {}
+      };
       if (!isSSE) {
         res.writeHead(upRes.statusCode, upRes.headers);
-        upRes.pipe(res);
+        const resChunks = [];
+        upRes.on('data', (c) => resChunks.push(c));
+        upRes.on('end', () => {
+          dumpExchange(Buffer.concat(resChunks).toString('utf8'));
+          res.end();
+        });
+        upRes.pipe(res, { end: false });
         return;
       }
       const scanner = makeScanner();
@@ -79,10 +125,12 @@ const server = http.createServer((req, res) => {
       delete outHeaders['content-length'];
       delete outHeaders['transfer-encoding'];
       res.writeHead(upRes.statusCode, outHeaders);
+      const resChunks = [];
       upRes.setEncoding('utf8');
       upRes.on('data', (chunk) => {
         scanner.scan(chunk);
         res.write(chunk);
+        if (resChunks.length < 64) resChunks.push(chunk);
       });
       upRes.on('end', () => {
         const events = 0; // 仅日志占位，计数在下方 chunks 统计
@@ -97,6 +145,7 @@ const server = http.createServer((req, res) => {
         } else {
           log(`req ${req.method} ${req.url} -> ${upRes.statusCode} passthrough (upstream sent finish_reason) ${Date.now() - started}ms`);
         }
+        dumpExchange(resChunks.join(''));
         res.end();
       });
       upRes.on('error', (e) => {
@@ -114,7 +163,14 @@ const server = http.createServer((req, res) => {
       res.end();
     }
   });
-  req.pipe(upReq);
+  req.on('end', () => {
+    const raw = Buffer.concat(reqChunks);
+    const normalized = normalizeBody(raw);
+    if (normalized !== raw) {
+      log(`req ${req.method} ${req.url} blocks-flattened (${raw.length}B -> ${normalized.length}B)`);
+    }
+    upReq.end(normalized);
+  });
 });
 
 // 长 RP 生成可能好几分钟，禁掉 Node 默认的请求超时
