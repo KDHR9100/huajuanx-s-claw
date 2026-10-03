@@ -5,6 +5,7 @@
 // 检查项（一次全跑，零模型调用）：
 //   gateway   网关端口 18789 是否在听
 //   vite      前端 5173 是否在听
+//   ssefix    RP 代理 18801 是否在听；死了自动拉起（省心版，2026-10-03），拉起结果照常记档报警
 //   channels  经 openclaw CLI 拿通道状态：QQ running/connected、网关事件循环是否降级
 //   backup    私有备份仓最后一次提交距今是否超过 26 小时（cron 每天 17:30 跑）
 //
@@ -15,7 +16,7 @@
 //   - 23:00–07:59 只记不发（深夜不扰）。--dry 只记不发。
 // 退出码恒为 0：异常状态本身记在 patrol.json 里，不污染 cron 收据。
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
@@ -31,6 +32,8 @@ const BACKUP_REPO = "K:/openclaw-backup"; // robocopy 目标（盘根，与 back
 const OPENCLAW_MJS = "C:/Users/Administrator/AppData/Roaming/npm/node_modules/openclaw/openclaw.mjs";
 const GATEWAY_PORT = 18789;
 const VITE_PORT = 5173;
+const SSEFIX_PORT = 18801;
+const SSEFIX_MJS = path.resolve(HERE, "..", "tools", "sse-fix-proxy.mjs");
 const BACKUP_STALE_HOURS = 26;
 const RE_ALERT_MS = 3 * 60 * 60 * 1000; // 同一异常 3 小时内不重发
 const HISTORY_CAP = 96;
@@ -138,6 +141,35 @@ const main = async () => {
   const viteOk = await tcpOk(VITE_PORT);
   addCheck("vite", "前端页面", viteOk, `${VITE_PORT} ${viteOk ? "在听" : "没在听"}`);
   if (!viteOk) addAnomaly("vite", "前端页面", `vite ${VITE_PORT} 没有监听——网页打不开，重跑 start-rana.cmd`);
+
+  // 2.5 RP 代理（sse-fix-proxy 18801）——省心版看护：死了自动拉起再复查（2026-10-03）
+  // 代理自带端口锁（多拉会自己退出），重复拉起无副作用。--dry 只管不发消息，修理动作照做。
+  let sseOk = await tcpOk(SSEFIX_PORT);
+  let sseDetail = `${SSEFIX_PORT} ${sseOk ? "在听" : "没在听"}`;
+  if (!sseOk) {
+    try {
+      const child = spawn(process.execPath, [SSEFIX_MJS], {
+        cwd: path.dirname(SSEFIX_MJS),
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      child.unref();
+      await new Promise((r) => setTimeout(r, 2500)); // 等它绑定端口
+      sseOk = await tcpOk(SSEFIX_PORT);
+      sseDetail = sseOk ? `掉线过，已自动拉起（${SSEFIX_PORT} 恢复在听）` : `掉线，自动拉起后仍没起来`;
+    } catch (e) {
+      sseDetail = `掉线，自动拉起失败：${(e instanceof Error ? e.message : String(e)).slice(0, 80)}`;
+    }
+    addAnomaly(
+      "ssefix",
+      "RP 代理",
+      sseOk
+        ? `RP 代理（聊天中转的必经之路）掉线过，巡检已自动拉起恢复；若反复发生要查崩溃原因`
+        : `RP 代理 ${SSEFIX_PORT} 掉线且自动拉起失败——RP 会收不到回复，手工跑 node tools/sse-fix-proxy.mjs 并查崩溃原因`,
+    );
+  }
+  addCheck("ssefix", "RP 代理", sseOk, sseDetail);
 
   // 3. 通道状态（网关都挂了就不重复查）
   let channelsDetail = "未查";

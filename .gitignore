@@ -23,6 +23,8 @@ rana-web/tmp-*
 rana-web/openclaw.*
 rana-web/wechat-mode-*.cmd
 rana-web/fix-ws-path.mjs
+# 修复手术前的原版快照（*.bak-<标记>-<日期>，回滚用，不入公开仓库）
+*.bak-*
 
 # 私有备份健康自检产物（运行时状态文件：含本地备份目录与推送落后计数，每天自动重写，不入公开仓库）
 rana-web/.backup-check/

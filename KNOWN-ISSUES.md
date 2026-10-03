@@ -21,6 +21,19 @@
 
 ## 登记区
 
+## \[已解决·本机手术] RP 全线拒答两天——SSE 代理静默死亡、RP 无 fallback、会话钉死压配置三病叠加，真病根=中转站不认 content 块数组（2026-10-03）
+
+- 症状：凌晨 02:04 微信 "hi" 无回复（87 秒后报 `connection refused by the provider endpoint`——本地 18801 代理进程已死，网关连不上它）；02:27 微信+网页、02:50 网页的三发真实聊天回合全报 `provider rejected the request schema or tool payload`（`400 empty-sse`，rawErrorHash `sha256:341298593183`，与 10-02 条目同指纹）。同期小探针请求（1k 级）全 200——「大请求必挂、小探针全过」比 10-02 记录的间歇抖动凶得多。网关侧另有事件循环延迟 180ms+ 持续半小时的亚健康（一个 Memory Dreaming cron 卡过 295s 后自释放）。
+- 根因（三层）：① **代理无看护**——sse-fix-proxy 上次干活是前日 23:49，之后进程静默死亡（无死亡日志），start-gateway.cmd 只管启动不管保活（10-02 已登记「无看护，RP 未配 fallback 每次平台抖动弹脸」待拍板项，当晚即兑现成事故）；② **RP 无 fallback**——`fallbackConfigured: false`，平台抖动直接 surface_error 弹脸；③ **会话钉死压配置**——`agent:rana-rp:main` 会话 entry 上有 `modelOverrideSource:"user"` 的钉子（钉在 nalang-turbo-0826，网页端某次手动切模型留下的），它同时**禁用配置级 fallback**（dist `resolveModelFallbackAvailability`：用户钉死 ⇒ `disabled_by_model_override`），只改配置不清钉子等于白改。
+- 手术记录（2026-10-03 03:40-03:46，备份：`openclaw.json.bak-rp1115-20261003` + `state/backups/rp-pin-fix-20261003/`）：① `openclaw.json` rana-rp 的 `model` 从字符串改成对象形态 `{primary: rp-nsfw/nalang-turbo-1115, fallbacks: [rp-nsfw/nalang-turbo-0826]}`（AgentEntrySchema 支持，1115 当夜探针实测 200）；② 停网关后直改 rana-rp agent 库 session_nodes 的 entry_json 清钉子——**第一版写成 `modelOverrideSource:"auto"`+保留 override 字段，网关启动即拒**（`invalid persisted session row requires repair for agent:rana-rp:main`，会话完整性闸门不认残缺 override 形态）；**正确形态照 dist openclaw 工具 applyModelIdentity 的做法：保留 `model`/`modelProvider` 指向新模型，把 providerOverride/modelOverride/modelOverrideSource/modelOverrideRouteResolution 及 fallback-origin 两字段整个删掉**——无钉子状态走配置 default（1115）且 fallback 生效；③ 重启网关（顺带清掉亚健康），启动零降级横幅、8 插件正常、QQ/微信双通道 READY，`openclaw models list --agent rana-rp` 确认 1115=default。
+- 教训：**改会话 entry 只有一种合法「清除钉子」形态（删光 override 字段），半清不清会让网关拒启**；官方修法是 `openclaw doctor --fix`，直改库必须照 dist 的干净形态抄。**会话级用户钉死压过一切配置且禁 fallback**——排障时先查 entry_json 再动配置。
+- **04:00-04:15 追记（手术做了，病没好——真实病根在更深处）**：03:52 主人微信实测，兜底机制正常工作（1115 挂了自动切 0826）但**两个都 400**——推翻「0826 单池生病」假设。转录取证：**10-02 09:39 reset 后唯一成功回合是第一轮（信封复读），此后 15:07 起真实回合 ~100% 连挂 18 小时**（7+ 发，横跨 0826/1115），此前"间歇抖动"的定性不成立。A/B 重放实验（node 直打代理，与网关同指纹；python 探针会被 Cloudflare 1010 签名封禁不能用）：采样参数块/40KB 大载荷/工具数组/workspace 六件套/空 assistant 历史**全部 200 无罪**。**实验把免费档当日额度打爆（429）一度中止**；主人确认额度有后恢复排查。
+- **真病根（04:45 实锤，代理转储立功）**：给 sse-fix-proxy 加请求/响应转储（`%TEMP%\openclaw\sse-fix-proxy-last-exchange.json`，每次覆盖，抓密钥形状不抓密钥本体），CLI 打一发真实回合复现 400 后拿到**上游真实错误体**（此前两天一直被两层包装掩盖：网关显示 "Malformed diagnostic JSON redacted"、代理标 "empty-sse"——其实错误体一直存在，是 SSE 包着的 JSON）：**`generationConfig.prompts[2].content must be a string`**——中转站后端是 Gemini 系，不认 OpenAI 协议的 content **块数组**（`[{type:"text",...},...]`），要求纯字符串。而 openclaw 2026.9.7 会把「会话元信息（⟦openclaw:ctx⟧ Conversation info）+ 用户文本」以及**短时间连发的多条消息合并**编成多 text 块数组发出。时间线闭环：升级 9.7 是 10-01 晚；10-02 09:39 reset 后第一条消息是单块→字符串→成功（信封复读那轮）；从第二条起出现块数组→15:07 开始 100% 被拒。重放变体 V4（块数组拍平）→200，其余变体全 400，实锤。
+- **修复（代理第二刀 blocks-flatten）**：sse-fix-proxy 加 `normalizeBody`——转发前把**纯文本**块数组拍平成字符串（含非文本块如图片的消息原样放过）；因请求体改写，转发改为缓冲后整发（自动重算 Content-Length）。备份 `tools/sse-fix-proxy.mjs.bak-nodump-20261003`（dump 补丁前原版）；dump 与 flatten 两个调试补丁都在，确认稳定后可按需回退。CLI 实测：`blocks-flattened (33114B -> 32848B)` → `200 FIXED 10.3s`，**Rana 正常角色扮演回复**，微信/网页待主人日常使用确认。
+- 教训：**改会话 entry 只有一种合法「清除钉子」形态（删光 override 字段），半清不清会让网关拒启**；官方修法是 `openclaw doctor --fix`，直改库必须照 dist 的干净形态抄。**会话级用户钉死压过一切配置且禁 fallback**——排障时先查 entry_json 再动配置。**上游错误体有两层伪装（网关 redacted + 代理 empty-sse 误标），"400 空体"定性是错的——排障必须拿到原始错误文本，代理转储是最短的路**。python 探针打不得（Cloudflare 1010 签名封禁），要打就用 node。
+- 遗留：①**18801 代理看护已落地（2026-10-03 省心版）**——health-patrol 加 ssefix 检查项：端口死了自动拉起再复查，拉起成功也记异常报备（"掉线过已自愈"），失败则报"需手工拉起"；备份 `health-patrol.mjs.bak-pressefix-20261003`；杀进程实测全流程通过；②openclaw 9.7 把多 text 块编成 content 数组——对标准 OpenAI 端点合法，但对 Gemini 系"OpenAI 兼容"端点不兼容，属**上游 issue 候选**（openclaw 侧可考虑对 openai-completions 扁平化纯文本块）；③RP 会话历史里积了失败残骸（空 assistant、五连 hi 合并块），能用但脏，主人可择机 /reset 换干净上下文；④当日免费额度有限（实测约几十发），排障实验注意节约。
+- 状态：**已解决**（病根=上游不认 content 块数组，代理拍平修复；CLI 实测 Rana 已正常回复；模型 1115 主+0826 兜底保留）。
+
 ## \[已解决·本机修复] 9.7 后兜底心跳连班虚报"巡检脚本停摆"——心跳 cwd 变成通用 workspace，提示词相对路径全凭模型拼、时对时错（2026-10-03）
 
 - 症状：10-02 当天 4 班心跳（11:51/14:51/17:51/23:51）向主人 QQ 虚报「巡检状态文件 memory/patrol-status.md 不存在，零成本巡检脚本疑似停摆」；实际 health-patrol.mjs 全程健在（状态文件每 30 分钟照常更新，23:30 仍有新班）。同日 21:00 班用 optional 读取沉默放过、22:00 晚报班又碰巧读对——**同一提示词时对时错**是最大线索。
@@ -34,6 +47,7 @@
 - 排除过程（内容假说逐条证伪）：①同款 400 在本地任何改动之前就有（10-01 14:04）；②直打中转 A/B 对照——干净最小请求、历史带 openclaw.inbound_meta 信封回显的请求、普通历史请求三发全 200，信封内容与 SOUL 新句子都不是扳机；③平台不稳直拍：10-02 白天内同一端点先后出现 `getaddrinfo ENOTFOUND`（DNS 瞬断自愈）、代理 502 `upstream connect failed`、空错误体 400，几分钟后又全通——免费档（50次/天）后端过载/抖动形态。真实 RP 回合（16k 上下文大请求，响应曾慢到 27s）易撞上，小探针请求都能过。
 - 解决方案：无需修本地；失败那发重发即可（13:39 失败后无重试但下一发正常）。可选加固（未拍板）：给 rana-rp 配 fallback 模型让 400 自动切换；或换免费档模型 id（nalang-turbo-1115 等）绕开单池抖动。
 - 状态：已解决（定性为平台间歇故障，观察即可；若频发再考虑 fallback/换模型）。诊断注意：同 hash 400 ≠ 同根因，先看 provider 字段再归案。
+- **10-03 补记（复发升级→最终破案）**：当晚 02:27/02:50 三发真实聊天回合连挂（同 hash `sha256:341298593183`、`400 empty-sse`），形态升级为「真实回合全挂、小探针全 200」——已按本条预留方案换模型：主 1115 + 0826 兜底（含会话钉子手术，见同日新条目）。换模型没有恢复服务，深挖后**真病根落案：中转站（Gemini 系后端）不认 OpenAI content 块数组**，openclaw 9.7 恰好在升级后开始把多 text 块编成数组——本条记的 10-02 15:07 一例确认属此案（会话转录 seq 实锤）；10-01 14:04 两发发生在升 9.7 之前（当时还是 9.2），未重验，不排除确属平台间歇。错误体一直存在，被网关 redacted + 代理 empty-sse 误标两层伪装盖住。修复=代理 blocks-flatten，详见 10-03 条目。
 
 ## \[已解决] RP 回复开头复读 openclaw.inbound_meta/outbound_meta JSON 信封——系统提示词 Message Context 被 RP 模型整段抄进正文（2026-10-02）
 
@@ -140,7 +154,7 @@
 - 实测证据链：出事时刻精确对齐 09-25 04:43 把 RP 模型切到 rp-nsfw（该供应商 09-24 14:33 才加入）之后——中转站 api.sillytraven.dev 的 SSE 流**内容完整但从不发 finish_reason 块与 [DONE]**，openclaw 严格按协议收流，等不到结束标记即判整次 run 失败并丢弃全文。绕开 openclaw 直连该站实测八次（nalang-turbo-0826/1115、x-apex-dash-0826 三种型号 × 长短输出 × stream_options × Accept/UA 请求头）全部复现"内容完整+缺结束标记" → 服务端流式实现残缺，与我方无关（钥匙有效：假钥匙被拒 HTTP 400；本机无代理环境变量、hosts/DNS 干净、证书校验通过）。
 - 为什么"之前直连脚本生成训练数据是好的"：rp-tune/st-continue.py、rp-eval/llm_client.py 收流方式宽容——读到对端关闭为止、拼 delta、[DONE] 有没有无所谓——结束标记缺失对它们无感；且脚本用的是 x-apex-dash-0826（实测同样无结束标记），分界在**客户端严格性**而非型号。内容本身从未丢过。
 - 解决方案（2026-09-25 落地）：本机架"补暗号"代理 `tools/sse-fix-proxy.mjs`（127.0.0.1:18801，零依赖 Node）：SSE 响应缺结束标记时在流末尾补 `finish_reason:"stop"` 块 + `[DONE]`；非 SSE（JSON 报错等）原样透传；上游若修复自动退化为纯透传；钥匙不经手仍由 openclaw 持有。openclaw.json `models.providers.rp-nsfw.baseUrl` → `http://127.0.0.1:18801/v1`（备份 `.bak-ssefix-20260925`），热重载即生效无需重启网关；`start-gateway.cmd` 挂条件自启动（配置含 `127.0.0.1:18801` 才拉起；端口锁防多开，同 embedding-watchdog 规矩）。验证：代理三态测试（注入 / 400 透传 / JSON 透传）全过，微信实测回复成功。
-- 排障抓手：代理日志 `%TEMP%\openclaw\sse-fix-proxy.log`（每请求一行，FIXED/passthrough/empty-sse 三态）；网关日志搜 `Stream ended without finish_reason`。换上游站点或端口需同步代理的 SSEFIX_PORT/SSEFIX_UPSTREAM 环境变量与 start-gateway.cmd 里的 findstr 条件。回退 = 还原 .bak + 杀代理进程。
+- 排障抓手：代理日志 `%TEMP%\openclaw\sse-fix-proxy.log`（每请求一行，FIXED/passthrough/empty-sse 三态）；网关日志搜 `Stream ended without finish_reason`。**手动重启代理的生命周期坑（10-03 实锤）**：在 exec 会话里直接 `node sse-fix-proxy.mjs` 或 Start-Process 拉起的实例会随会话回收一起死（同晚端口两度掉线）；用 WMI 起才真正独立：`Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='node.exe K:\OpenClaw\tools\sse-fix-proxy.mjs'}`，起后 netstat 验 LISTENING + 打 `/v1/models` 验通。换上游站点或端口需同步代理的 SSEFIX_PORT/SSEFIX_UPSTREAM 环境变量与 start-gateway.cmd 里的 findstr 条件。回退 = 还原 .bak + 杀代理进程。
 - 状态：已解决（2026-09-25 微信实测恢复）。上游协议缺陷未反馈站长（主人拍板不反馈）。
 
 ## \[上游限制] 网页（webchat）看不到她的实时思考——网关广播层不支持转发推理载荷（2026-09-22 修正）
@@ -769,3 +783,10 @@
 **2026-09-30 补**：同款第二个命令 `/指北`（能力边界与 FAQ，文档 `extensions-local\suan-help-echo\zhinan.md`，同样热改生效）；面板 v5 四入口（命盘/摇卦/helps/指北）。升级插件两个补丁一起重打。
 
 **2026-09-30 再补（防刷屏终版）**：helps/指北合并为腾讯文档（https://docs.qq.com/doc/DWk92bWVwTGNEb2p0，唯一权威版，改文档只改在线版）；面板 v6 收三项（命盘/摇卦/📖使用说明-link项直达文档，PanelItem type=link 可放 https 链接）；dist 两个命令（/helps、/指北）handler 都改读 short.md（三五行速览+文档链接）。本地 help.md/zhinan.md/merged-guide.md 均为历史稿。
+## [已解决·有绕行] QQ 私聊长回复只收到最后一段——qqbot 分块流式（partial）中间块不落终稿（2026-10-03）
+
+- 症状：轩瑜在 QQ 私聊里没看到我 11:01 那轮的过程直播和中间段落，只收到最后一段成稿；同一轮在网页端完整显示。
+- 取证：当日网关日志 11:01–11:08 一串严格 ~50s 间隔的 `[qqbot:api] <<< Status: 200 OK`，无 errcode、无限流报错——出站 API 全部成功，不是网络丢包/频控丢包。插件源码 `npm/projects/tencent-connect-openclaw-qqbot-*`/dist/index.cjs：`defaults = { streaming: { mode: "partial" } }`——qqbot 通道未写 streaming 配置即默认分块流式；`src/outbound/streaming-controller.ts` 逻辑：流激活时中间块走 `stream_messages`（`streamOwnsText` 分支跳过静态发送，`deliveredTexts` 还会去重吞同文），只有 finalize 的终稿落成一条可见消息。QQ 客户端对 stream_messages 中途更新渲染不稳 → 中间过程段用户侧不可见，只看到终稿。
+- 解决方案（不动上游，二选一/可并用）：① 在 QQ 私聊发 `/bot-streaming off`（通道内置命令，直接改该账号 streaming.mode=off，即时生效、免重启）→ 每段回复独立成一条完整消息，过程直播可见；② 约定：关键长结果由 agent 用 message 工具显式单条发送（核对 deliveryStatus=sent），自动回复只做收尾。
+- 排障抓手：QQ「没收到/只收到一半」先查当日日志 `[qqbot:api]`——全 200 但用户看不到 = 分块流式只落终稿，不是丢包；有 errcode/频控码才是被 QQ 拒了。
+- 状态：已解决（当次结果已显式单发补齐并确认送达；是否关流式等轩瑜拍板）。
