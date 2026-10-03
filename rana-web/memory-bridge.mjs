@@ -23,8 +23,14 @@ import { spawn } from 'node:child_process';
 const HOME = 'K:/OpenClaw/.openclaw/.openclaw';
 const SHARED = HOME + '/shared-memory';
 const CFG = JSON.parse(fs.readFileSync(HOME + '/openclaw.json', 'utf8'));
+// model 字段可能是字符串或 {primary, fallbacks} 对象（2026-10 配置改版），统一规整成字符串
+function modelStr(m) {
+  if (typeof m === 'string') return m;
+  if (m && typeof m === 'object' && typeof m.primary === 'string') return m.primary;
+  return '';
+}
 // RP 侧提炼模型跟随 rana-rp agent 当前配置，避免写死旧模型被 JIT 反复拉起挤显存
-const RP_DISTILL_MODEL = (CFG.agents?.entries?.['rana-rp']?.model || '').split('/').pop() || 'rana-rp-7b';
+const RP_DISTILL_MODEL = modelStr(CFG.agents?.entries?.['rana-rp']?.model).split('/').pop() || 'rana-rp-7b';
 const NOW = Date.now();
 // 本地兜底过滤表（privacy-patterns 文件含私人词表，不入公开仓库；缺文件时兜底跳过，提示词层防护仍在）
 const LOCAL_FILTERS = (() => {
@@ -56,7 +62,7 @@ function resolveApiKey(raw) {
 /** 云端提炼统一走 glm（aliyun token-plan 额度耗尽 + glm 是 main 现役主力） */
 function glmChatConfig() {
   const p = CFG.models.providers['glm'];
-  const m = CFG.agents?.entries?.['rana-qq-public']?.model || '';
+  const m = modelStr(CFG.agents?.entries?.['rana-qq-public']?.model);
   // qq agent 换非 glm 模型后不能直接拿它的名字发到智谱端点（1211 模型不存在），回退到 provider 自带模型列表
   const model = m.startsWith('glm/') ? m.split('/').pop() : (p.models?.[0]?.id || 'glm-5.3-flash');
   return { url: p.baseUrl, apiKey: resolveApiKey(p.apiKey), model };
@@ -121,7 +127,7 @@ function readNewEvents(agentId, sinceMs, capChars, opts = {}) {
     if (opts.sessionFilter && !opts.sessionFilter(key)) continue;
     let j;
     try { j = JSON.parse(r.event_json); } catch { continue; }
-    const msg = j.type === 'message' ? j : null;
+    const msg = j && j.type === 'message' ? j : null; // 个别损坏/空事件行不炸整条腿
     if (!msg) continue;
     const role = msg.message?.role;
     if (role !== 'user' && role !== 'assistant') continue;
