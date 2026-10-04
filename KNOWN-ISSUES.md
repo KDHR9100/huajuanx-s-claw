@@ -21,6 +21,14 @@
 
 ## 登记区
 
+## [已解决·本机补丁] 网页「新建会话」秒拒 "Session creation publication owner is no longer current"——9.7 Win32 `\\?\` 路径前缀泄漏进创建流程的路径比对，同一文件两种写法永不相等；比对处规整修复（2026-10-02/03 首诊，10-04 探针定案+补丁修复）
+- 症状：网页（webchat）点新建会话被秒拒——`sessions.create` 报 `errorCode=UNAVAILABLE`（53ms-2s 即拒），客户端随即断开。首诊 2026-10-02 23:54 / 10-03 01:29-01:47 三簇，10-04 11:15、11:38、12:30 多簇复发。**只挡「新建会话」**：chat.send/history 走别的路径，微信/QQ/网页 RP 聊天全程正常。
+- 根因（探针实锤到值）：创建会话时 sharing-preparation 的 bindCreation 校验「创建发布凭证的源库路径 ∈ 目标路径集合」（`dist/session-accessor.sqlite-entry-cache-DgoUpjH2.mjs` 的 `assertSessionEntryCreationPublication`，`Set.has(path.resolve())` **字符串比对**）。Win32 下创建侧拿到的库路径带 `\\?\` 扩展前缀（探针实测 `srcPath=\\?\K:\...\openclaw-agent.sqlite` vs `targetPaths=[K:\...\openclaw-agent.sqlite, ...]`），agentId/sessionKey 全对、唯路径字符串永不相等 → **每次新建必挂、重启无用**。与 clawstat.us 收录的 9.7 Windows 已知问题（`\\?\` path leaks into creation）一致；已下载 9.8 逐行比对，该函数零改动=**上游 9.8 仍未修**。
+- 定性修正（重要，防后人再误诊）：10-03 的「重启即愈」是**误诊**——10-04 11:45 全新网关 3 分钟后照样秒拒（11:54 两发全挂），探针证明新缓存出生即坏；旧定性「缓存凭证失效/配对轮换触发」均不成立（12:42 修复后成功时并无配对事件，纯属时间上的巧合）。
+- 修复（2026-10-04 本机补丁）：比对处加 `__pubNorm` 路径规整——剥 `\\?\` 前缀（`\\?\UNC\` 转 `\\` 形式）、双侧都规整后再 resolve 比对。落地 3 文件：主线程 `dist/session-accessor.sqlite-entry-cache-DgoUpjH2.mjs` + 工人包 `dist/worker/worker.mjs` / `dist/worker/sqlite-store.worker.mjs`（同款比对一并修）。备份同目录 `*.bak-creationpub-20261004`；探针 `%TEMP%\openclaw\creation-pub-probe.log` 保留观察（每次 create 记 OPEN/CLOSE，报错才记 MISS，开销可忽略）。验证：12:42 主人实测 `sessions.create ✓ 1937ms`，探针 OPEN→CLOSE 零 MISS。
+- 诊断方法（可复用）：CLI 无 sessions create，复现须网页点新建；dist 探针补丁（报错点打印实际比对值+调用栈，工人包用 throw 包装栈日志）→ **一次复现即定案**，比静态逆向省两小时。
+- 状态：已解决（本机补丁）。⚠️升级 openclaw/重装 dist 后必须重打本补丁（加入重打脚本清单）；上游修复后可回滚（还原 .bak 即可）。
+
 ## [已解决·待观察] QQ 收到 600s 超时罐头话——心跳班越权"施工"救备份磨满超时；真凶是 push 通道 TLS 挂三天（2026-10-03）
 - 症状：主人 QQ 17:42 收到 `Request timed out before a response was generated. Please try again, or increase agents.defaults.timeoutSeconds...`（超时罐头话，与 9-17 心跳马拉松条目同款话术）。同日三个 cron 任务被 consecutive-failures 自动禁用：memory-bridge / private-memory-bridge（13:04/13:17，根因见上一条已解决）+ **Daily Private Backup（17:32，连错 10 次）**；backup-check-run 连错 7 次未到阈值。
 - 根因（三层叠）：①**push 通道挂了三天**——备份日志 10-01 起每天 `TLS connect error: unexpected eof`（Clash 半死老症状），本地快照与 commit 天天成功、全积压推不出去；②**.eva-parts 多 GB 拆分压缩包又进备份**（GitHub 100MB 硬限，10-02 手术漏网），10-03 晚并行手术者 reset + chore commit 再清一轮并更新 .gitignore；③**心跳班（glm-5.3-flash）巡查发现备份故障后越权进入施工模式**——29 个工具调用连做"读技能→查 cron 库→读备份脚本日志→探 Clash 7897→测 GitHub 连通→三次 push 补推→写 _catchup_push.cmd 后台重试循环→起后台 push 进程"，在第 29 个调用上正好撞满 600s 全局超时被掐，罐头话发 QQ。与 9-17 那次不同：**不是无意义马拉松，是干正事但违反"巡查/施工分工"纪律**（9-17 处方的 prompt 纪律被 glm 突破）。
