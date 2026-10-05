@@ -29,8 +29,21 @@ function modelStr(m) {
   if (m && typeof m === 'object' && typeof m.primary === 'string') return m.primary;
   return '';
 }
-// RP 侧提炼模型跟随 rana-rp agent 当前配置，避免写死旧模型被 JIT 反复拉起挤显存
-const RP_DISTILL_MODEL = modelStr(CFG.agents?.entries?.['rana-rp']?.model).split('/').pop() || 'rana-rp-7b';
+// RP 侧提炼模型：只用 LM Studio 当前"已加载"的模型（14B 优先——7B 实测会主客颠倒/编造场景时间；7B 只兜底），绝不 JIT 拉起新模型挤显存。
+// 2026-10 RP 上云后 agent 配置已是云端模型名，不能再当本地模型名用——那正是 RP 腿断管的根因之一
+async function pickRpDistillModel() {
+  let ids = [];
+  try {
+    const res = await fetch('http://127.0.0.1:1234/v1/models', { signal: AbortSignal.timeout(5000) });
+    ids = ((await res.json()).data || []).map((m) => m && m.id).filter(Boolean);
+  } catch (e) {
+    throw new Error('LM Studio 服务不可达（' + (e && e.message ? e.message : e) + '）');
+  }
+  for (const pref of ['rana-rp-14b', 'rana-v4-7b']) if (ids.includes(pref)) return pref;
+  const llm = ids.find((id) => !/embed/i.test(id));
+  if (llm) return llm;
+  throw new Error('本地无已加载模型（RP 页按「🔗记忆同步」可自动拉起，跑完自动卸载）');
+}
 const NOW = Date.now();
 // 本地兜底过滤表（privacy-patterns 文件含私人词表，不入公开仓库；缺文件时兜底跳过，提示词层防护仍在）
 const LOCAL_FILTERS = (() => {
@@ -168,13 +181,13 @@ function qqSpeakerOf(text) {
 }
 
 /* ---------- 2. 提炼（各侧各自的模型） ---------- */
-async function chat(url, apiKey, model, sys, user, maxTokens) {
+async function chat(url, apiKey, model, sys, user, maxTokens, timeoutMs = 120000) {
   const res = await fetch(url.replace(/\/$/, '') + '/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(apiKey ? { Authorization: 'Bearer ' + apiKey } : {}) },
     // sys 并入首条 user：RP 调优的本地模型常忽略 system 角色
     body: JSON.stringify({ model, messages: [{ role: 'user', content: sys + '\n\n' + user }], max_tokens: maxTokens, temperature: 0.2, stream: false }),
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`${res.status} ${await res.text().catch(() => '')}`.slice(0, 200));
   const j = await res.json();
@@ -255,7 +268,7 @@ function syncMemoryMd(agentWorkspace) {
   let body = '';
   try { body = fs.readFileSync(f, 'utf8'); } catch {}
   const month = fs.readFileSync(monthFile(), 'utf8');
-  const lines = month.split('\n').filter(l => l.startsWith('- ')).slice(-6); // 最近 6 条必见
+  const lines = month.split('\n').filter(l => l.startsWith('- ')).slice(-15); // 最近 15 条必见（2026-10-06 应主人要求从 6 加大）
   const section = `\n${MEM_MARK_BEGIN}\n## 共享近况（工作体/陪伴体互通，全文见 memory/shared-rana-*.md）\n${lines.join('\n')}\n${MEM_MARK_END}\n`;
   if (body.includes(MEM_MARK_BEGIN)) {
     body = body.replace(new RegExp(MEM_MARK_BEGIN.replace(/[/*]/g, '\\$&') + '[\\s\\S]*?' + MEM_MARK_END.replace(/[/*]/g, '\\$&')), section.trim());
@@ -330,7 +343,10 @@ try {
   if (rpEvts.length) {
     const dialog = rpEvts.map(e => e.line).join('\n');
     // RP 原文只进本地模型（跟随 agent 当前模型）
-    const raw = await chat('http://127.0.0.1:1234/v1', null, RP_DISTILL_MODEL, SYS, promptFor('陪伴', 'RP', dialog), 500);
+    const rpModel = await pickRpDistillModel();
+    log('rp distill model: ' + rpModel);
+    // 积压多天的对话很长，本地 7B/14B prefill 慢，超时放宽到 8 分钟（120s 会撞死）
+    const raw = await chat('http://127.0.0.1:1234/v1', null, rpModel, SYS, promptFor('陪伴', 'RP', dialog), 500, 480000);
     rpEntries = parseEntries(raw, 'RP', rpEvts[rpEvts.length - 1].ts);
     newRpTs = rpEvts[rpEvts.length - 1].ts;
     if (!rpEntries.length && raw && !/^空/.test(raw)) log('rp distill raw (rejected): ' + JSON.stringify(raw.slice(0, 200)));

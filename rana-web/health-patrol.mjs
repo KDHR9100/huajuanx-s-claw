@@ -262,8 +262,11 @@ const main = async () => {
   fs.mkdirSync(path.dirname(HEALTH_FILE), { recursive: true });
   fs.writeFileSync(HEALTH_FILE, JSON.stringify(patrol, null, 2), "utf8");
 
-  // 同步一份到 workspace-main/memory/patrol-status.md：兜底心跳（每 24h）从这里读；
-  // 「更新时间超过 90 分钟」即代表本脚本自身停摆，由兜底心跳报警
+  // 状态 markdown 写在 .health/patrol-status.md（兜底心跳从这里读，「更新时间超过 90 分钟」
+  // 即代表本脚本自身停摆，由兜底心跳报警）。
+  // [2026-10-04] 曾经写到 workspace-main/memory/patrol-status.md——但记忆目录里的文件会被
+  // OpenClaw 记忆子系统自动重索引，每 30 分钟触发一次 embedding，LM Studio 反复 JIT 拉起
+  // 模型（详见 KNOWN-ISSUES「embedding 每 30 分钟被拉起」条目），故挪出记忆目录。
   const pad = (n) => String(n).padStart(2, "0");
   const t = new Date(now);
   const stamp = `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}`;
@@ -274,11 +277,11 @@ const main = async () => {
     ...anomalies.map((a) => `  - ${a.label}：${a.detail}`),
   ].join("\n");
   try {
-    const wsStatus = path.join(STATE_DIR, "workspace-main", "memory", "patrol-status.md");
+    const wsStatus = path.join(HERE, ".health", "patrol-status.md");
     fs.mkdirSync(path.dirname(wsStatus), { recursive: true });
     fs.writeFileSync(wsStatus, statusMd + "\n", "utf8");
   } catch {
-    /* workspace 写不进不影响主流程 */
+    /* .health 写不进不影响主流程 */
   }
 
   console.log(

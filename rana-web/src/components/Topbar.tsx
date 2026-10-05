@@ -120,6 +120,63 @@ function ModelPicker() {
   );
 }
 
+/** 记忆同步按钮：一键拉起本地模型跑共享桥+私密桥，完成后自动卸载还显存（平时绝不自动加载，打游戏不受影响） */
+function BridgeSyncButton() {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+
+  const start = async () => {
+    if (busy) return;
+    setBusy(true);
+    setNote("启动…");
+    try {
+      const r = await fetch("/__rana/bridge-sync", { method: "POST" });
+      const j = (await r.json()) as { started?: boolean; error?: string };
+      if (!j.started) {
+        setNote(j.error ?? "无法启动");
+        setBusy(false);
+        return;
+      }
+      const poll = async () => {
+        try {
+          const s = (await (await fetch("/__rana/bridge-sync")).json()) as {
+            running?: boolean; step?: string; error?: string | null;
+          };
+          if (s.running) {
+            setNote(s.step ?? "…");
+            setTimeout(() => void poll(), 3000);
+          } else if (s.error) {
+            setNote(`✗ ${s.error}`);
+            setBusy(false);
+          } else {
+            setNote("✓ 已同步");
+            setBusy(false);
+            setTimeout(() => setNote(""), 8000);
+          }
+        } catch {
+          setNote("✗ 查询失败");
+          setBusy(false);
+        }
+      };
+      void poll();
+    } catch (e) {
+      setNote(`✗ ${(e as Error).message}`);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      className="btn ghost"
+      onClick={() => void start()}
+      disabled={busy}
+      title="一键记忆同步：按需拉起本地模型跑共享桥+私密桥，完成后自动卸载还显存；平时绝不自动加载模型"
+    >
+      {busy ? `🔗 ${note}` : "🔗 记忆同步"}
+    </button>
+  );
+}
+
 export default function Topbar() {
   const conn = useAppStore((s) => s.conn);
   const sessions = useAppStore((s) => s.sessions);
@@ -142,6 +199,7 @@ export default function Topbar() {
       >
         💭 思考{showReasoning ? "" : "（关）"}
       </button>
+      <BridgeSyncButton />
       <ModelPicker />
       <button className="btn ghost" onClick={togglePanel} title={panelOpen ? "收起用量面板" : "展开用量面板"}>
         🧮 用量{panelOpen ? "（收）" : ""}
