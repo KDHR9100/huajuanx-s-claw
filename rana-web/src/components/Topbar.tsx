@@ -121,6 +121,12 @@ function ModelPicker() {
 }
 
 /** 记忆同步按钮：一键拉起本地模型跑共享桥+私密桥，完成后自动卸载还显存（平时绝不自动加载，打游戏不受影响） */
+const SYNC_STEP_ZH: Record<string, string> = {
+  start: "启动", lmstudio: "检查LM Studio", model: "检查模型",
+  "shared-bridge": "共享桥同步中", "private-bridge": "私密桥同步中",
+  unload: "释放显存", done: "完成", failed: "失败",
+};
+
 function BridgeSyncButton() {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
@@ -140,18 +146,20 @@ function BridgeSyncButton() {
       const poll = async () => {
         try {
           const s = (await (await fetch("/__rana/bridge-sync")).json()) as {
-            running?: boolean; step?: string; error?: string | null;
+            running?: boolean; step?: string; error?: string | null; result?: Record<string, string> | null;
           };
           if (s.running) {
-            setNote(s.step ?? "…");
-            setTimeout(() => void poll(), 3000);
+            setNote(SYNC_STEP_ZH[s.step ?? ""] ?? s.step ?? "…");
+            setTimeout(() => void poll(), 2000);
           } else if (s.error) {
-            setNote(`✗ ${s.error}`);
+            setNote(`✗ ${s.error}`); // 失败原因一直留着，直到下次再按
             setBusy(false);
           } else {
-            setNote("✓ 已同步");
+            const results = Object.values(s.result ?? {});
+            const allOk = results.length > 0 && results.every((v) => v.includes("✓"));
+            setNote(allOk ? "✓ 同步完成" : "⚠ 部分完成，详见网关日志");
             setBusy(false);
-            setTimeout(() => setNote(""), 8000);
+            setTimeout(() => setNote(""), 30000); // 成功提示留 30 秒
           }
         } catch {
           setNote("✗ 查询失败");
@@ -170,9 +178,9 @@ function BridgeSyncButton() {
       className="btn ghost"
       onClick={() => void start()}
       disabled={busy}
-      title="一键记忆同步：按需拉起本地模型跑共享桥+私密桥，完成后自动卸载还显存；平时绝不自动加载模型"
+      title="一键记忆同步：云端优先提炼（不占显存）；云端不通才拉起本地模型，跑完自动卸载。平时绝不自动加载模型"
     >
-      {busy ? `🔗 ${note}` : "🔗 记忆同步"}
+      {busy ? `🔗 ${note}` : note.startsWith("✗") ? `🔗 ${note}` : note || "🔗 记忆同步"}
     </button>
   );
 }
