@@ -195,6 +195,38 @@ async function chat(url, apiKey, model, sys, user, maxTokens, timeoutMs = 120000
 }
 
 const SYS = '任务：从对话片段提炼共享记忆纪要。禁止复述本任务，禁止扮演对话角色，直接输出纪要行。';
+
+/** 云端提炼（rp-nsfw 中转站）：中转站永远回 SSE（stream:false 也不听），需自行拼 delta；
+ *  sse-fix-proxy 已在流尾补 finish_reason/[DONE] 所以正常收尾。 */
+async function cloudChat(url, apiKey, model, sys, user, timeoutMs = 120000) {
+  const res = await fetch(url.replace(/\/$/, '') + '/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
+    body: JSON.stringify({ model, messages: [{ role: 'user', content: sys + '\n\n' + user }], max_tokens: 500, temperature: 0.2, stream: false }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${await res.text().catch(() => '')}`.slice(0, 200));
+  const text = await res.text();
+  if (!/^\s*data:/.test(text) && !text.includes('\ndata:')) {
+    const j = JSON.parse(text); // 万一哪天中转站老实回 JSON 了
+    return (j.choices?.[0]?.message?.content || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  }
+  let out = '';
+  for (const line of text.split('\n')) {
+    const s = line.trim();
+    if (!s.startsWith('data:')) continue;
+    const p = s.slice(5).trim();
+    if (!p || p === '[DONE]') continue;
+    try {
+      const j = JSON.parse(p);
+      const ch = j.choices?.[0] ?? {};
+      if (ch.delta?.content) out += ch.delta.content;
+      if (ch.message?.content) out += ch.message.content;
+    } catch { /* 忽略无法解析的半行 */ }
+  }
+  return out.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+}
+
 function promptFor(side, tag, dialog) {
   // RP 侧私密内容一律不进共享记忆（云端可见）——由 private-memory-bridge 负责保管
   const privacy = tag === 'RP' ? '\n私密、亲密、身体相关的内容一律跳过不记（由私密记忆单独负责，共享记忆绝不收录）。' : '';
@@ -342,11 +374,28 @@ try {
   const rpEvts = readNewEvents('rana-rp', state.lastRpMs || NOW - 24 * 3600e3, CAP);
   if (rpEvts.length) {
     const dialog = rpEvts.map(e => e.line).join('\n');
-    // RP 原文只进本地模型（跟随 agent 当前模型）
-    const rpModel = await pickRpDistillModel();
-    log('rp distill model: ' + rpModel);
-    // 积压多天的对话很长，本地 7B/14B prefill 慢，超时放宽到 8 分钟（120s 会撞死）
-    const raw = await chat('http://127.0.0.1:1234/v1', null, rpModel, SYS, promptFor('陪伴', 'RP', dialog), 500, 480000);
+    const prompt = promptFor('陪伴', 'RP', dialog);
+    // 云端优先（2026-10-06 实测通过，主人拍板）：RP 原文本就经过该中转站（聊天本体同通道），提炼无新增暴露；
+    // 失败（链路抖/超时/账户问题）才回落本地——本地路径只用已加载的模型（14B 优先），绝不 JIT 拉起挤显存
+    let raw = null;
+    try {
+      const rpProv = CFG.models?.providers?.['rp-nsfw'] || {};
+      const cloudKey = resolveApiKey(rpProv.apiKey);
+      if (cloudKey) {
+        const cloudModel = modelStr(CFG.agents?.entries?.['rana-rp']?.model).split('/').pop() || 'nalang-turbo-1115';
+        raw = await cloudChat(rpProv.baseUrl || 'http://127.0.0.1:18801/v1', cloudKey, cloudModel, SYS, prompt);
+        log('rp distill model: cloud:' + cloudModel);
+      } else log('rp cloud skipped: rp-nsfw 配置里没有 apiKey');
+    } catch (e) {
+      log('rp cloud distill FAILED, falling back to local: ' + e.message);
+      raw = null;
+    }
+    if (raw === null) {
+      const rpModel = await pickRpDistillModel();
+      log('rp distill model: local:' + rpModel);
+      // 积压多天的对话很长，本地 7B/14B prefill 慢，超时放宽到 8 分钟（120s 会撞死）
+      raw = await chat('http://127.0.0.1:1234/v1', null, rpModel, SYS, prompt, 500, 480000);
+    }
     rpEntries = parseEntries(raw, 'RP', rpEvts[rpEvts.length - 1].ts);
     newRpTs = rpEvts[rpEvts.length - 1].ts;
     if (!rpEntries.length && raw && !/^空/.test(raw)) log('rp distill raw (rejected): ' + JSON.stringify(raw.slice(0, 200)));
@@ -371,6 +420,83 @@ try {
   } else log('qq side: nothing new');
 } catch (e) { log('qq side FAILED (will retry next run): ' + e.message); }
 
+/* ---------- 4b. 晚报安全版摘要（绕开 private-memory-gate，供云端晚报任务读取） ---------- */
+// 背景：晚报（云端 glm）读 shared-rana 被 private-memory-gate 硬拦（10-01 亲密内容触发云端审查后装的闸），陪伴侧 10-02 起每晚「暂缺」。
+// 修法（2026-10-06 主人拍板）：桥把当天 [RP] 行交给 RP 模型（云端 nalang 优先、本地已加载模型兜底）软化成中性散文，
+// 写到文件名不含 shared-rana 字样的独立文件——闸门按路径拦截，新文件不命中。
+const DIGEST_FILE = `${HOME}/workspace-main/memory/evening-digest.md`;
+const DIGEST_STATE = `${SHARED}/.digest-state.json`;
+
+function todayRpDigestSource() {
+  try {
+    const month = fs.readFileSync(monthFile(), 'utf8');
+    const today = dateKey();
+    const out = [];
+    let inToday = false;
+    for (const ln of month.split('\n')) {
+      if (ln.startsWith('## ')) { inToday = ln.includes(today); continue; }
+      if (inToday && ln.startsWith('- ') && ln.includes('[RP]')) out.push(ln.replace(/^-\s*/, '').trim());
+    }
+    return out;
+  } catch { return []; }
+}
+
+async function generateEveningDigest() {
+  const rpLines = todayRpDigestSource();
+  const sourceKey = rpLines.join('\n');
+  let prev = {};
+  try { prev = JSON.parse(fs.readFileSync(DIGEST_STATE, 'utf8')); } catch {}
+  if (prev.sourceKey === sourceKey && fs.existsSync(DIGEST_FILE)) return; // 当天内容没变不重做（省额度）
+  const fallback = rpLines.length
+    ? `今日陪伴侧共 ${rpLines.length} 条记录（细节只在本地保留，想听直接问我）。`
+    : '今日陪伴侧暂无记录。';
+  let body = fallback;
+  if (rpLines.length) {
+    const softenSys = '任务：把陪伴侧纪要改写成给主人的晚报摘要。禁止扮演对话角色，直接输出摘要文本。';
+    const softenPrompt = [
+      '把下面的陪伴侧纪要改写成晚报摘要：',
+      '①只保留日常层面：聊了什么话题、做了什么日常互动、彼此的状态情绪；',
+      '②任何身体、亲密、私密细节一律省略或模糊成「亲密陪伴」级别，绝不复述；',
+      '③2-3 句中文散文，不超过 80 字，不要列表不要格式；',
+      '④若纪要基本全是私密内容，就输出：今日主要是亲密陪伴。',
+      '纪要：',
+      sourceKey,
+    ].join('\n');
+    try {
+      const rpProv = CFG.models?.providers?.['rp-nsfw'] || {};
+      const cloudKey = resolveApiKey(rpProv.apiKey);
+      if (cloudKey) {
+        const cloudModel = modelStr(CFG.agents?.entries?.['rana-rp']?.model).split('/').pop() || 'nalang-turbo-1115';
+        body = await cloudChat(rpProv.baseUrl || 'http://127.0.0.1:18801/v1', cloudKey, cloudModel, softenSys, softenPrompt, 60000);
+        log('digest softened by cloud:' + cloudModel);
+      } else throw new Error('rp-nsfw 配置无 apiKey');
+    } catch (e) {
+      try {
+        const m = await pickRpDistillModel(); // 本地兜底：只用已加载的，绝不 JIT 拉起
+        body = await chat('http://127.0.0.1:1234/v1', null, m, softenSys, softenPrompt, 500, 480000);
+        log('digest softened by local:' + m);
+      } catch (e2) {
+        log('digest soften FAILED (cloud & local), fallback line used: ' + e2.message);
+        body = fallback;
+      }
+    }
+    // 隐私兜底：软化结果只要还带敏感词，整段降级为计数行
+    const nets = [LOCAL_FILTERS.rpPrivacy, '内射|做爱|抽插|阴道|阴茎|乳房|处女'].filter(Boolean);
+    const dirty = nets.some((n) => { try { return new RegExp(n).test(body); } catch { return false; } });
+    if (dirty) {
+      log('digest soften output failed privacy net, downgraded');
+      body = fallback;
+    }
+    body = body.replace(/\s+/g, ' ').trim().slice(0, 200) || fallback;
+  }
+  try {
+    const stamp = new Date().toTimeString().slice(0, 5);
+    fs.writeFileSync(DIGEST_FILE, `# 陪伴侧日报摘要（晚报专用，已脱敏）\n\n（记忆桥自动生成，最后更新今天 ${stamp}；细节只在本地共享记忆里，不要去找原文）\n\n${body}\n`);
+    fs.writeFileSync(DIGEST_STATE, JSON.stringify({ sourceKey, at: NOW }));
+    log(`evening digest updated (${rpLines.length} rp lines)`);
+  } catch (e) { log('digest write failed: ' + e.message); }
+}
+
 appendShared([...mainEntries, ...rpEntries]);
 if (mainEntries.length || rpEntries.length) {
   syncMemoryMd(HOME + '/workspace-main');
@@ -378,6 +504,7 @@ if (mainEntries.length || rpEntries.length) {
 }
 publishQqDigest(qqEntries);
 publishFlatCopies(); // 无论有无新条目都确保副本存在（跨月/首次）
+await generateEveningDigest(); // 晚报安全摘要（内容没变则跳过）
 if (mainEntries.length || rpEntries.length || qqEntries.length) {
   saveState({ ...state, lastMainMs: newMainTs, lastRpMs: newRpTs, lastQqMs: newQqTs });
   log(`shared updated: +${mainEntries.length} work, +${rpEntries.length} rp, +${qqEntries.length} qq`);
