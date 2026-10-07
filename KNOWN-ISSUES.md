@@ -21,6 +21,18 @@
 
 ## 登记区
 
+## [未解决·账户侧] 群画像每日增量 cron 连败——qwenanliang/deepseek-v4-pro-0813 免费额度烧穿 403（2026-10-07 登记，10-06 起病）
+- 症状：cron「群画像每日增量」（b566bd64）连败 4 次进 15 分钟错误退避。日志实锤：`403 Free quota exhausted. To continue accessing the model on a paid basis, please add funds or disable the "use free tier only" mode in the management console.`（`AllocationQuota.FreeTierOnly`），且 `fallbackConfigured=false` 无兜底 → 直接 surface_error。
+- 根因：**账户侧额度耗尽**（中转站处于「仅免费额度」模式且免费档烧完），代码/配置无恙。此前 10-06 凌晨「全 nalang 模型 400 账户不支持」疑云（见记忆）与此同族——都是中转账户额度问题，待主人自查。
+- 解决方案（待主人拍板）：①中转站充值或关掉「仅免费额度」模式；②`cron edit` 换健康端点模型——注意 qwen3.8-flash 在画像类长工具链任务上有「工具干完不写档案」前科（见 2026-09-14/15 条目），换它要连收尾问题一起观察；③换 glm。
+- 状态：未解决（退避重试不丢任务，下次自动试跑约 10-08 晚；主人处置额度或拍板换模型后即愈）。
+
+## [未解决·观察] qwen3.8-flash 输出内容审查误伤主会话——"Output data may contain inappropriate content" 整条回复失败（2026-10-07）
+- 症状：10-07 10:19 QQ 主会话（agent:main）一条回复生成 130s 后报错落空：`aliyun-maas/qwen3.8-flash` 报 `Output data may contain inappropriate content`，message dispatch `outcome=error`；当天该错 2 次（10-06 全天 0 次）。端点本身健康（9-15 已实证全 200），纯**输出侧**审查拦截。
+- 根因：上游（阿里云 MaaS）输出内容审查——模型生成完才被平台判「输出可能含不当内容」整条丢弃，与 09-14 那波隔离 turn 输入侧 400 拒绝（端点不健康）不同源。
+- 解决方案：本机无根治（闸门在上游）。缓解候选：频发再考虑主会话换模型/提示词规避敏感表述；关键结论保持「message 显式单发」习惯。
+- 状态：未解决·观察（个位数次/天先记账；频发再升级处置）。
+
 ## [已解决·本机补丁] 网页「新建会话」秒拒 "Session creation publication owner is no longer current"——9.7 Win32 `\\?\` 路径前缀泄漏进创建流程的路径比对，同一文件两种写法永不相等；比对处规整修复（2026-10-02/03 首诊，10-04 探针定案+补丁修复）
 - 症状：网页（webchat）点新建会话被秒拒——`sessions.create` 报 `errorCode=UNAVAILABLE`（53ms-2s 即拒），客户端随即断开。首诊 2026-10-02 23:54 / 10-03 01:29-01:47 三簇，10-04 11:15、11:38、12:30 多簇复发。**只挡「新建会话」**：chat.send/history 走别的路径，微信/QQ/网页 RP 聊天全程正常。
 - 根因（探针实锤到值）：创建会话时 sharing-preparation 的 bindCreation 校验「创建发布凭证的源库路径 ∈ 目标路径集合」（`dist/session-accessor.sqlite-entry-cache-DgoUpjH2.mjs` 的 `assertSessionEntryCreationPublication`，`Set.has(path.resolve())` **字符串比对**）。Win32 下创建侧拿到的库路径带 `\\?\` 扩展前缀（探针实测 `srcPath=\\?\K:\...\openclaw-agent.sqlite` vs `targetPaths=[K:\...\openclaw-agent.sqlite, ...]`），agentId/sessionKey 全对、唯路径字符串永不相等 → **每次新建必挂、重启无用**。与 clawstat.us 收录的 9.7 Windows 已知问题（`\\?\` path leaks into creation）一致；已下载 9.8 逐行比对，该函数零改动=**上游 9.8 仍未修**。
