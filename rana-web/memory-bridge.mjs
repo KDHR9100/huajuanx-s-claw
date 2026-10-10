@@ -19,8 +19,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { spawn } from 'node:child_process';
+import { STATE_HOME, resolveApiKey } from './lib/rana-config.mjs';
 
-const HOME = 'K:/OpenClaw/.openclaw/.openclaw';
+// 状态目录与 SecretRef 解析统一走共享模块（env 优先，缺省回退仓库内布局）
+const HOME = STATE_HOME;
 const SHARED = HOME + '/shared-memory';
 const CFG = JSON.parse(fs.readFileSync(HOME + '/openclaw.json', 'utf8'));
 // model 字段可能是字符串或 {primary, fallbacks} 对象（2026-10 配置改版），统一规整成字符串
@@ -58,20 +60,6 @@ const IDENTITY = (() => {
 const OWNER_NAME = IDENTITY.realName || '主人';
 const OWNER_ALIAS = IDENTITY.groupAlias || '群主';
 
-/** apiKey 现在可能是明文串，也可能是 SecretRef 对象（{source:"store",id}）——后者去 state SQLite 解析 */
-function resolveApiKey(raw) {
-  if (typeof raw === 'string') return raw;
-  if (raw && typeof raw === 'object' && raw.source === 'store') {
-    const db = new DatabaseSync(HOME + '/state/openclaw.sqlite', { readOnly: true });
-    try {
-      const row = db.prepare(
-        "SELECT value FROM secret_store_entries WHERE name = ? AND kind = 'secret' AND deleted_at_ms IS NULL ORDER BY updated_at_ms DESC LIMIT 1"
-      ).get(String(raw.id ?? ''));
-      return row ? String(row.value) : undefined;
-    } finally { db.close(); }
-  }
-  return undefined;
-}
 /** 云端提炼统一走 glm（aliyun token-plan 额度耗尽 + glm 是 main 现役主力） */
 function glmChatConfig() {
   const p = CFG.models.providers['glm'];

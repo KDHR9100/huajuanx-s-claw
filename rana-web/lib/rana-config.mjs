@@ -13,11 +13,14 @@ export const STATE_HOME = process.env.OPENCLAW_STATE_DIR
   ? path.resolve(process.env.OPENCLAW_STATE_DIR)
   : path.resolve(fileURLToPath(new URL('../../.openclaw/.openclaw', import.meta.url)));
 
+/** 网关状态库路径（密钥库 secret_store_entries 所在） */
+export const DB_FILE = path.join(STATE_HOME, 'state', 'openclaw.sqlite');
+
 /** apiKey 可能是明文串，也可能是 SecretRef 对象（{source:"store",id}）——后者去 state SQLite 解析 */
 export function resolveApiKey(raw) {
   if (typeof raw === 'string') return raw;
   if (raw && typeof raw === 'object' && raw.source === 'store') {
-    const db = new DatabaseSync(path.join(STATE_HOME, 'state', 'openclaw.sqlite'), { readOnly: true });
+    const db = new DatabaseSync(DB_FILE, { readOnly: true });
     try {
       const row = db.prepare(
         "SELECT value FROM secret_store_entries WHERE name = ? AND kind = 'secret' AND deleted_at_ms IS NULL ORDER BY updated_at_ms DESC LIMIT 1"

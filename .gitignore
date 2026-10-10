@@ -3,6 +3,8 @@
 .openclaw/
 # ZCode 本地会话数据（工作区副本）
 .zcode/
+# Trae 本地会话数据（工作区副本）
+.trae/
 # 第三方参考仓库克隆（deepseek-ai/deepseek-harness，自带 .git）
 dsh-reference/
 
