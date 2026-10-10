@@ -71,8 +71,8 @@
 │         qwen3-embedding-0.6B（CPU 常驻，记忆检索用，看门狗锁单实例）        │
 └────────────────────────────────────────────────────────────────────────────┘
 
- Vite 开发服务器 (vite.config.ts 兼任本地后端 /__rana/*)：学习计划文件读写、
- GPU/网络/服务端口状态、模型连通测试、群画像数据 —— 中间件模式，同源无跨域
+ rana-web 本地后端 (server/ 下二十一组 Vite 中间件，/__rana/*)：学习计划文件读写、
+ GPU/网络/服务端口状态、模型连通测试、群画像数据 —— 同源无跨域，零部署
 ```
 
 看不懂这张图没关系，下一节用大白话再讲一遍。
@@ -191,6 +191,12 @@ K:\OpenClaw
 │   └── sse-fix-proxy.mjs      ← RP 中转站流式修复代理：SSE 缺结束标记就在流尾补上（密钥不落代理）
 └── rana-web/              ← ★ 自建 Web 前端 + 边车脚本
     ├── index.html / vite.config.ts / tsconfig.json
+    ├── server/               ← ★ 本地后端：2026-10 把原挤在 vite.config.ts 的二十一组中间件按域拆分
+    │   ├── index.ts          装配 buildServerPlugins()（vite.config.ts 只剩约 40 行）
+    │   ├── lib/              公共工具：paths(状态目录 / 可移植根 RANA_WEB) · config(读 openclaw.json) · exec · http(json/readBody/isLoopback)
+    │   └── plugins/          每域一个文件：provider-config/sys-status/avatar/news/study/events/bangumi/life/fate/
+    │                         model-params/model-test/agent-info/qq-profile/dsh-models/dev-config/agents/
+    │                         sessions-cleanup/context/approvals/memory/bridge-sync
     ├── src/
     │   ├── App.tsx            根组件：十一个页面视图的装配（每页套 ErrorBoundary 兜底，坏一块不白全站）
     │   ├── styles.css         全部样式（2,000+ 行，房间场景/主题变量都在这）
@@ -214,8 +220,7 @@ K:\OpenClaw
     │       │        CalendarPage(全局日历) / BangumiPage(追番) / MemoryPage(🧠记忆) / AppsPage(程序：万年历/八字紫微/摇卦，apps/ 下子组件) / GroupsPage(群画像) / DshPage(派活)
     │       └── 面板与弹窗：UsagePanel(用量/超参调参/快捷命令/技能与MCP卡) / SettingsModal /
     │                LmStudioModal / CloudConfigModal / SystemCleanupModal(系统会话清理) / ModelTuningCard / AgentKitCard / ErrorBoundary
-    ├── vite.config.ts        ★ 二十一组中间件：token/agents清单/云端provider配置/电脑状态(含虚拟化切换)/头像/早报/
-    │                           学习计划(含待办)/全局日历/追番/人生规划与内容库/问卜/模型超参/模型连通测试/技能与MCP卡/群画像/DSH模型清单/系统会话清理/审批/上下文体检/记忆/记忆同步
+    ├── vite.config.ts        装配层（约 40 行）：react + buildServerPlugins() + /gateway、/lmstudio 代理；实现见 server/
     ├── start-rana.cmd        一键启动（网关+vite+浏览器；路径全相对解析，换机器不用改）
     ├── start-gateway.cmd     网关启动器（状态目录相对推导 + node/openclaw.mjs 自动探测 + 配置含 LM Studio 时拉起 embedding 看门狗）
     ├── local-overrides.example.cmd ← 本机个性化覆盖模板（node 路径/状态目录；真实文件 gitignore）
@@ -228,7 +233,8 @@ K:\OpenClaw
     ├── health-patrol.mjs     零成本系统巡检（cron 每 30 分钟：网关/前端端口、QQ 通道、备份新鲜度；异常聚合发 QQ 私聊，深夜只记不发）
     ├── backup-check.mjs      备份健康自检（每晚两段式：23:00 判定 fail-closed、23:05 异常才告警）
     ├── cron-session-cleanup.mjs 系统会话清理手术（停网关→备份→清 placement 残留→重启→删 cron 父会话；会话页左下角入口，--dry-run 只盘点）
-    ├── lib/rana-config.mjs   边车共享小工具：状态目录定位 + SecretRef apiKey 解析
+    ├── lib/rana-config.mjs   边车共享小工具：状态目录定位 + SecretRef apiKey 解析（含 rana-config.d.mts 类型声明）
+    ├── lib/agent-bridge.mjs  学习 / 问卜 / 人生规划三桥的共享实现（上面三个 *-agent.mjs 只是薄封装，2026-10 合并去重）
     ├── git-activity.mjs      Git 活动统计（日报/周报/月报口径）
     ├── git-activity-cron.mjs cron 直跑包装：统计+报告落盘（--out），配独立任务读文件分段推送 QQ
     └── design-mockups/       v2 界面的五版设计稿（纯 HTML 静态原型，从 a 到 e 迭代到「她的房间」）
@@ -348,7 +354,7 @@ QQ 公共号**自己养出来的**群画像：群档案、群友档案、每周�
 
 ## 🧩 深入：没有后端的全栈——Vite 中间件当后端
 
-「网页要读电脑状态、要改配置文件，后端呢？」——**没有独立后端进程**。`vite.config.ts`（约 5,000 行）里写了二十一组 Vite 插件，直接把接口挂到开发服务器上；`configurePreviewServer` 把同样的中间件挂到生产预览服务上，所以 `npm run dev` 和 `npm run preview` 行为一致，始终是单进程。
+「网页要读电脑状态、要改配置文件，后端呢？」——**没有独立后端进程**。二十一组 Vite 插件（2026-10 起按域拆分在 `rana-web/server/`，`vite.config.ts` 只剩约 40 行装配）直接把接口挂到开发服务器上；`configurePreviewServer` 把同样的中间件挂到生产预览服务上，所以 `npm run dev` 和 `npm run preview` 行为一致，始终是单进程。
 
 > 给新手的一句话：Vite 的开发服务器本质是个 Node 程序，允许你往它身上挂自己的接口。请求不进打包产物，只在本地服务器这一层就被拦下处理了。这对「纯本地自用」的工具来说是零成本的架构简化。
 
@@ -675,7 +681,7 @@ GBK 输出解码、PowerShell 显式 UTF8、Node `--tls-max-v1.2` 绕 TLS 1.3 �
 按「模型运维」守则逐条检查：`/api/v0/models` 看有没有 `:2` 实例、有没有旧模型陪跑、contextWindow 是否 ≥32768、看门狗是否在跑。
 
 **Q：想自己改点什么，从哪下手？**
-加页面：`src/components/` 建组件 → `App.tsx` 挂视图 → `src/lib/types.ts` 的 `NAV_TABS` 加页签（**单一来源**，页签顺序/合法性都由它派生，别在别处再抄一份清单——这是踩过坑的）。要本地数据就照现有中间件的样子在 `vite.config.ts` 加一组（记得回环校验）。改之前读一遍根目录 `AGENTS.md` 的规矩。
+加页面：`src/components/` 建组件 → `App.tsx` 挂视图 → `src/lib/types.ts` 的 `NAV_TABS` 加页签（**单一来源**，页签顺序/合法性都由它派生，别在别处再抄一份清单——这是踩过坑的）。要本地数据就照现有中间件的样子在 `server/plugins/` 加一组（公共小工具放 `server/lib/`；记得回环校验）。改之前读一遍根目录 `AGENTS.md` 的规矩。
 
 **Q：为什么叫 Rana？界面为什么长这样？**
 原型是 MyGO!!!!! 的要乐奈：铃铛、异色瞳（导航栏那对双色圆点）、乐奈绿主色、墙上的吉他，都是给她的应援。设计稿的演进过程（五版）完整保留在 `rana-web/design-mockups/`。
@@ -691,7 +697,7 @@ GBK 输出解码、PowerShell 显式 UTF8、Node `--tls-max-v1.2` 绕 TLS 1.3 �
 | [OPEN-SOURCE-ROADMAP.md](OPEN-SOURCE-ROADMAP.md) | 开源任务书：五阶段路线（可移植/英文门面/框架化） |
 | [AGENTS.md](AGENTS.md) | code agent 行为规范（公开版） |
 | `setup.cmd` / `setup-templates/` | 开箱初始化与发行模板 |
-| `rana-web/vite.config.ts` | 「后端」全部代码，注释齐全 |
+| `rana-web/server/` | 「后端」全部代码（plugins/ 各域中间件 + lib/ 公共工具），vite.config.ts 只剩装配，注释齐全 |
 | `rana-web/src/lib/gateway.ts` | 连接层，读懂它就读懂了半套前端 |
 | `.gitignore`（根 + rana-web） | 隐私红线的落地清单，动新增文件前先看 |
 
