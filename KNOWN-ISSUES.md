@@ -21,6 +21,12 @@
 
 ## 登记区
 
+## [已解决·流程教训] 主人发图后 22 分钟「没反应」——超重轮次把新消息全压在队列里，用户侧表现为完全静默；日志实锤零丢包（2026-10-14）
+- 症状：主人 14:11 QQ 发来截图后连问「你还在不」「在干嘛」「怎么回事」；我方除开头一句过场话外约 22 分钟无任何可见输出。
+- 根因：①**轮次过重**——收到图后一轮内连做记忆检索+日记/MEMORY 更新+automations 全量 list×2+sessions_history 全量拉取+git 提交，共约 27 分钟；轮次进行中新消息只能进 pendingInputs 排队、无法应答，用户侧=失联；②14:18:55 网络瞬断叠加（weixin getUpdates fetch failed ×1、qqbot ws 1006 断开约 1.5s 后 RESUMED、模型 timeout 重试 1/8）；③我方两次工具调用失误重试（edit oldText 不匹配、sessions_history 漏 sessionKey）再搭约 2 分钟。**出站零丢失**：窗口内 [qqbot:api] 全部 Status: 200 OK、零 errcode，14:38:22 长回复投递成功。
+- 解决方案：一次性流程事故，无代码/配置改动。纪律沉淀（已入当日日记）：「收消息→记档→回复」类活要么先发结论再记档，要么分段播报进度——过程直播是持续播报不是开头喊一句就闷头半小时；拉数据前先想最小必要范围（全量 list 拉两次纯属浪费）。
+- 状态：已解决。分诊路径可复用：先按 qq-message-delivery 切 [qqbot:api] 状态码——全 200 即排除丢包，转查轮次时长/排队，别误报网络故障。
+
 ## [未解决·账户侧] 群画像每日增量 cron 连败——qwenanliang/deepseek-v4-pro-0813 免费额度烧穿 403（2026-10-07 登记，10-06 起病）
 - 症状：cron「群画像每日增量」（b566bd64）连败 4 次进 15 分钟错误退避。日志实锤：`403 Free quota exhausted. To continue accessing the model on a paid basis, please add funds or disable the "use free tier only" mode in the management console.`（`AllocationQuota.FreeTierOnly`），且 `fallbackConfigured=false` 无兜底 → 直接 surface_error。
 - 根因：**账户侧额度耗尽**（中转站处于「仅免费额度」模式且免费档烧完），代码/配置无恙。此前 10-06 凌晨「全 nalang 模型 400 账户不支持」疑云（见记忆）与此同族——都是中转账户额度问题，待主人自查。
