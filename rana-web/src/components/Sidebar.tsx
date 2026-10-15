@@ -40,6 +40,8 @@ export default function Sidebar() {
   const runs = useAppStore((s) => s.runs);
   const unread = useAppStore((s) => s.unread);
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
+  const setView = useAppStore((s) => s.setView);
+  const setTracePreselect = useAppStore((s) => s.setTracePreselect);
   const setLmOpen = useAppStore((s) => s.setLmOpen);
   const setCloudOpen = useAppStore((s) => s.setCloudOpen);
   const setCleanupOpen = useAppStore((s) => s.setCleanupOpen);
@@ -285,6 +287,17 @@ export default function Sidebar() {
             }}
           >
             📌 {pinned.includes(menu.key) ? "取消置顶" : "置顶"}
+          </button>
+          <button
+            className="ctx-item"
+            onClick={() => {
+              setTracePreselect(menu.key);
+              setView("trace");
+              setMenu(null);
+            }}
+            title="导出该会话的运行轨迹，在🔍过程页回放她每一步想了什么、调了什么工具"
+          >
+            🔍 轨迹回放
           </button>
         </div>
       )}

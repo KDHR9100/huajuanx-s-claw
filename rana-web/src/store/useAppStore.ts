@@ -40,6 +40,8 @@ interface AppState {
   panelOpen: boolean;
   /** 显示模型思考过程（<think> 折叠块）；关闭时完全不渲染 */
   showReasoning: boolean;
+  /** 🔍 过程页预选的会话 key（会话列表右键「轨迹回放」跳转时带上） */
+  tracePreselect?: string;
 
   settings: ThemeSettings;
   settingsOpen: boolean;
@@ -70,6 +72,7 @@ interface AppState {
   setPlanningTab: (tab: PlanningTab) => void;
   togglePanel: () => void;
   setShowReasoning: (v: boolean) => void;
+  setTracePreselect: (key?: string) => void;
   updateSettings: (patch: Partial<ThemeSettings>) => void;
   resetSettings: () => void;
   setSettingsOpen: (open: boolean) => void;
@@ -183,6 +186,7 @@ export const useAppStore = create<AppState>((set) => ({
     set({ planningTab: tab });
   },
   togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
+  setTracePreselect: (tracePreselect) => set({ tracePreselect }),
   setShowReasoning: (showReasoning) => {
     localStorage.setItem(REASONING_KEY, showReasoning ? "1" : "0");
     set({ showReasoning });
