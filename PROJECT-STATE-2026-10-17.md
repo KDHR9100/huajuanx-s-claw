@@ -42,6 +42,7 @@
 
 ### Tier 1 — 工程可信度（开源路线阶段一，**最该补**）
 - **零测试 / 零 lint / 零 CI**：`package.json` 仅 `dev/build/preview`，无 vitest、无 eslint、无 `.github/`。
+  - ✅ **进度（10-17 凌晨，trae 施工 + Rana 审计）**：批次 A 已合入（commit `e3334fa`）——vitest 骨架 + `reasoning.ts`/`fateCore.ts` 共 66 用例全绿，顺带修掉 fateCore 闰月双「闰」显示 bug（见 KNOWN-ISSUES 10-17 条目）。**待做：批次 B**（`git-activity.mjs`/`memory-bridge.mjs` 纯函数抽取+测试）、**批次 C**（GitHub Actions CI）、**批次 D**（断线重连加固）——任务书 `TASK-TRAE-2026-10-17.md`。
 - **vitest 首批 4 个纯函数目标**（路径已核实，边界 case 密集、改动爆炸半径最大）：
   - `src/lib/reasoning.ts`（脏输出清洗：伪思维链/封套剥离/回声检测）
   - `src/lib/fateCore.ts`（历法/干支/64 卦——**有"卦表系统性颠倒"前科**）
