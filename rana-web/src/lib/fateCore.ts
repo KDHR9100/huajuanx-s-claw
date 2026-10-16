@@ -116,8 +116,8 @@ export function dayAlmanac(y: number, m: number, d: number): DayAlmanac {
   return {
     ymd: `${y}-${pad2(m)}-${pad2(d)}`,
     week: `星期${WEEKS[solar.getWeek()]}`,
-    lunarText: `${lunar.getYearInChinese()}年${lunar.getMonth() < 0 ? "闰" : ""}${lunar.getMonthInChinese()}月${lunar.getDayInChinese()}`,
-    lunarMonth: `${lunar.getMonth() < 0 ? "闰" : ""}${lunar.getMonthInChinese()}`,
+    lunarText: `${lunar.getYearInChinese()}年${lunar.getMonthInChinese()}月${lunar.getDayInChinese()}`,
+    lunarMonth: `${lunar.getMonthInChinese()}`,
     lunarDay: lunar.getDayInChinese(),
     isLeap: lunar.getMonth() < 0,
     yearGZ: lunar.getYearInGanZhi(),
@@ -140,7 +140,7 @@ export function lunarCellLabel(y: number, m: number, d: number): { label: string
   const today = new Date();
   const isToday = today.getFullYear() === y && today.getMonth() + 1 === m && today.getDate() === d;
   if (jq) return { label: jq, isJieQi: true, isToday };
-  if (lunar.getDay() === 1) return { label: (lunar.getMonth() < 0 ? "闰" : "") + lunar.getMonthInChinese() + "月", isJieQi: false, isToday };
+  if (lunar.getDay() === 1) return { label: lunar.getMonthInChinese() + "月", isJieQi: false, isToday };
   return { label: lunar.getDayInChinese(), isJieQi: false, isToday };
 }
 
