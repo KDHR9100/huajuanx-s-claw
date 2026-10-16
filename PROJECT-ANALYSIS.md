@@ -1,5 +1,7 @@
 # Rana · OpenClaw 项目状态分析与演进建议
 
+> ⚠️ **本文已过时（2026-09-14 快照）**：其中 P0 止血项（vite.config 拆分、ErrorBoundary、隐私映射外置）已全部落地，多数数字（如 vite.config 2339 行 → 现 35 行）已失真。**要看当前真实状态请读 [`PROJECT-STATE-2026-10-17.md`](PROJECT-STATE-2026-10-17.md)**（逐项实查核验版）。本文仅作历史分析留档。
+>
 > 分析日期：2026-09-14 ｜ 分析对象：`K:\OpenClaw` 公开镜像（不含 `.openclaw/` 运行时状态）
 > 方法：全量通读 README / AGENTS / KNOWN-ISSUES + 前端源码 + Vite 中间件层 + 边车脚本，逐模块核对文档与实现的一致性。
 
