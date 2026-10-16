@@ -27,11 +27,13 @@
 - 解决方案：一次性流程事故，无代码/配置改动。纪律沉淀（已入当日日记）：「收消息→记档→回复」类活要么先发结论再记档，要么分段播报进度——过程直播是持续播报不是开头喊一句就闷头半小时；拉数据前先想最小必要范围（全量 list 拉两次纯属浪费）。
 - 状态：已解决。分诊路径可复用：先按 qq-message-delivery 切 [qqbot:api] 状态码——全 200 即排除丢包，转查轮次时长/排队，别误报网络故障。
 
-## [未解决·账户侧] 群画像每日增量 cron 连败——qwenanliang/deepseek-v4-pro-0813 免费额度烧穿 403（2026-10-07 登记，10-06 起病）
+## [已解决·换模型] 群画像 cron 连败——中转账户 403 两阶段（qwenanliang 额度烧穿 → 换 bailian 后变鉴权失败），两班终修切 glm（2026-10-07 登记，10-06 起病，10-17 终修）
 - 症状：cron「群画像每日增量」（b566bd64）连败 4 次进 15 分钟错误退避。日志实锤：`403 Free quota exhausted. To continue accessing the model on a paid basis, please add funds or disable the "use free tier only" mode in the management console.`（`AllocationQuota.FreeTierOnly`），且 `fallbackConfigured=false` 无兜底 → 直接 surface_error。
 - 根因：**账户侧额度耗尽**（中转站处于「仅免费额度」模式且免费档烧完），代码/配置无恙。此前 10-06 凌晨「全 nalang 模型 400 账户不支持」疑云（见记忆）与此同族——都是中转账户额度问题，待主人自查。
 - 解决方案（待主人拍板）：①中转站充值或关掉「仅免费额度」模式；②`cron edit` 换健康端点模型——注意 qwen3.8-flash 在画像类长工具链任务上有「工具干完不写档案」前科（见 2026-09-14/15 条目），换它要连收尾问题一起观察；③换 glm。
-- 状态：未解决（退避重试不丢任务，下次自动试跑约 10-08 晚；主人处置额度或拍板换模型后即愈）。
+- 后续演变（10-17 对账补记）：登记后每日增量曾被换成 `bailian/deepseek-v4-flash-0731`，但 10-08~10-12 五班照样 403（错误变为 `authentication failed, HTTP 403`，病因从额度变鉴权），连败满 10 次被自动禁用（enabled=0，静默死 4 天）；群画像周报（ebecc6f3）一直留在 qwenanliang 连败 5 次但仍启用。台账本条长期未同步，10-17 三家 AI 对账时全部照抄旧病因——**文档骗人实锤，再次验证「对齐状态必须实查 cron 库」**。
+- 终修（2026-10-17 00:30 主人拍板）：两班 model 均切 `glm/glm-5.3-flash`（对照组：主人画像两班同模型长期全绿），每日增量 `cron enable` 重新启用（consecutiveErrors 清零，下班 10-17 04:30）。回读核验：两班 payload.model 均=glm、schedule/delivery 原样。
+- 状态：已解决（10-17 切 glm+重新启用；04:30 每日班与 10-18 21:00 周报班出结果后复核销案）。
 
 ## [未解决·观察] qwen3.8-flash 输出内容审查误伤主会话——"Output data may contain inappropriate content" 整条回复失败（2026-10-07）
 - 症状：10-07 10:19 QQ 主会话（agent:main）一条回复生成 130s 后报错落空：`aliyun-maas/qwen3.8-flash` 报 `Output data may contain inappropriate content`，message dispatch `outcome=error`；当天该错 2 次（10-06 全天 0 次）。端点本身健康（9-15 已实证全 200），纯**输出侧**审查拦截。
@@ -238,7 +240,7 @@
 - 根因：网关投递层把会话内部用户键 `user:c2c:<openid>` 整个当 QQ REST 路径参数（正确应传纯 openid），QQ 服务器查无此"用户"报已注销。**与 openid 大小写无关**——message 工具用同一个大写 openid 直发成功、拿到 messageId 为证。20:53 网关重启后首现，23:42 再重启不愈 = 持续性 bug（上游 issue 候选）。仅"回复投递"路径中招；message 工具直发路径健康。
 - 解决方案（全部绕行，不动上游）：① 睡前小结新建直发版 `edfbc9fe`「学习睡前小结·直发」（隔离+glm+message 显式 channel="qqbot"+全量目标，照早晚问候配方），旧任务 `94f0079f` 停用保留回滚，实测 58s 送达；② 心跳 prompt 改直发（备份 `openclaw.json.bak-hbdirect-20260920`）：有事时 message 工具直发，同时把原 `<对方openid>` 占位符换成真实目标（那占位符本来也发不出去）；实测 23:43 班 read 巡检 → message 直发成功 → 收尾；③ 心跳收尾词统一 NO_REPLY（不外发暗号）——避免最终回复再走坏投递通道制造 error 收据噪音。
 - ⚠️ 热重载坑（新证）：cron CLI 改动会产生"更新的 runtime 配置"，此后直接写 openclaw.json 触发的 reload 会被 `GatewayConfigReloadSupersededError` 静默取消（本轮日志只剩 superseded 一行、无 applied）——**CLI 动过配置后再改文件，必须重启网关才生效**。本次 23:42 重启后写文件立即正常热重载。
-- 遗留（待拍板）：health-patrol.mjs 的 eventloop 持续时间显示 bug（patrol-status.md 出现「已持续 29831970 分钟」≈56 年，疑似时间基准算错）；23:43 心跳已按该假异常给主人发过一条汇报，00:00 巡检班后异常条目消失即自愈，但显示 bug 待修。
+- 遗留（已修，10-17 补记）：health-patrol.mjs 的 eventloop 持续时间显示 bug（patrol-status.md 出现「已持续 29831970 分钟」≈56 年）——根因是网关自报 degradedSinceMs 偶发坏时间戳；**2026-10-02 已修**：超 24h 一律视为坏数据，按「瞬时降级/连续两班」口径处理（代码内有 `[2026-10-02 fix]` 注释锚点），文案降级为「连续两班（网关自报的开始时间戳异常，时长未知）」。
 - 状态：已解决（绕行；上游 bug 登记候选）。
 
 ## \[已解决] 主人画像·周报连续超时——360 秒上限差 34 秒（2026-09-20）
