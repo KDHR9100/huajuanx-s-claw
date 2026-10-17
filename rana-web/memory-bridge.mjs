@@ -20,6 +20,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { spawn } from 'node:child_process';
 import { STATE_HOME, resolveApiKey } from './lib/rana-config.mjs';
+import { makeParseEntries } from './memory-bridge-parse.mjs';
 
 // 状态目录与 SecretRef 解析统一走共享模块（env 优先，缺省回退仓库内布局）
 const HOME = STATE_HOME;
@@ -224,28 +225,7 @@ function promptFor(side, tag, dialog) {
   return `【${side}侧对话片段】\n${dialog}\n---\n从上面对话提炼 1-3 条纪要（合并相似内容；${tag === '群聊' ? '群里有互动就至少记一条' : '陪伴对话哪怕小事也至少记一条'}；实在没有才输出：空）。\n每条一行，格式：HH:MM [${tag}] 内容\n时间必须照抄对话行首的 [HH:MM] 标记，禁止自己编时间。\n示例：09:30 [${tag}] ${OWNER_NAME}修完微信bug后疲惫，Rana 陪他休息了一会儿\n规则：内容≤60字；记一起做的事、聊的话题、${tag === '群聊' ? '谁（用群友名字）' : OWNER_NAME}的状态情绪、重要事实；陈述句。${privacy}${ops}${qq}`;
 }
 
-function parseEntries(raw, tag, fallbackTs) {
-  if (!raw || (/空/.test(raw) && raw.length < 10)) return [];
-  const entries = [];
-  for (let ln of raw.split('\n')) {
-    ln = ln.replace(/^[-*\s]+/, '').trim();
-    if (!ln || /^(空|无)/.test(ln)) continue;
-    // 防模型复述任务/角色扮演/舞台指令/照抄对话（本地 7B 常见毛病）
-    if (/记忆提炼器|共享记忆纪要|禁止复述|```|坐姿[:：]|^\*?\*?-(坐姿|状态|行为)/.test(ln)) continue;
-    if (new RegExp(`${OWNER_NAME}:|Rana:|\\[\\d{1,2}:\\d{2}\\]`).test(ln)) continue; // 原文回声
-    // 隐私兜底/运维噪音兜底：正则表放本地 privacy-patterns 文件（不入公开仓库），缺文件时跳过
-    if (tag === 'RP' && LOCAL_FILTERS.rpPrivacy && new RegExp(LOCAL_FILTERS.rpPrivacy).test(ln)) continue;
-    if (tag === '工作' && LOCAL_FILTERS.opsNoise && new RegExp(LOCAL_FILTERS.opsNoise, 'i').test(ln)) continue;
-    if (tag !== '群聊' && !new RegExp(`${OWNER_ALIAS}|${OWNER_NAME}|Rana`).test(ln)) continue; // 纪要必须提到主人或 Rana（群聊侧人名不限）
-    if (tag === '群聊' && !/[\u4e00-\u9fa5]/.test(ln)) continue; // 群聊纪要至少得有中文
-    ln = ln.replace(/刘南|刘娜/g, 'Rana'); // 7B 微调残留的错误自称，入库前统一改回
-    const m = ln.match(/^(\d{1,2}:\d{2})\s*\[/);
-    const time = m ? m[1] : new Date(fallbackTs).toTimeString().slice(0, 5);
-    if (!ln.includes(`[${tag}]`)) ln = `${time} [${tag}] ${ln.replace(/^(\d{1,2}:\d{2})?\s*/, '')}`;
-    if (ln.length > 15) entries.push({ time, line: ln.slice(0, 120) });
-  }
-  return entries.slice(0, 3);
-}
+const parseEntries = makeParseEntries({ OWNER_NAME, OWNER_ALIAS, LOCAL_FILTERS });
 
 /* ---------- 3. 写共享文件 + 同步 MEMORY.md ----------
  * 注意：OpenClaw 记忆索引只扫 memory/*.md（不递归子目录），

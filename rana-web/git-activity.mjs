@@ -19,11 +19,11 @@ import { promisify } from "node:util";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { periodRange, isAutoCommit } from "./git-activity-lib.mjs";
 
 const execFileP = promisify(execFile);
 
 // ---------- 常量 ----------
-const AUTO_PREFIXES = [/^sync:/i, /^backup[\s]/i]; // 自动提交特征（push-public / backup-private）
 const MAX_TITLE_COMMITS = 5; // 每仓库最多列几条代表性提交
 const REPOS_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), "git-activity.repos.json");
 
@@ -37,33 +37,11 @@ if (!["today", "week", "month"].includes(periodArg)) {
   process.exit(2);
 }
 
-// ---------- 时间边界（本地时区） ----------
-function periodRange(period, now = new Date()) {
-  const y = now.getFullYear();
-  const m = now.getMonth(); // 0-based
-  if (period === "today") {
-    const start = new Date(y, m, now.getDate());
-    return { start, end: new Date(y, m, now.getDate() + 1) };
-  }
-  if (period === "week") {
-    // 本周一 00:00 为终点；往前 7 天为起点（= 上周一 00:00）
-    const dow = (now.getDay() + 6) % 7; // 周一=0 ... 周日=6
-    const thisMonday = new Date(y, m, now.getDate() - dow);
-    return { start: new Date(thisMonday.getTime() - 7 * 864e5), end: thisMonday };
-  }
-  // month：上月 1 日 00:00 ~ 本月 1 日 00:00
-  return { start: new Date(y, m - 1, 1), end: new Date(y, m, 1) };
-}
-
 const { start, end } = periodRange(periodArg);
 const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const PERIOD_LABEL = { today: "今日", week: "上周", month: "上月" }[periodArg];
 
 // ---------- 工具 ----------
-function isAutoCommit(subject) {
-  return AUTO_PREFIXES.some((re) => re.test(subject));
-}
-
 function runGit(args, opts = {}) {
   return execFileP("git", args, {
     encoding: "utf8",
