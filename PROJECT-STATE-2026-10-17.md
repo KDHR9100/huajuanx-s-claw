@@ -42,18 +42,18 @@
 
 ### Tier 1 — 工程可信度（开源路线阶段一，**最该补**）
 - **零测试 / 零 lint / 零 CI**：`package.json` 仅 `dev/build/preview`，无 vitest、无 eslint、无 `.github/`。
-  - ✅ **进度（10-17 凌晨，trae 施工 + Rana 审计）**：批次 A 已合入（commit `e3334fa`）——vitest 骨架 + `reasoning.ts`/`fateCore.ts` 共 66 用例全绿，顺带修掉 fateCore 闰月双「闰」显示 bug（见 KNOWN-ISSUES 10-17 条目）。批次 B 已合入（commit `791ba5f`，10-17 上午）——`git-activity-lib.mjs`（periodRange/isAutoCommit/AUTO_PREFIXES 逐字搬移）+ `memory-bridge-parse.mjs`（parseEntries 工厂注入，函数体 L228-248 字节级比对命中），新增 39 用例、共 105/105 绿；净改动 +2/-22 与 +1/-23，调用点 L335/367/384 字节未动，TDZ 实查清（OWNER_NAME/ALIAS L61-62、LOCAL_FILTERS L52 均在 L228 const 之前）。生产回执验收：memory-bridge 10:04 班已销 ✅（回执 ok + `.bridge.log` 有真实业务输出，验收班顺带揪出 private-memory-bridge 慢性静默失败，见 KNOWN-ISSUES 10-17 条目）；git-activity 日报 21:30 班由 21:50 一次性任务核。批次 C 已合入（commit `921c646`，10-17 晚）——`.github/workflows/ci.yml`（push+PR 触发 / ubuntu-latest / node 22 / working-directory=rana-web / npm ci→build→test），Rana 独立复审全绿（PyYAML 解析 1 job 5 steps、npm ci --dry-run exit=0、test 105/105 + build 复跑）。**CI 首跑验收 = 主人核 GitHub Actions 页签绿灯（若仓库未启用过 Actions 需手点一次启用）**。**待做：批次 D**（断线重连加固）——任务书 `TASK-TRAE-2026-10-17.md`。
+  - ✅ **进度（10-17 凌晨，trae 施工 + Rana 审计）**：批次 A 已合入（commit `e3334fa`）——vitest 骨架 + `reasoning.ts`/`fateCore.ts` 共 66 用例全绿，顺带修掉 fateCore 闰月双「闰」显示 bug（见 KNOWN-ISSUES 10-17 条目）。批次 B 已合入（commit `791ba5f`，10-17 上午）——`git-activity-lib.mjs`（periodRange/isAutoCommit/AUTO_PREFIXES 逐字搬移）+ `memory-bridge-parse.mjs`（parseEntries 工厂注入，函数体 L228-248 字节级比对命中），新增 39 用例、共 105/105 绿；净改动 +2/-22 与 +1/-23，调用点 L335/367/384 字节未动，TDZ 实查清（OWNER_NAME/ALIAS L61-62、LOCAL_FILTERS L52 均在 L228 const 之前）。生产回执验收：memory-bridge 10:04 班已销 ✅（回执 ok + `.bridge.log` 有真实业务输出，验收班顺带揪出 private-memory-bridge 慢性静默失败，见 KNOWN-ISSUES 10-17 条目）；git-activity 日报 21:30 + QQ 推送 21:32 班已销 ✅（21:52 一次性任务按附录B只读查 sqlite 回执：两班 status=ok、error 空、consecutiveErrors=0，批次B生产验收全部通过、彻底销案）。批次 C 已合入（commit `921c646`，10-17 晚）——`.github/workflows/ci.yml`（push+PR 触发 / ubuntu-latest / node 22 / working-directory=rana-web / npm ci→build→test），Rana 独立复审全绿（PyYAML 解析 1 job 5 steps、npm ci --dry-run exit=0、test 105/105 + build 复跑）。CI 首跑已绿（run #1 success，Rana 拉 job 逐步时间戳证实非空转：npm ci 4s / build 11s / test 1s；Actions 无需手动启用）。批次 D 已合入（commit `8865c13`，10-17 深夜）——断线重连加固：删 MAX_RECONNECT=6 放弃分支、无限指数退避（`reconnectBackoffMs` 纯函数叶模块 1s→30s 封顶 + 4 用例）、`reconnectNow()` 手动重连重置计数、App.tsx 12 处横幅统一 `connBanner`+「重新连接」按钮、styles.css 尾部按钮样式带注记；Rana 独立审计（三文件 diff 全量过目、禁触区 grep 零命中、MAX_RECONNECT 全仓零残留、wsUrl 回 18789、setConn 语义核验、test 109/109 + build 复跑全绿），trae 无头 Chrome CDP 三阶段实证（退避时间戳逐毫秒吻合、第 6 次仍重试、按钮重置计数、HMR 恢复零刷新）。**四批次 A/B/C/D 全部合入，任务书 `TASK-TRAE-2026-10-17.md` 施工收官**。
 - **vitest 首批 4 个纯函数目标**（路径已核实，边界 case 密集、改动爆炸半径最大）：
   - `src/lib/reasoning.ts`（脏输出清洗：伪思维链/封套剥离/回声检测）
   - `src/lib/fateCore.ts`（历法/干支/64 卦——**有"卦表系统性颠倒"前科**）
   - `memory-bridge.mjs` 的 `parseEntries()`（**L227**）✅ 批次 B 完成（工厂注入 → `memory-bridge-parse.mjs`，22 用例）
   - `git-activity.mjs`（统计口径）✅ 批次 B 完成（→ `git-activity-lib.mjs`，17 用例）
-- **CI**：`.github/workflows`（至少 build + test）。✅ 批次 C 完成（`921c646`）：`ci.yml` npm ci→build→test，待 GitHub 首跑验收。
+- **CI**：`.github/workflows`（至少 build + test）。✅ 批次 C 完成（`921c646`）：`ci.yml` npm ci→build→test；GitHub 首跑 run #1 success（逐步时间戳核过非空转）。
 - **上游 issue ×2**：证据链已备（cron 会话 delete、worker placements 残留），一直未报。
 
 ### Tier 1 — 可靠性（防丢记忆 / 防失联）
 - **agent 库异地备份缺失**：main `openclaw-agent.sqlite` **120.5MB**、rp 25.6MB、qq-public 21.6MB。`backup-private.cmd` 的 robocopy 明确 `/XF *.sqlite*`（**2026-10-02 起因 GitHub 100MB 硬限剔除**）→ **记忆库零异地副本**。修法：sqlite 压缩转储（zstd，压完通常剩一两成）后入库。
-- **断线重连**：`src/lib/gateway.ts` **L15 `MAX_RECONNECT = 6`**（约 45s）后彻底放弃、需手动刷新页面，无"重新连接"按钮。网关重启是本项目日常运维动作，这个上限从 9 月未动。
+- **断线重连** ✅ 批次 D 完成（`8865c13`，10-17）：无限指数退避不放弃（1s→30s 封顶）+ 断线横幅「重新连接」按钮（reconnectNow 重置计数），CDP 三阶段实证。旧状：`src/lib/gateway.ts` **L15 `MAX_RECONNECT = 6`**（约 45s）后彻底放弃、需手动刷新页面，无"重新连接"按钮。网关重启是本项目日常运维动作，这个上限从 9 月未动。
 
 ### Tier 2 — 体验完善（按需选）
 - **记忆桥观测面板**：三腿记忆桥（系统心脏）健康可视化——10-03 曾连挂 10 次被自动禁用、静默大半天。现有同步按钮 + observability.md + TracePage，但缺三腿运行/失败面板。
