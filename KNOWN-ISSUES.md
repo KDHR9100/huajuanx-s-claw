@@ -21,6 +21,13 @@
 
 ## 登记区
 
+## [未解决·待拍板] private-memory-bridge 两腿慢性软失败两天——event_json=legal null 炸 `.type`，10-03 给 memory-bridge 补的同款防护没同步到姊妹脚本（2026-10-17 登记，10-15 起病）
+- 症状：private-memory-bridge（每小时 :17 班）自 10-15 09:17（本地）起 narrative/acts 两腿班班 `FAILED (will retry next run): Cannot read properties of null (reading 'type')`，私密记忆蒸馏（月度纪要+行为账本）停更约两天。**cron 层完全无感**：回执 status=ok、error 空、consecutiveErrors=0——脚本主流程 try/catch 吞掉两腿异常后照常 `done:` 收尾 exit 0，属 gateway-log-triage §3b 的静默降级形态。发现路径：10-17 10:30 批次B（791ba5f）生产验收班顺带 tail `private-memory/.bridge.log` 揪出。
+- 根因：`private-memory-bridge.mjs` readNewEvents 里 `try { j = JSON.parse(r.event_json); } catch { continue; }` 只防解析异常，但 event_json 内容为合法 JSON `null` 时 parse 成功返回 null，下一行 `j.type` 直接 TypeError——与 10-03 memory-bridge main 腿同款病（见本文件 10-03 条目）。当时给 memory-bridge.mjs 补了 `j && j.type === 'message'` 防护（现 L131，注释「个别损坏/空事件行不炸整条腿」），**姊妹脚本没同步**。且水位机制放大成永动机：lastRpMs/lastActMs 只在 narrOk/actOk 时推进，坏行永久滞留重试窗口 → 班班必炸、不自愈（10-15 09:17 起某条 RP 会话 event 行为 null，一直卡在水位前沿）。
+- 与批次B的关系：**无关，非回归**——791ba5f 未触碰 private-memory-bridge.mjs（git show --stat 核实），失败起点（10-15）早于合入（10-17 09:46）两天；memory-bridge 10:04 班回执 ok 且 `.bridge.log` 有真实业务输出，批次B生产验收本身通过。
+- 解决方案（修法已就绪，**待主人拍板**——生产脚本改动不自主执行）：照抄 10-03 配方，`private-memory-bridge.mjs` L71 `const msg = j.type === 'message' ? j : null;` 改为 `const msg = j && j.type === 'message' ? j : null;` 并加同款注释（一行防护）。改后下一班 :17 自然验证：坏行被跳过、水位恢复推进、积压两天的 RP 对话重新进蒸馏。
+- 状态：未解决（根因已定位到行，等拍板一行修复）。**教训**：①同款 bug 修复必须 grep 全仓同 pattern——两脚本 readNewEvents 结构近乎复制，修一处漏一处；②验收桥类 cron 光查回执不够（ok 也可能是静默降级），必须 tail 各自 `.bridge.log` 看业务输出。
+
 ## [已解决] fateCore 闰月双「闰」显示 bug——万年历/月历格子/问卜页闰月日期显示「闰闰二月」；vitest 首批测试的黄金值交叉对照揪出（2026-10-17 发现并修复）
 - 症状：`dayAlmanac().lunarText/lunarMonth` 与 `lunarCellLabel()` 在所有闰月日期多出一个「闰」字（实测 2023-03-22 出「闰闰二月初一」「闰闰二月」）。消费方 CalendarAlmanac（万年历页）、Divination（问卜页农历行）、月历格子初一 label 三处直接展示，无任何补偿逻辑。2023 闰二、2025 闰六均已过、下一个 2028 闰五——属定时炸弹型显示 bug，此前无人翻到闰月所以没暴露。
 - 根因：lunar-javascript 的 `getMonthInChinese()` 对闰月**自带「闰」前缀**（实测 month=-2 时返回「闰二」），而 `fateCore.ts` L119/L120/L143 又各自拼了一次 `${month<0?"闰":""}` → 双前缀。
