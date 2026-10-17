@@ -4,6 +4,7 @@
 // 事件：chat（delta/final/aborted/error/status）、sessions.changed、shutdown。
 import { buildDeviceAuthPayloadV3 } from "@openclaw/gateway-client/browser";
 import { loadBrowserIdentity } from "./identity";
+import { reconnectBackoffMs } from "./reconnectBackoff";
 import { useAppStore } from "../store/useAppStore";
 import type { ChatAttachment, ChatMessage, ModelInfo, OutgoingAttachment, SessionRow } from "./types";
 
@@ -12,7 +13,6 @@ const HELLO_TIMEOUT_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 /** 删除链路专用超时：服务端串行删除单个 ~7s，排队时更要留足余量 */
 const DELETE_TIMEOUT_MS = 120_000;
-const MAX_RECONNECT = 6;
 
 const store = () => useAppStore.getState();
 
@@ -274,16 +274,24 @@ class GatewayConnection {
 
   private scheduleReconnect() {
     if (this.manualClose || this.reconnectTimer) return;
-    if (this.reconnects >= MAX_RECONNECT) {
-      store().setConn("error", `重连失败 ${MAX_RECONNECT} 次，请检查 gateway 是否运行`);
-      return;
-    }
-    const delay = Math.min(1000 * 2 ** this.reconnects, 15_000);
+    const delay = reconnectBackoffMs(this.reconnects);
     this.reconnects += 1;
+    store().setConn("closed", `与 gateway 断开，${Math.round(delay / 1000)}s 后自动重连（第 ${this.reconnects} 次）`);
+    console.warn(`[gateway] 连接断开，${delay}ms 后重连（第 ${this.reconnects} 次）`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       void this.connect();
     }, delay);
+  }
+
+  /** 手动重连（断线横幅「重新连接」按钮）：立即重试并重置退避计数 */
+  reconnectNow() {
+    this.reconnects = 0;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    void this.connect();
   }
 
   private async resolveToken(): Promise<string> {

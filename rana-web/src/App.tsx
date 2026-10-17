@@ -63,6 +63,14 @@ export default function App() {
     };
   }, []);
 
+  // 断线横幅：错误信息 +「重新连接」按钮（点击立即重试并重置退避）；所有页签分支共用
+  const connBanner = connError ? (
+    <div className="err-banner">
+      ⚠ {connError}
+      <button className="conn-retry-btn" onClick={() => gateway.reconnectNow()}>重新连接</button>
+    </div>
+  ) : null;
+
   return (
     <>
       {/* 自定义背景图层（用户上传背景图时显示；同时房间场景让位） */}
@@ -77,7 +85,7 @@ export default function App() {
               <Sidebar />
               <main className="main">
                 <Topbar />
-                {connError && <div className="err-banner">⚠ {connError}</div>}
+                {connBanner}
                 {page("会话", <><ChatStream /><Composer /></>)}
               </main>
               {panelOpen && <UsagePanel />}
@@ -85,67 +93,67 @@ export default function App() {
           )}
           {view === "sys" && (
             <main className="main">
-              {connError && <div className="err-banner">⚠ {connError}</div>}
+              {connBanner}
               {page("Rana 的状态", <SysPage />)}
             </main>
           )}
           {view === "cron" && (
             <main className="main">
-              {connError && <div className="err-banner">⚠ {connError}</div>}
+              {connBanner}
               {page("定时任务", <CronPage />)}
             </main>
           )}
           {view === "approvals" && (
             <main className="main">
-              {connError && <div className="err-banner">⚠ {connError}</div>}
+              {connBanner}
               {page("审批", <ApprovalsPage />)}
             </main>
           )}
           {view === "news" && (
             <main className="main">
-              {connError && <div className="err-banner">⚠ {connError}</div>}
+              {connBanner}
               {page("早报", <NewsPage />)}
             </main>
           )}
           {view === "planning" && (
             <main className="main">
-              {connError && <div className="err-banner">⚠ {connError}</div>}
+              {connBanner}
               {page("规划", <PlanningPage />)}
             </main>
           )}
           {view === "bangumi" && (
             <main className="main">
-              {connError && <div className="err-banner">⚠ {connError}</div>}
+              {connBanner}
               {page("追番", <BangumiPage />)}
             </main>
           )}
           {view === "apps" && (
             <main className="main">
-              {connError && <div className="err-banner">⚠ {connError}</div>}
+              {connBanner}
               {page("程序", <AppsPage />)}
             </main>
           )}
           {view === "groups" && (
             <main className="main">
-              {connError && <div className="err-banner">⚠ {connError}</div>}
+              {connBanner}
               {page("群画像", <GroupsPage />)}
             </main>
           )}
           {view === "dsh" && (
             <main className="main">
-              {connError && <div className="err-banner">⚠ {connError}</div>}
+              {connBanner}
               {page("派活", <DshPage />)}
             </main>
           )}
           {view === "memory" && (
             <main className="main">
-              {connError && <div className="err-banner">⚠ {connError}</div>}
+              {connBanner}
               {page("记忆", <MemoryPage />)}
             </main>
           )}
           {view === "trace" && (
             <main className="main">
-              {connError && <div className="err-banner">⚠ {connError}</div>}
+              {connBanner}
               {page("过程", <TracePage />)}
             </main>
           )}
