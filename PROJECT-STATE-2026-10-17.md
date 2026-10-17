@@ -42,13 +42,13 @@
 
 ### Tier 1 — 工程可信度（开源路线阶段一，**最该补**）
 - **零测试 / 零 lint / 零 CI**：`package.json` 仅 `dev/build/preview`，无 vitest、无 eslint、无 `.github/`。
-  - ✅ **进度（10-17 凌晨，trae 施工 + Rana 审计）**：批次 A 已合入（commit `e3334fa`）——vitest 骨架 + `reasoning.ts`/`fateCore.ts` 共 66 用例全绿，顺带修掉 fateCore 闰月双「闰」显示 bug（见 KNOWN-ISSUES 10-17 条目）。批次 B 已合入（commit `791ba5f`，10-17 上午）——`git-activity-lib.mjs`（periodRange/isAutoCommit/AUTO_PREFIXES 逐字搬移）+ `memory-bridge-parse.mjs`（parseEntries 工厂注入，函数体 L228-248 字节级比对命中），新增 39 用例、共 105/105 绿；净改动 +2/-22 与 +1/-23，调用点 L335/367/384 字节未动，TDZ 实查清（OWNER_NAME/ALIAS L61-62、LOCAL_FILTERS L52 均在 L228 const 之前）。生产回执验收点：memory-bridge 10:00 班、git-activity 日报 21:30 班（已挂一次性验收任务）。**待做：批次 C**（GitHub Actions CI）、**批次 D**（断线重连加固）——任务书 `TASK-TRAE-2026-10-17.md`。
+  - ✅ **进度（10-17 凌晨，trae 施工 + Rana 审计）**：批次 A 已合入（commit `e3334fa`）——vitest 骨架 + `reasoning.ts`/`fateCore.ts` 共 66 用例全绿，顺带修掉 fateCore 闰月双「闰」显示 bug（见 KNOWN-ISSUES 10-17 条目）。批次 B 已合入（commit `791ba5f`，10-17 上午）——`git-activity-lib.mjs`（periodRange/isAutoCommit/AUTO_PREFIXES 逐字搬移）+ `memory-bridge-parse.mjs`（parseEntries 工厂注入，函数体 L228-248 字节级比对命中），新增 39 用例、共 105/105 绿；净改动 +2/-22 与 +1/-23，调用点 L335/367/384 字节未动，TDZ 实查清（OWNER_NAME/ALIAS L61-62、LOCAL_FILTERS L52 均在 L228 const 之前）。生产回执验收：memory-bridge 10:04 班已销 ✅（回执 ok + `.bridge.log` 有真实业务输出，验收班顺带揪出 private-memory-bridge 慢性静默失败，见 KNOWN-ISSUES 10-17 条目）；git-activity 日报 21:30 班由 21:50 一次性任务核。批次 C 已合入（commit `921c646`，10-17 晚）——`.github/workflows/ci.yml`（push+PR 触发 / ubuntu-latest / node 22 / working-directory=rana-web / npm ci→build→test），Rana 独立复审全绿（PyYAML 解析 1 job 5 steps、npm ci --dry-run exit=0、test 105/105 + build 复跑）。**CI 首跑验收 = 主人核 GitHub Actions 页签绿灯（若仓库未启用过 Actions 需手点一次启用）**。**待做：批次 D**（断线重连加固）——任务书 `TASK-TRAE-2026-10-17.md`。
 - **vitest 首批 4 个纯函数目标**（路径已核实，边界 case 密集、改动爆炸半径最大）：
   - `src/lib/reasoning.ts`（脏输出清洗：伪思维链/封套剥离/回声检测）
   - `src/lib/fateCore.ts`（历法/干支/64 卦——**有"卦表系统性颠倒"前科**）
   - `memory-bridge.mjs` 的 `parseEntries()`（**L227**）✅ 批次 B 完成（工厂注入 → `memory-bridge-parse.mjs`，22 用例）
   - `git-activity.mjs`（统计口径）✅ 批次 B 完成（→ `git-activity-lib.mjs`，17 用例）
-- **CI**：`.github/workflows`（至少 build + test）。
+- **CI**：`.github/workflows`（至少 build + test）。✅ 批次 C 完成（`921c646`）：`ci.yml` npm ci→build→test，待 GitHub 首跑验收。
 - **上游 issue ×2**：证据链已备（cron 会话 delete、worker placements 残留），一直未报。
 
 ### Tier 1 — 可靠性（防丢记忆 / 防失联）
