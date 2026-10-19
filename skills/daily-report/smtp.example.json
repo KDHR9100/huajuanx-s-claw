@@ -1,0 +1,8 @@
+{
+  "host": "smtp.qq.com",
+  "port": 465,
+  "secure": true,
+  "user": "你的邮箱@qq.com",
+  "pass": "授权码（不是QQ密码）",
+  "fromName": "Rana"
+}
