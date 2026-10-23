@@ -23,7 +23,7 @@
 | 边车自动化 | 独立 Node 脚本：记忆桥（每小时，三腿）、私密记忆桥（每小时）、系统巡检（30 分钟，异常主动 QQ 汇报）、早报（每天 8:00 + 页面按需）、备份健康自检（每晚两段式）、Git 活动统计（日/周/月报直跑+QQ 推送）、学习睡前小结/周报（cron 驱动）；学习排课与问卜解卦走「专用会话桥」（页面按需触发）；embedding 看门狗与 SSE 修复代理随网关常驻 |
 | 本地算力 | LM Studio `:1234` 保留（RP 本地路：微调模型在库、可切回）；qwen3-embedding-0.6b 纯 CPU 常驻供记忆检索（看门狗锁单实例）；`tools/sse-fix-proxy.mjs` 本地小代理给 RP 中转站补流式结束标记 |
 | 硬件约束 | RTX 4070 Ti 12GB + 48GB 内存——14B 本地常驻时代的显存决策史见「模型运维」一章（RP 上云后显存压力已解除） |
-| 工程方法 | `KNOWN-ISSUES.md` 问题台账（症状/根因/方案/状态）、两层 AGENTS.md（人机共读规范）、`OPTIMIZATION-ROADMAP.md` 演进路线、公开镜像的 gitignore 隐私纪律 |
+| 工程方法 | `KNOWN-ISSUES.md` 问题台账（症状/根因/方案/状态，顶部有索引）、两层 AGENTS.md（人机共读规范）、`PROJECT-MAP.md` 面向 AI 的项目地图、`PROJECT-STATE-2026-10-17.md` 实查状态快照、vitest 109 用例 + GitHub Actions CI（build+test）、公开镜像的 gitignore 隐私纪律 |
 
 代码量：前端 + 边车脚本合计约 22,600 行。下面从零讲起。
 
@@ -174,9 +174,14 @@ cd rana-web && npm run dev
 ```
 K:\OpenClaw
 ├── README.md              ← 你在这里
-├── AGENTS.md              ← 给 code agent 的规矩（排障先查 KNOWN-ISSUES）
-├── KNOWN-ISSUES.md        ← 工程问题台账：每个坑的症状/根因/解法/状态，本项目最值钱的文件之一
-├── OPTIMIZATION-ROADMAP.md ← 演进路线（架构减重/功能增强的分期计划）
+├── AGENTS.md              ← 给 code agent 的入场规矩+速览（AI 进场第一份）
+├── PROJECT-MAP.md         ← ★ 面向 AI 的项目地图：代码地图/按任务入手/红线/演进时间线（新窗口先读）
+├── KNOWN-ISSUES.md        ← 工程问题台账：每个坑的症状/根因/解法/状态（顶部有索引），本项目最值钱的文件之一
+├── PROJECT-STATE-2026-10-17.md ← 实查核验的状态快照（对齐现状以此为准；含实查配方）
+├── PROJECT-ANALYSIS.md    ← 09-14 历史分析（已加过期横幅，留档）
+├── OPTIMIZATION-ROADMAP.md ← 09-14 优化施工图（历史留档，大部分已落地）
+├── OPEN-SOURCE-ROADMAP.md ← 开源任务书：五阶段路线（可移植/英文门面/框架化）
+├── SYSTEM-MAINTENANCE-PLAN.md ← 09-17 系统维护规划（历史留档）
 ├── .gitignore             ← 隐私红线清单（公开镜像，什么不能上传写得明明白白）
 ├── setup.cmd / setup.mjs  ← ★ 开箱初始化：装 openclaw + 生成配置与 Rana 人格 + 装前端依赖（可重复执行）
 ├── setup-templates/       ← 发行模板：openclaw.template.json（单 agent 骨架）+ SOUL/USER/MEMORY 人格三件套
@@ -186,17 +191,22 @@ K:\OpenClaw
 ├── lmctl/                 ← LM Studio 控制台小工具（本地私有，不入库）
 ├── rp-tune/               ← RP 模型微调管线：QLoRA 数据构建→蒸馏→训练→合并导出 GGUF（本地私有，不入库）
 ├── rp-eval/               ← RP 模型评测脚手架：生产路径回放/对照/组装三组评测（本地私有，不入库）
+├── skills/                ← 可公开的技能母本（运行时技能在状态目录 workspace-*/skills/，这里改完拷过去生效）
+│   └── daily-report/      ← 收日报技能（SMTP 收信+汇总；check_mail.py；真实 smtp 配置在状态目录 secrets/）
+├── .github/workflows/ci.yml ← CI：push/PR 自动跑 rana-web 的 npm ci→build→test（2026-10-17 首跑绿）
 ├── tools/
 │   ├── embedding-watchdog.mjs ← embedding 看门狗：锁死「恰好一份、纯 CPU 常驻」，违例自动纠正
-│   └── sse-fix-proxy.mjs      ← RP 中转站流式修复代理：SSE 缺结束标记就在流尾补上（密钥不落代理）
+│   ├── sse-fix-proxy.mjs      ← RP 中转站流式修复代理：SSE 缺结束标记就在流尾补上（密钥不落代理）
+│   └── rp-soul-test/          ← RP 人格回归测试（智谱 glm-5.3 / glm-5.3-flash 双档对比；reports/ 已 gitignore）
 └── rana-web/              ← ★ 自建 Web 前端 + 边车脚本
     ├── index.html / vite.config.ts / tsconfig.json
+    ├── vitest.config.ts / tests/unit/ ← 单测 109 用例（reasoning/fateCore/git-activity-lib/memory-bridge-parse/reconnect-backoff）
     ├── server/               ← ★ 本地后端：2026-10 把原挤在 vite.config.ts 的二十二组中间件按域拆分
     │   ├── index.ts          装配 buildServerPlugins()（vite.config.ts 只剩约 40 行）
     │   ├── lib/              公共工具：paths(状态目录 / 可移植根 RANA_WEB) · config(读 openclaw.json) · exec · http(json/readBody/isLoopback)
     │   └── plugins/          每域一个文件：provider-config/sys-status/avatar/news/study/events/bangumi/life/fate/
     │                         model-params/model-test/agent-info/qq-profile/dsh-models/dev-config/agents/
-    │                         sessions-cleanup/context/approvals/memory/bridge-sync
+    │                         sessions-cleanup/context/approvals/memory/bridge-sync/trajectory
     ├── src/
     │   ├── App.tsx            根组件：十一个页面视图的装配（每页套 ErrorBoundary 兜底，坏一块不白全站）
     │   ├── styles.css         全部样式（2,000+ 行，房间场景/主题变量都在这）
@@ -204,6 +214,7 @@ K:\OpenClaw
     │   │   ├── gateway.ts     ★ 网关连接层：握手/请求/事件/重连/乐观UI（约 760 行，核心）
     │   │   ├── identity.ts    浏览器 Ed25519 设备身份的生成与签名
     │   │   ├── reasoning.ts   思考过程解析 + 运行时封套剥离（清洗模型脏输出）
+    │   │   ├── reconnectBackoff.ts 重连指数退避纯函数（1s→30s 封顶不放弃；10-17 批次D 抽取，带测试）
     │   │   ├── fetchRetry.ts  带自动重试的 JSON 取数（瞬时抖动自愈，免得页面挂载撞上空面板）
     │   │   ├── theme.ts       外观设置：持久化 + 应用为 CSS 变量
     │   │   ├── lmstudio.ts    本地模型管理面板的接口封装
@@ -217,7 +228,7 @@ K:\OpenClaw
     │       ├── 会话三件套：Sidebar / ChatStream / Composer（+ Topbar、TopNav、Room 她的房间）
     │       ├── 页面：SysPage(状态) / CronPage / ApprovalsPage(审批) / NewsPage /
     │       │        PlanningPage(🗺规划四合一：PlanningOverview 总览 / StudyPage+StudyQuiz+StudyGoalsPage 课表与待办 / PlanningLibrary 内容库) /
-    │       │        CalendarPage(全局日历) / BangumiPage(追番) / MemoryPage(🧠记忆) / AppsPage(程序：万年历/八字紫微/摇卦，apps/ 下子组件) / GroupsPage(群画像) / DshPage(派活)
+    │       │        CalendarPage(全局日历) / BangumiPage(追番) / MemoryPage(🧠记忆) / AppsPage(程序：万年历/八字紫微/摇卦，apps/ 下子组件) / GroupsPage(群画像) / DshPage(派活) / TracePage(🔍过程·轨迹回放)
     │       └── 面板与弹窗：UsagePanel(用量/超参调参/快捷命令/技能与MCP卡) / SettingsModal /
     │                LmStudioModal / CloudConfigModal / SystemCleanupModal(系统会话清理) / ModelTuningCard / AgentKitCard / ErrorBoundary
     ├── vite.config.ts        装配层（约 40 行）：react + buildServerPlugins() + /gateway、/lmstudio 代理；实现见 server/
@@ -226,6 +237,7 @@ K:\OpenClaw
     ├── local-overrides.example.cmd ← 本机个性化覆盖模板（node 路径/状态目录；真实文件 gitignore）
     ├── local-config.example.json ← 派活页本机路径模板（DSH 设置与项目预设；真实文件不入库）
     ├── memory-bridge.mjs     三腿共享记忆桥（cron 每小时；真名/化名映射在 gitignore 的 identity 文件里）
+    ├── memory-bridge-parse.mjs 桥纪要解析纯函数（10-17 批次B 抽取，22 用例）
     ├── news-report.mjs       早报生成器（联播抓取 + 博查搜索 + flash 总结；key 兼容密钥库 SecretRef）
     ├── study-agent.mjs       学习专用会话桥（排课/出题/判分/开课 → agent:main:study-planner）
     ├── fate-agent.mjs        问卜专用会话桥（解卦 → agent:main:fate-teller）
@@ -237,6 +249,7 @@ K:\OpenClaw
     ├── lib/agent-bridge.mjs  学习 / 问卜 / 人生规划三桥的共享实现（上面三个 *-agent.mjs 只是薄封装，2026-10 合并去重）
     ├── git-activity.mjs      Git 活动统计（日报/周报/月报口径）
     ├── git-activity-cron.mjs cron 直跑包装：统计+报告落盘（--out），配独立任务读文件分段推送 QQ
+    ├── git-activity-lib.mjs 统计口径纯函数（10-17 批次B 抽取，17 用例）
     └── design-mockups/       v2 界面的五版设计稿（纯 HTML 静态原型，从 a 到 e 迭代到「她的房间」）
 ```
 
@@ -383,6 +396,7 @@ QQ 公共号**自己养出来的**群画像：群档案、群友档案、每周�
 | `/__rana/context` | 会话上下文体检面板 | 经网关 RPC 拿会话 token 构成，只读 |
 | `/__rana/memory` | 🧠 记忆页数据：记忆/人设文件读改 | **白名单制**：前端只传 key，key→路径映射在服务端；机器维护文件标 editable=false 保存被拒；私密组前端二次确认 |
 | `/__rana/bridge-sync` | 🔗 记忆同步按钮后端：GET 轮询进度 / POST 启动一轮双桥 | 仅本机回环；上一轮没跑完拒绝重复启动；必要时 `lms` 拉起本地模型跑完自动卸载（平时绝不 JIT 加载）；step/log/result 实时状态供按钮轮询，全部 ✓ 才报成功 |
+| `/__rana/trajectory` | 🔍 过程页：按 run 导出会话轨迹（events.jsonl，2137KB→212KB 按分组瘦身） | 导出走 CLI 子进程落状态目录；协议字典见 `rana-web/docs/observability.md` |
 
 所有**写操作**端点都做双重来源校验：socket 必须是本机回环地址 + Origin 头必须匹配 localhost。这套东西不面向公网，但也没有裸奔。
 
@@ -681,7 +695,7 @@ GBK 输出解码、PowerShell 显式 UTF8、Node `--tls-max-v1.2` 绕 TLS 1.3 �
 按「模型运维」守则逐条检查：`/api/v0/models` 看有没有 `:2` 实例、有没有旧模型陪跑、contextWindow 是否 ≥32768、看门狗是否在跑。
 
 **Q：想自己改点什么，从哪下手？**
-加页面：`src/components/` 建组件 → `App.tsx` 挂视图 → `src/lib/types.ts` 的 `NAV_TABS` 加页签（**单一来源**，页签顺序/合法性都由它派生，别在别处再抄一份清单——这是踩过坑的）。要本地数据就照现有中间件的样子在 `server/plugins/` 加一组（公共小工具放 `server/lib/`；记得回环校验）。改之前读一遍根目录 `AGENTS.md` 的规矩。
+加页面：`src/components/` 建组件 → `App.tsx` 挂视图 → `src/lib/types.ts` 的 `NAV_TABS` 加页签（**单一来源**，页签顺序/合法性都由它派生，别在别处再抄一份清单——这是踩过坑的）。要本地数据就照现有中间件的样子在 `server/plugins/` 加一组（公共小工具放 `server/lib/`；记得回环校验）。改之前读一遍根目录 `AGENTS.md` 的规矩；更完整的「按任务入手」路由（改后端/加定时任务/升级 openclaw 重打补丁等）见 [PROJECT-MAP.md](PROJECT-MAP.md)。
 
 **Q：为什么叫 Rana？界面为什么长这样？**
 原型是 MyGO!!!!! 的要乐奈：铃铛、异色瞳（导航栏那对双色圆点）、乐奈绿主色、墙上的吉他，都是给她的应援。设计稿的演进过程（五版）完整保留在 `rana-web/design-mockups/`。
@@ -692,10 +706,13 @@ GBK 输出解码、PowerShell 显式 UTF8、Node `--tls-max-v1.2` 绕 TLS 1.3 �
 
 | 文件 | 用途 |
 | --- | --- |
-| [KNOWN-ISSUES.md](KNOWN-ISSUES.md) | 排障先查这里；新坑解决后回写 |
-| [OPTIMIZATION-ROADMAP.md](OPTIMIZATION-ROADMAP.md) | 演进路线：减重/增强分期计划 |
+| [PROJECT-MAP.md](PROJECT-MAP.md) | ★ 面向 AI 的项目地图：代码地图/按任务入手/红线/演进时间线（新窗口新 agent 先读） |
+| [KNOWN-ISSUES.md](KNOWN-ISSUES.md) | 排障先查这里（顶部有索引）；新坑解决后回写 |
+| [PROJECT-STATE-2026-10-17.md](PROJECT-STATE-2026-10-17.md) | 实查状态快照：真实挂账/红线/实查配方（对齐现状以此为准） |
+| [OPTIMIZATION-ROADMAP.md](OPTIMIZATION-ROADMAP.md) | 09-14 优化施工图（历史留档，大部分已落地） |
 | [OPEN-SOURCE-ROADMAP.md](OPEN-SOURCE-ROADMAP.md) | 开源任务书：五阶段路线（可移植/英文门面/框架化） |
-| [AGENTS.md](AGENTS.md) | code agent 行为规范（公开版） |
+| [AGENTS.md](AGENTS.md) | code agent 入场须知+速览（公开版） |
+| `rana-web/tests/` + `.github/workflows/ci.yml` | vitest 109 用例；push/PR 自动 build+test |
 | `setup.cmd` / `setup-templates/` | 开箱初始化与发行模板 |
 | `rana-web/server/` | 「后端」全部代码（plugins/ 各域中间件 + lib/ 公共工具），vite.config.ts 只剩装配，注释齐全 |
 | `rana-web/src/lib/gateway.ts` | 连接层，读懂它就读懂了半套前端 |

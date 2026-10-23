@@ -2,6 +2,7 @@
 
 > **给所有访问本仓库的读者（人类与 code agent）**：这里是本项目的疑难问题登记簿。
 >
+> - **先看下方【索引】**：未闭环条目单列 + 按症状关键词导航，grep 标题直达条目。
 > - 排障耗时超过十分钟、疑似上游/平台 bug、环境怪癖的问题 → **先查本文件**，命中直接复用方案，别重新踩一遍。
 > - 新问题没登记过 → 按【条目模板】加到【登记区】顶部（新条目在上）。
 > - 问题解决后**必须回来**补「解决方案」并更新状态；确认是平台/上游限制的，写清缓解办法。
@@ -19,7 +20,61 @@
 
 ***
 
+## 索引（2026-10-24 整理）
+
+> 条目本体在下方【登记区】，**新条目永远加在登记区顶部**（新→旧排列）。本索引只做导航，用标题或关键词 grep 即可直达；条目标题第一段方括号 = 状态。
+
+### 还没闭环 / 需要留意的条目（动工前先看）
+
+- [未解决·观察] qwen3.8-flash 输出内容审查误伤主会话——上游输出侧审查，本机无根治，频发再升级
+- [未解决·良性] system-presence 偶发 missing scope——旧缓存页面发起，无实害
+- [未解决·有解法] Mimosa git 门钩拦截提交——误报级为主，可绕行
+- [未解决·疑似] rana-web/.life/ 目录消失——9-17 事故，内容库候选已捞回
+- [上游限制×3] webchat 看不到实时思考 / 微信主动推送依赖 contextToken / cron 系统任务不能单独启停——平台限制，各有缓解
+- [观察] P2 性能杂音（heartbeat 延迟/lane 排队）——负载瞬时挤兑，不动配置
+- [已解决·待观察] QQ 600s 超时罐头话——遗留：心跳「巡查/施工分工」纪律对 glm 也只是软约束，待拍板
+- 群算卦 fate MCP（10-20）——CLI 已验证；**群内真消息端到端实测待主人**（只有真群消息是端到端验收）
+
+### 按症状找条目（关键词 → 在本文件搜索）
+
+| 症状域 | 搜索关键词 |
+| --- | --- |
+| 网关起不来/秒拒/空转/卡死 | `秒拒`、`空转`、`degraded`、`\\?\`、`DataCloneError`、`Async work scope`、`卡死病` |
+| QQ/微信不通/行为怪 | `user:c2c`、`ask_user`、`channelAccounts`、`静默装死`、`收图`、`分块流式` |
+| 模型 400/403/超时/审查 | `Free quota`、`data_inspection`、`输出审查`、`content 块数组`、`maxTokens`、`SSE` |
+| LM Studio/显存 | `双实例`、`:2`、`JIT`、`ctx 2048`、`显存`、`embedding` |
+| 前端白屏/闪回/显示错 | `白屏`、`闪回`、`气泡弹两遍`、`页签不可达`、`闰`、`复读` |
+| cron 不跑/静默停摆 | `store 孤儿`、`静默降级`、`水位`、`罐头话`、`timed out`、`did not finish stopping` |
+| 备份/git 推送挂死 | `100MB`、`winnat`、`TLS connect`、`ECONNRESET`、`静默失败` |
+| Windows 环境怪癖 | `GBK`、`heredoc`、`反斜杠`、`DPI`、`IAB` |
+| 升级 openclaw/补丁重打 | `升级`、`重打`、`schema 24`、`dist 补丁`、`allowlist` |
+| 隐私/安全/闸门 | `pmgate`、`私密`、`脱敏`、`Mimosa`、`审查` |
+
+### 维护纪律（旧账三条，违者重蹈）
+
+1. 条目解决后**当场改状态**——旧状态骗人是实锤过的（三家 AI 照抄旧台账集体翻车，见 PROJECT-STATE 附录 A）。
+2. 同款 bug 修复必须 grep 全仓同 pattern（10-17 案：修了 memory-bridge 漏了 private-memory-bridge，班班必炸两天才揪出）。
+3. 桥类/边车 cron 验收**光查回执不够**（ok 也可能静默降级），必须 tail 各自 `.bridge.log` 看业务输出。
+
+***
+
 ## 登记区
+
+## [已解决] 群算卦断链三段案——9.7 升级空 allowlist 废了 exec 通道（10-01 起病）→ A1 摘 exec 止损（10-20 晨）→ fate MCP 重建工具链（10-20 晚，主人拍板做 MCP 不开 exec）
+- 症状：10-20 20:00 群友发 `/suan 摇卦`，rana-qq-public 在 compact tool surface（9.7 机制：工具多时藏 schema 进 catalog 用 tool_search 发现）下 60+ 次工具调用全失败——tool_search 参数写对的有返回，但 deepseek-v4.1-flash 探索能力弱（连 tool_call(id='read') 都没试过，盲猜 read_file/bash/exec_command），8 分钟后诚实回复「摇不了」（SOUL 不懂别装生效）。**病根实为 10-01 升 9.7**：exec 改 allowlist 模式但 exec-approvals.json 全机不存在=全拒，9-30 上线的群算卦（9.2 时代）从那天就断了，只是群里没人用没暴露；10-20 晨 A1 摘 exec 后当晚首次实战照出断腿。
+- 解决方案（fate MCP，2026-10-20 主人拍板）：照 moegirl.mjs 先例自建 `mcp-servers/fate.mjs`（stdio JSON-RPC 零依赖协议壳，**命理逻辑零重写**——spawn 现成 gua.mjs/bazi.mjs/ziwei.mjs/archive.mjs 拿 JSON 透传）。五工具：`fate__yaogua/bazi/ziwei/archive_get/archive_save`，参数白名单校验后拼 argv（不接受任意命令）、无网络无密钥。配置：openclaw.json mcp.servers.fate + rana-qq-public alsoAllow `fate__*`（备份 `openclaw.json.bak-fatemcp-20261020`，语义 diff 恰两处）。群聊侧 5 份 SKILL.md（yaogua/bazi/ziwei/fate-archive/suan-help）改工具用法+注明邮箱版暂不可用；main 侧 skill 不动（main 有 exec 走 .cmd 原路）。
+- 验证：JSON-RPC 自测全绿（含坏参数负测试）+ 测试档案销账；CLI 隔离会话实测模型成功调 fate__yaogua 摇出天山遁变艮为山（手动验算卦象正确）；**群内真消息实测待主人**（今晚教训：只有真群消息是端到端验收）。
+- **二期（同晚续）**：补齐全家桶最后两件——`fate__mail_send`（SMTP 直发，凭据脚本自读）/ `fate__msg_recall`（管理员撤回）/ `fate__mail_report`（组合工具：markdown 进→乐奈绿 HTML 邮件出，临时文件壳内落盘即删，模型不经手文件路径），共八工具。mail_send 已真发两封测试信到主人 QQ 邮箱验证（纯文本+渲染 HTML 各一）；msg_recall 用假 openid 测安全路径（no_matching_inbound_message，未撤任何真消息）。群聊侧 SKILL.md 六份全部对齐（yaogua/bazi/ziwei 邮箱段恢复可用+撤回步骤、mail-send/msg-recall 手册改工具用法、suan-help 面板恢复邮箱说明）。MCP server 懒加载无常驻进程，改 fate.mjs 后下次调用自动用新版，**无需重启网关**。
+- **顺手修真 bug（64 卦表履卦丢失）**：`workspace-main/skills/yaogua/gua.mjs` L83-85 一段错误"修正"覆盖把 55 号卦（下兑上乾=天泽履）写成"泽天夬"（与 62 重复），履卦 1/64 概率永远摇错卦名。全量对拍 64 卦确认余 63 卦全对后删掉覆盖三行，备份 `gua.mjs.bak-tianze-lv-20261020`。
+- 关联与遗留：①memory_search 群聊 Unknown 之谜：CLI 隔离会话实测 tool_search("memory") 能搜到裸名、tool_call(id='memory_search') 直接调通（5 条命中）——工具链当前健康，今晚群聊的 Unknown 无法复现，疑为模型未消化 tool_search 返回即盲猜或群聊会话特定状态，留群内实测观察；②工具名坑：heredoc 里 python 字符串写 Windows 反斜杠路径会被 `\f` 等转义吃掉（本次 fate 注册路径被吃成 `\x0cate.mjs`，改正斜杠修复）——**python heredoc 一律用正斜杠路径**。
+- 状态：已解决（CLI 实测通过；群内实测待主人）。
+
+## [已解决] exec denied "allowlist miss" 空转风暴——rana-qq-public 挂着「白名单模式但全机无白名单文件」，内置每周技能评审任务在沙箱里碰壁烧满 1 小时超时（2026-10-20 登记，当晚主人拍板 A1 修复）
+- 症状：10-19 22:58 网关重启后，`skill-collection-review-rana-qq-public`（openclaw 内置 Skill Workshop 周评审任务，2026-09-30 自动创建，cron_jobs 表）23:03 补跑，模型反复尝试 exec 被拒 229 条/两天（`allowlist miss`）、read/ls/write 试逃 workshop-skills 沙箱被拒 11 条，烧满 3600s 超时（last phase: model-call-started）。连带：RSS 1.72→2.13 GiB、事件循环 p99 58s、liveness heartbeat delayed。**00:05 自动重试班 24min ok**；前两班 10-05（23min）/10-12（49min）正常——偶发非死症。
+- 根因：`openclaw.json` rana-qq-public `tools.exec={mode:"allowlist"}`，但 9.7 的白名单本体从 `exec-approvals.json` 文件读（`resolveExecApprovalsFromFile`），该文件**全机不存在**（find state 目录+用户 home 均无）→ 白名单空＝见一个拒一个，但模型看得见 exec 工具故反复试。该 exec 键 9-30~10-01 之间进入配置（bak-divination-20260930 无、bak-preupgrade-20261001 有）。
+- 解决方案（A1，2026-10-20 主人拍板）：alsoAllow 摘掉 `exec`+`process` 并删 `exec:{mode:"allowlist"}`——agent 拿不到 exec 工具即不再空转。备份 `openclaw.json.bak-rqqexec-20261020`。代价：QQ 群算卦的 exec 通道关闭（9-30 后群内实战未用过）；哪天要用群算卦再走 A2（写 exec-approvals.json 白名单——注意 9.7 只认程序路径，放行 cmd.exe≈全放，违背 9-19 解释器禁令，须慎重）。
+- 定性修正（防误诊）：①1h 超时是模型碰壁空转，**不是** provider 连接停滞（收据实锤重试班 24min ok）；②RSS 峰值后自回落 1.38GB，非泄漏（prepared-model-catalog 10-04 已根治，看门狗零事件，heap 才 500MB）；③58s/81s 循环卡顿全在启动期插件装载（10-02 条目已知项），外部 AI 解读提到的 tryReadJsonSync/update-sentinel 日志零命中。
+- 状态：已解决（配置已改并校验，下次网关启动生效）。
 
 ## [已解决] private-memory-bridge 两腿慢性软失败两天——event_json=legal null 炸 `.type`，10-03 给 memory-bridge 补的同款防护没同步到姊妹脚本（2026-10-17 登记，10-15 起病，当晚主人拍板修复）
 - 症状：private-memory-bridge（每小时 :17 班）自 10-15 09:17（本地）起 narrative/acts 两腿班班 `FAILED (will retry next run): Cannot read properties of null (reading 'type')`，私密记忆蒸馏（月度纪要+行为账本）停更约两天。**cron 层完全无感**：回执 status=ok、error 空、consecutiveErrors=0——脚本主流程 try/catch 吞掉两腿异常后照常 `done:` 收尾 exit 0，属 gateway-log-triage §3b 的静默降级形态。发现路径：10-17 10:30 批次B（791ba5f）生产验收班顺带 tail `private-memory/.bridge.log` 揪出。
@@ -254,7 +309,8 @@
 - 解决方案（全部绕行，不动上游）：① 睡前小结新建直发版 `edfbc9fe`「学习睡前小结·直发」（隔离+glm+message 显式 channel="qqbot"+全量目标，照早晚问候配方），旧任务 `94f0079f` 停用保留回滚，实测 58s 送达；② 心跳 prompt 改直发（备份 `openclaw.json.bak-hbdirect-20260920`）：有事时 message 工具直发，同时把原 `<对方openid>` 占位符换成真实目标（那占位符本来也发不出去）；实测 23:43 班 read 巡检 → message 直发成功 → 收尾；③ 心跳收尾词统一 NO_REPLY（不外发暗号）——避免最终回复再走坏投递通道制造 error 收据噪音。
 - ⚠️ 热重载坑（新证）：cron CLI 改动会产生"更新的 runtime 配置"，此后直接写 openclaw.json 触发的 reload 会被 `GatewayConfigReloadSupersededError` 静默取消（本轮日志只剩 superseded 一行、无 applied）——**CLI 动过配置后再改文件，必须重启网关才生效**。本次 23:42 重启后写文件立即正常热重载。
 - 遗留（已修，10-17 补记）：health-patrol.mjs 的 eventloop 持续时间显示 bug（patrol-status.md 出现「已持续 29831970 分钟」≈56 年）——根因是网关自报 degradedSinceMs 偶发坏时间戳；**2026-10-02 已修**：超 24h 一律视为坏数据，按「瞬时降级/连续两班」口径处理（代码内有 `[2026-10-02 fix]` 注释锚点），文案降级为「连续两班（网关自报的开始时间戳异常，时长未知）」。
-- 状态：已解决（绕行；上游 bug 登记候选）。
+- **10-18 再现补记（又一中招路径：重启恢复公告）**：网关重启后的 main-session restart-recovery 公告再踩同款——`failed to announce restart recovery agent:main:main: API Error [/v2/users/user:c2c:<openid>/messages]: 请求的资源不存在(用户/群已注销)`，URL 照旧带 `user:c2c:` 整键=同一投递 bug 实锤（**用户并未注销，勿误诊后去清理/重绑会话**）。该路径在网关内部、无绕行口子；影响仅每次重启少一条「我回来了」通知，中断会话本体照常恢复（started=1 failed=0）。
+- 状态：已解决（绕行；上游 bug 登记候选——已知三条中招路径：systemEvent 回复 / 心跳汇报 / 重启恢复公告）。
 
 ## \[已解决] 主人画像·周报连续超时——360 秒上限差 34 秒（2026-09-20）
 

@@ -1,5 +1,7 @@
 # OPTIMIZATION-ROADMAP — 优化路线与实现细节（2026-09-14）
 
+> ⚠️ **历史留档**：本文多数批次已落地（vite 拆分、ErrorBoundary、取数重试、心跳轻量化等），零测试/零 CI 也已于 2026-10-17 补齐（vitest 109 用例 + GitHub Actions）。**当前真实状态看 [PROJECT-STATE-2026-10-17.md](PROJECT-STATE-2026-10-17.md)，勿把本文当现状。**
+>
 > 性质：施工图。融合两份诊断（PROJECT-ANALYSIS.md 代码体检 + 运行时 token/延迟诊断）与已确认取舍。
 > 用法：按批次执行，每批完工跑第 4 部分对应的验证项；回滚点见第 6 部分。
 
