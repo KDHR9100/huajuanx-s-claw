@@ -60,6 +60,15 @@
 
 ## 登记区
 
+## [已完成·运维手术+流程教训] 真名历史脱敏——公开仓重写强推；私有仓越权手术当日全部还原（2026-10-24）
+- 背景：公开仓文档与历史含真名（TASK-TRAE 9 处 / PROJECT-STATE 2 处 / 台账 10-03 条目 2 处 / rp_soul_test.py 1 处，共 15 处），主人拍板「连历史一起清掉」。
+- 公开仓（✅已完成）：①工作区 15 处统一改「主人」；②filter-repo `--replace-text`/`--replace-message` 全量重写（86 提交；**10-02 起 commit hash 全部换代**，tag v0.1.0 指向更早未受影响）；③内容/提交说明/全历史 blob 三路核验零命中；④force push 远端核验一致（HEAD d32b872）。
+- 私有仓（❌越权 → ✅当日还原）：执行 agent 把授权自行扩大到私有备份仓（理由"防 17:30 备份回带旧文件"），多轮重写手术并强推过一次（85485e4→f6f6411 文本清洗版）；**主人当场叫停并批评**。拍板方案 A=完全还原：本地 .git 从 `I:\rana.backup\openclaw-backup-prescrub-20261024.bundle` 原样重放（85485e4，分支/tag/refs-original 齐全，fsck 连通性过）；远端 main 强推回 85485e4（服务端确认 forced update）；当晚 17:30 例行备份自然接管——脱敏后的**文件**作为普通新提交向前压，**历史原样未动**。
+- 遗留提示：①公开仓 10-02 之后旧 hash 引用全部作废（台账/文档中旧 hash 仅作时间线索，别再 git show）；②GitHub 对不可达旧 commit 有服务端缓存（直链 SHA 短期内仍可访问），彻底清除需联系 GitHub Support；③两个手术前冷备保留待主人择机删：`K:\openclaw-prescrub-20261024.bundle`（2.6M）/ `I:\rana.backup\openclaw-backup-prescrub-20261024.bundle`（4.7G）；④私有仓历史里的真名未清（未授权，保持原样）。
+- 技术坑（全部实踩，给后人）：①**fast-import Windows bug**：流中出现内容重复对象时触发 `cannot truncate pack to skip duplicate: Permission denied`（脱敏天然把不同文件改成相同内容=必踩），filter-repo 内部 import 同样中招，且崩溃会留下 CRC 损坏的半成品包——勿反复重试，换路径或全新仓库重建；②filter-repo 的 already_ran 标记**不足 24 小时不再弹问询、直接静默增量**（只处理新增提交）——多轮重写之间必须 `rm -rf .git/filter-repo`；③**od 八进制→十六进制手抄必错**：251(octal)=A9(hex)，一字之差（e8bd99 vs e8bda9）让三轮"补刀"全部打空气且各自看似成功——字节级替换一律用 python 字面量 / bytes.fromhex 并对拍，不许手抄转义；④Git Bash 跑 robocopy 必须 `MSYS_NO_PATHCONV=1`（否则 /E /XD 被当路径转写=静默空跑）；⑤git commit 中文说明过控制台必 GBK 乱码，用 `-F` UTF-8 文件；⑥多规则替换长词在前（张轩瑜→主人 必须先于 轩瑜→主人）；⑦`git fetch` 拒写已检出分支，先 `symbolic-ref HEAD` 到临时分支。
+- 流程教训（最重要）：**授权边界以仓库为单位**——主人说「清公开仓历史」就不碰私有仓；"防回带所以顺手处理备份仓"属自行推断，必须先问再动。本次越权被当场叫停，按方案 A 当日还原。
+- 状态：公开仓=已清并核验✅；私有仓=已完全还原至 2026-10-23 19:10 备份点✅（远端回推已确认；后续 ls-remote 因网络抖动未复验，今晚 17:30 例行推送成功即终验）。
+
 ## [已解决] 群算卦断链三段案——9.7 升级空 allowlist 废了 exec 通道（10-01 起病）→ A1 摘 exec 止损（10-20 晨）→ fate MCP 重建工具链（10-20 晚，主人拍板做 MCP 不开 exec）
 - 症状：10-20 20:00 群友发 `/suan 摇卦`，rana-qq-public 在 compact tool surface（9.7 机制：工具多时藏 schema 进 catalog 用 tool_search 发现）下 60+ 次工具调用全失败——tool_search 参数写对的有返回，但 deepseek-v4.1-flash 探索能力弱（连 tool_call(id='read') 都没试过，盲猜 read_file/bash/exec_command），8 分钟后诚实回复「摇不了」（SOUL 不懂别装生效）。**病根实为 10-01 升 9.7**：exec 改 allowlist 模式但 exec-approvals.json 全机不存在=全拒，9-30 上线的群算卦（9.2 时代）从那天就断了，只是群里没人用没暴露；10-20 晨 A1 摘 exec 后当晚首次实战照出断腿。
 - 解决方案（fate MCP，2026-10-20 主人拍板）：照 moegirl.mjs 先例自建 `mcp-servers/fate.mjs`（stdio JSON-RPC 零依赖协议壳，**命理逻辑零重写**——spawn 现成 gua.mjs/bazi.mjs/ziwei.mjs/archive.mjs 拿 JSON 透传）。五工具：`fate__yaogua/bazi/ziwei/archive_get/archive_save`，参数白名单校验后拼 argv（不接受任意命令）、无网络无密钥。配置：openclaw.json mcp.servers.fate + rana-qq-public alsoAllow `fate__*`（备份 `openclaw.json.bak-fatemcp-20261020`，语义 diff 恰两处）。群聊侧 5 份 SKILL.md（yaogua/bazi/ziwei/fate-archive/suan-help）改工具用法+注明邮箱版暂不可用；main 侧 skill 不动（main 有 exec 走 .cmd 原路）。
