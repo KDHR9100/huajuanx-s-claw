@@ -2,17 +2,21 @@ import path from "node:path";
 import net from "node:net";
 import { execFileP } from "../lib/exec";
 import { RANA_WEB } from "../lib/paths";
+import { isLoopback } from "../lib/http";
 import type { Plugin } from "vite";
 
 /**
  * 记忆桥手动同步端点（2026-10-06）：RP 上云后本地 LM Studio 平时无模型，桥的 RP 腿每班必败。
  * 本端点是 RP 页「🔗记忆同步」按钮的后端：一键「起服务→按需加载 14B→跑共享桥+私密桥→卸载模型」。
  * 显存红线：只有用户按下按钮才会碰模型；两个桥的定时班没模型只会静默失败等下一班，绝不自动加载。
+ * 2026-10-25 迁移批1 双形态：家里的 Windows=原 LM Studio 启停流程；云服务器（linux）没有本地模型，
+ * 按钮直接跑双桥（桥内 RP 腿本来就云端优先，走本机 sse-fix-proxy:18801）。
  * - GET  /__rana/bridge-sync  当前同步状态（running/step/log/result/error）
- * - POST /__rana/bridge-sync  启动一轮同步（仅本机回环；上一轮没跑完时拒绝重复启动）
+ * - POST /__rana/bridge-sync  启动一轮同步（仅可信来源；上一轮没跑完时拒绝重复启动）
  */
 export function bridgeSyncMiddleware(): Plugin {
-  const LMS = "C:\\Users\\Administrator\\.lmstudio\\bin\\lms.exe";
+  const IS_WIN = process.platform === "win32";
+  const LMS = IS_WIN ? "C:\\Users\\Administrator\\.lmstudio\\bin\\lms.exe" : "lms";
   const STATUS = {
     running: false, startedAt: 0, updatedAt: 0, step: "",
     log: [] as string[], result: null as Record<string, string> | null, error: null as string | null,
@@ -40,6 +44,10 @@ export function bridgeSyncMiddleware(): Plugin {
     let loadedByUs = false;
     const results: Record<string, string> = {};
     try {
+      // 云端：没有本地模型可加载，RP 腿由桥内「云端优先」直走本机 sse-fix-proxy
+      if (!IS_WIN) {
+        mark("model", "云端部署：跳过本地模型，RP 腿云端优先直跑");
+      } else {
       // 1) LM Studio 服务：没起就 lms server start，轮询等端口
       mark("lmstudio", "检查 LM Studio 服务…");
       if (!(await portOpen(1234))) {
@@ -61,6 +69,7 @@ export function bridgeSyncMiddleware(): Plugin {
         if (!model) throw new Error("模型加载后仍未就绪");
       }
       mark("model", `提炼用模型：${model}（${loadedByUs ? "本次新加载，跑完自动卸载" : "已在显存，不动它"}）`);
+      }
       // 3) 共享桥 + 4) 私密桥（互相独立，前者失败不影响后者跑）
       const runScript = async (label: string, script: string) => {
         mark(label, `运行 ${script}…`);
@@ -107,11 +116,8 @@ export function bridgeSyncMiddleware(): Plugin {
     };
     if (req.method === "GET") { json(200, { ...STATUS, log: STATUS.log.slice(-40) }); return; }
     if (req.method !== "POST") { json(405, { error: "method not allowed" }); return; }
-    const ra = req.socket?.remoteAddress ?? "";
-    const loopback = ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(ra);
-    const origin = String(req.headers?.origin ?? "");
-    if (!loopback || (origin && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin))) {
-      json(403, { error: "仅本机可操作" });
+    if (!isLoopback(req)) {
+      json(403, { error: "仅可信设备可操作" });
       return;
     }
     if (STATUS.running && Date.now() - STATUS.updatedAt < 10 * 60_000) {

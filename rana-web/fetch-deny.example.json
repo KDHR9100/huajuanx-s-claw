@@ -1,0 +1,7 @@
+{
+  "_说明": "内容库/讲义抓取的域名黑名单。域本身与任意子域命中即拒(302 每一跳都重验)。真实文件 fetch-deny.json 已 gitignore,不入公开仓。",
+  "示例(真实文件里删掉本行,填真实域名)": [
+    "example-private-site.example",
+    "some-db-provider.example"
+  ]
+}

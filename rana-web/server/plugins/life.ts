@@ -349,7 +349,20 @@ export function ranaLifeMiddleware(): Plugin {
     return { title: title.slice(0, 80), digest: digest.slice(0, 12000) };
   };
 
-  /** 抓取 URL 的安全闸：仅 http/https，host 拒绝 localhost、环回、私网、链路本地等内网地址（防 SSRF 探内网） */
+  /**
+   * 抓取 URL 的安全闸：仅 http/https，host 拒绝 localhost、环回、私网、链路本地等内网地址（防 SSRF 探内网）；
+   * 再过一道域名黑名单（rana-web/fetch-deny.json，gitignore——真实名单含自家资产域名不入公开仓，
+   * 模板见 fetch-deny.example.json；缺文件=只有内网闸）。
+   */
+  const readFetchDeny = (): string[] => {
+    try {
+      const raw = JSON.parse(fs.readFileSync(path.join(RANA_WEB, "fetch-deny.json"), "utf8")) as unknown;
+      if (!Array.isArray(raw)) return [];
+      return raw.map((s) => String(s).trim().toLowerCase()).filter(Boolean);
+    } catch {
+      return [];
+    }
+  };
   const assertPublicHttpUrl = (url: string) => {
     let u: URL;
     try {
@@ -378,23 +391,15 @@ export function ranaLifeMiddleware(): Plugin {
       }
       if (bad) throw new Error("不给抓内网地址");
     }
+    // 域名黑名单：域本身或任意子域命中即拒（302 跳转的每一跳也会走到这里）
+    const deny = readFetchDeny();
+    if (deny.some((d) => host === d || host.endsWith(`.${d}`))) {
+      throw new Error("这个域名在抓取黑名单里，不给抓");
+    }
   };
 
-  /** 服务端直抓网页转正文文本（bocha 只有搜索摘要，整页要自己抓；学 news-report.mjs 的做法） */
-  const httpText = async (url: string): Promise<string> => {
-    if (!/^https?:\/\//i.test(url)) throw new Error("URL 需以 http(s):// 开头");
-    assertPublicHttpUrl(url); // 安全闸：内网/环回一律拒绝
-    const r = await fetch(url, {
-      signal: AbortSignal.timeout(20000),
-      redirect: "follow",
-      headers: {
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) rana-web/1.0",
-        accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.6",
-      },
-    });
-    if (!r.ok) throw new Error(`网页返回 HTTP ${r.status}`);
-    const raw = (await r.text()).slice(0, 2 * 1024 * 1024);
-    // 轻量 HTML→文本：去脚本样式、块级标签换行、实体解码、空白收敛
+  /** HTML→正文文本的轻量清洗（去脚本样式、块级换行、实体解码、空白收敛） */
+  const htmlToText = (raw: string): string => {
     let t = raw
       .replace(/<script[\s\S]*?<\/script>/gi, " ")
       .replace(/<style[\s\S]*?<\/style>/gi, " ")
@@ -423,6 +428,36 @@ export function ranaLifeMiddleware(): Plugin {
       })
       .replace(/&([a-z]+);/gi, (m, name: string) => named[name.toLowerCase()] ?? m);
     return t.replace(/[ \t\u00a0]+/g, " ").replace(/\n\s*\n\s*\n+/g, "\n\n").trim();
+  };
+
+  /**
+   * 服务端直抓网页转正文文本（bocha 只有搜索摘要，整页要自己抓；学 news-report.mjs 的做法）。
+   * 302/301 手动逐跳：每一跳都重新过安全闸（黑名单域名想用跳转绕过/跳去内网都会被拦），最多跟 5 跳。
+   */
+  const httpText = async (url: string): Promise<string> => {
+    if (!/^https?:\/\//i.test(url)) throw new Error("URL 需以 http(s):// 开头");
+    let current = url;
+    for (let hop = 0; hop < 5; hop++) {
+      assertPublicHttpUrl(current); // 安全闸：内网/环回/黑名单，每一跳都过
+      const r = await fetch(current, {
+        signal: AbortSignal.timeout(20000),
+        redirect: "manual",
+        headers: {
+          "user-agent": "Mozilla/5.0 (compatible) rana-web/1.0",
+          accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.6",
+        },
+      });
+      if (r.status >= 300 && r.status < 400) {
+        const loc = r.headers.get("location");
+        if (!loc) throw new Error(`网页返回 HTTP ${r.status} 但没给跳转地址`);
+        current = new URL(loc, current).toString();
+        continue;
+      }
+      if (!r.ok) throw new Error(`网页返回 HTTP ${r.status}`);
+      const raw = (await r.text()).slice(0, 2 * 1024 * 1024);
+      return htmlToText(raw);
+    }
+    throw new Error("跳转超过 5 跳，放弃了");
   };
 
 
