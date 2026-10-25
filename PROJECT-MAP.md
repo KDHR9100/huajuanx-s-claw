@@ -100,6 +100,7 @@
 | bridge-sync.ts | `/__rana/bridge-sync` | 🔗 记忆同步按钮：启动/轮询双桥一轮 |
 | sessions-cleanup.ts | `/__rana/sessions-cleanup` | 系统会话清理手术（--dry-run 只盘点） |
 | trajectory.ts | `/__rana/trajectory` | 🔍 过程页：按 run 导出会话轨迹（events.jsonl，瘦身 2137KB→212KB） |
+| cloud-sync.ts | `/__rana/cloud-snapshot`、`/cloud-sync` | 迁移同步桥：云端 tar.gz 流式打包数据快照（X-Home-Token 鉴权）/ 家里拉取状态与触发（10-25 迁移批1，方案见 MIGRATION-PLAN） |
 
 ### 1.4 rana-web 根目录的边车脚本（cron 自动化，独立进程跑完退出）
 

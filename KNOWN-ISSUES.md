@@ -32,6 +32,7 @@
 - [未解决·疑似] rana-web/.life/ 目录消失——9-17 事故，内容库候选已捞回
 - [上游限制×3] webchat 看不到实时思考 / 微信主动推送依赖 contextToken / cron 系统任务不能单独启停——平台限制，各有缓解
 - [观察] P2 性能杂音（heartbeat 延迟/lane 排队）——负载瞬时挤兑，不动配置
+- [已缓解·待观察] token-plan 月度额度烧穿（429）——main 已临时换 glm-5.3-flash；QQ 公众号仍挂 deepseek 待拍板；10-29 额度重置
 - [已解决·待观察] QQ 600s 超时罐头话——遗留：心跳「巡查/施工分工」纪律对 glm 也只是软约束，待拍板
 - 群算卦 fate MCP（10-20）——CLI 已验证；**群内真消息端到端实测待主人**（只有真群消息是端到端验收）
 
@@ -59,6 +60,18 @@
 ***
 
 ## 登记区
+
+## [已解决·迁移批1] 腾讯云迁移批1 本地代码改造五刀——含两处顺手排掉的雷（2026-10-25）
+- 症状：迁移准备（方案=MIGRATION-PLAN-2026-10.md）；勘探发现两处雷：①qq-profile.ts 硬编码小写 `K:/openclaw/...`（Windows 大小写不敏感侥幸能跑，Linux 必读不到）；②dev-config 的 `GET /__rana/config` **无任何校验明文下发网关 token**（本机回环时代没人够得着=无害，上云=钥匙挂门上）。
+- 根因：①当年手写路径笔误，被 Windows 文件系统大小写不敏感掩盖；②设计前提是「仅本机回环可达」，公网/Tailscale 部署下前提失效。
+- 解决方案：批1 五笔提交（migration/cloud-hk 分支 a5a0184/930f3e5/af435f2/2b99070/a612c4a+补刀）：DSH/acpx 删除、状态页双形态+本机探针、门禁收窄（RANA_TRUSTED_IPS 精确 IP 注入）+dev-config 堵洞（token 只发可信来源）、内容库抓取黑名单（fetch-deny.json 外置 gitignore）+302 逐跳重验、embedding 切智谱 embedding-3（实测 2048 维）、边车脚本路径 env 化、云→家同步桥（cloud-snapshot tar 流式+家里拉取留 14 份）。**自环实测全通**：探针上报/668.8MB 快照打包下载。两个实测抓到的 bug 记档：PowerShell 5.1 跑无 BOM 的 UTF-8 .ps1 按 GBK 错切中文致语法错（**写 .ps1 必带 UTF-8 BOM**）；`using` 声明不能接 `fs.openSync` 返回的数字 fd。
+- 状态：批1 收官（build ✓ + vitest 109/109 ✓）；页面新形态待主人过目；**注意：家里的 vite dev 已热载分支代码，页面即新形态，回旧观感=checkout main**。遗留：embedding 维度 2048 与旧本地索引（1024）不一致，记忆搜索若异常需触发重建索引（批4 回归验证）。
+
+## [已缓解·待观察] token-plan 月度额度烧穿——aliyun-maas 全线 429 insufficient_quota，main 临时换 glm-5.3-flash 顶班（2026-10-24）
+- 症状：10-24 03:00 起 `aliyun-maas/deepseek-v4.1-flash` 返回 `429 insufficient_quota`（token-plan 1-month quota exhausted，Retry-After 507540s）。03:00 memory-core 后台蒸馏班连败、09:57 网页 fate-teller 会话回复直接报 billing error 落空。挂此模型的有两个 agent：main 与 rana-qq-public——10-29 重置前凡走该端点的计费调用全撞墙。
+- 根因：阿里云 token-plan 月度额度按月重置（下次 2026-10-29 16:00 UTC = 北京 10-30 00:00），本周期用量烧穿。非代码/配置故障；与 10-07 群画像 403 Free quota（qwenanliang 免费档烧穿）同族不同因——那次是免费档，这次是付费月包。
+- 解决方案（主人拍板换 glm）：`agents.entries.main.model` 由 `aliyun-maas/deepseek-v4.1-flash` 改 `glm/glm-5.3-flash`（备份 `openclaw.json.bak-mainmodel-glm-20261024`，语义 diff 恰一处），21:39 重启网关、21:42:33 日志 `agent model` 行确认生效；QQ 通道首连照例 token 超时一次，auto-restart 后 21:44:24 READY，微信监控正常。glm 端点（open.bigmodel.cn，GLM_API_KEY）非新引入——心跳班（`agents.defaults.heartbeat.model`）与群画像 cron（10-17 切换）已在用。
+- 状态：已缓解（main 已换 glm）。遗留：①`agents.entries.rana-qq-public.model` 仍是 deepseek-v4.1-flash，QQ 群公共号 10-29 前照样撞 429，待主人拍板是否同换；②10-29 额度重置后是否换回 deepseek 待定（换回=改回该字段+重启）；③memory-core 后台蒸馏班是否随 main 换模型自愈，下次班次看一眼。
 
 ## [已完成·运维手术+流程教训] 真名历史脱敏——公开仓重写强推；私有仓越权手术当日全部还原（2026-10-24）
 - 背景：公开仓文档与历史含真名（TASK-TRAE 9 处 / PROJECT-STATE 2 处 / 台账 10-03 条目 2 处 / rp_soul_test.py 1 处，共 15 处），主人拍板「连历史一起清掉」。
