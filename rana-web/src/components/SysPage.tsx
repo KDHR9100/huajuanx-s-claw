@@ -51,6 +51,7 @@ interface PatrolInfo {
   sendError?: string;
 }
 interface StatusPayload {
+  platform?: "win32" | "linux";
   sys?: SysInfo;
   gpu?: GpuInfo | null;
   power?: PowerInfo | null;
@@ -58,6 +59,12 @@ interface StatusPayload {
   services?: ServiceRow[];
   net?: NetInfo | null;
   patrol?: PatrolInfo | null;
+}
+
+/** 家里探针上报（/__rana/sys/home；report 结构与 status 的 Windows 部分同构） */
+interface HomePayload {
+  receivedAt: number;
+  report?: { sys?: SysInfo; gpu?: GpuInfo | null; power?: PowerInfo | null };
 }
 
 const POLL_MS = 5000;
@@ -95,6 +102,88 @@ function DiskBar({ disk }: { disk: DiskRow }) {
         <i className={cls} style={{ width: `${pct}%` }} />
       </div>
     </div>
+  );
+}
+
+/** 🏠 家里电脑卡（仅云端 Linux 部署显示）：读探针最后上报，数据可能滞后 */
+function HomeCard() {
+  const [home, setHome] = useState<HomePayload | null | undefined>(undefined); // undefined=加载中, null=从没上报过
+  useEffect(() => {
+    let stop = false;
+    const load = async () => {
+      try {
+        const r = await fetch("/__rana/sys/home");
+        const j = (await r.json()) as HomePayload | null;
+        if (!stop) setHome(j ?? null);
+      } catch {
+        if (!stop) setHome(null);
+      }
+    };
+    void load();
+    const t = window.setInterval(() => void load(), 30000);
+    return () => {
+      stop = true;
+      window.clearInterval(t);
+    };
+  }, []);
+  if (home === undefined) return <p className="pending-text">……看看家里。</p>;
+  if (!home) {
+    return (
+      <>
+        <div className="svc-row">
+          <span className="svc-dot" />
+          <span className="svc-name">探针没上报过</span>
+        </div>
+        <div className="plan-hint">家里的电脑没跑探针（tools/home-probe.ps1，手动跑），或云端还没配 HOME_REPORT_TOKEN。</div>
+      </>
+    );
+  }
+  const ageMin = Math.max(0, Math.round((Date.now() - home.receivedAt) / 60000));
+  const online = ageMin < 3;
+  const s = home.report?.sys;
+  const g = home.report?.gpu;
+  const p = home.report?.power;
+  const memUsed = s ? s.memTotalGB - s.memFreeGB : 0;
+  const activePlan = p?.plans.find((x) => x.guid === p.activeGuid)?.name;
+  return (
+    <>
+      <div className="svc-row" title={`最后上报 ${new Date(home.receivedAt).toLocaleString()}`}>
+        <span className={`svc-dot${online ? " ok" : ""}`} />
+        <span className="svc-name">{online ? "家里电脑在线" : "家里电脑离线"}</span>
+        <span className="svc-meta">{online ? "探针在跑" : `${ageMin} 分钟没上报了`}</span>
+      </div>
+      {s && (
+        <>
+          <div className="kv">
+            <span className="k">CPU / 内存</span>
+            <span className="v">
+              {s.cpu !== null ? `${s.cpu}%` : "—"} · {memUsed.toFixed(1)} / {s.memTotalGB.toFixed(0)} GB
+            </span>
+          </div>
+          <div className="kv">
+            <span className="k">开机时长</span>
+            <span className="v">
+              {s.uptimeHours >= 24 ? `${Math.floor(s.uptimeHours / 24)} 天 ${Math.round(s.uptimeHours % 24)} 小时` : `${s.uptimeHours.toFixed(1)} 小时`}
+            </span>
+          </div>
+        </>
+      )}
+      {g && (
+        <div className="kv">
+          <span className="k">🎮 {g.name}</span>
+          <span className="v">
+            {(g.memUsedMB / 1024).toFixed(1)} / {(g.memTotalMB / 1024).toFixed(0)} GB · {g.tempC}°C
+          </span>
+        </div>
+      )}
+      {activePlan && (
+        <div className="kv">
+          <span className="k">电源计划</span>
+          <span className="v">{activePlan}</span>
+        </div>
+      )}
+      <div className="plan-hint">手动工具不上报历史，数据只是最后一眼（{new Date(home.receivedAt).toLocaleTimeString()}）。</div>
+    </>
   );
 }
 
@@ -195,16 +284,29 @@ export default function SysPage() {
     : "—";
   const virt = data?.virt ?? null;
   const virtActive = Boolean(virt?.hypervisorPresent);
+  // 云端 Linux 部署：状态页=服务器自己 + 🏠家里(探针)；家里的 Windows：现状全套
+  const isLinux = data?.platform === "linux";
 
   return (
     <div className="wallboard">
       <div className="board-inner">
         <div className="page-intro">
           <h2>Rana 的状态</h2>
-          <p>家里的样子，她帮你看着。{error && <span className="sys-err">（{error}）</span>}</p>
+          <p>
+            {isLinux ? "☁ 云服务器的样子，她帮你看着。" : "家里的样子，她帮你看着。"}
+            {error && <span className="sys-err">（{error}）</span>}
+          </p>
         </div>
         <div className="sys-grid">
-          {/* 虚拟化模式：游戏 / WSL 切换（弹 UAC 提权，重启生效） */}
+          {/* 云端：家里电脑（探针上报，只读）；家里：虚拟化模式切换卡 */}
+          {isLinux ? (
+            <div className="card">
+              <h3>
+                <span className="ic">🏠</span>家里电脑 <small>手动探针 · 数据可能滞后</small>
+              </h3>
+              <HomeCard />
+            </div>
+          ) : (
           <div className="card">
             <h3>
               <span className="ic">🖥️</span>虚拟化模式 <small>重启后生效</small>
@@ -240,8 +342,10 @@ export default function SysPage() {
               <p className="pending-text">……看不见了。</p>
             )}
           </div>
+          )}
 
-          {/* 电源计划：可点切换 */}
+          {/* 电源计划：可点切换（仅家里 Windows） */}
+          {!isLinux && (
           <div className="card">
             <h3>
               <span className="ic">⚡</span>电源计划 <small>powercfg</small>
@@ -266,6 +370,7 @@ export default function SysPage() {
               <p className="pending-text">……看不见了。</p>
             )}
           </div>
+          )}
 
           {/* 硬盘 */}
           <div className="card">
@@ -275,7 +380,8 @@ export default function SysPage() {
             {sys ? sys.disks.map((d) => <DiskBar key={d.drive} disk={d} />) : <p className="pending-text">……看不见了。</p>}
           </div>
 
-          {/* 显卡 */}
+          {/* 显卡（仅家里 Windows；云服务器无独显） */}
+          {!isLinux && (
           <div className="card">
             <h3>
               <span className="ic">🎮</span>显卡 <small>{gpu?.name ?? "nvidia-smi"}</small>
@@ -323,6 +429,7 @@ export default function SysPage() {
               <p className="pending-text">……看不见了。</p>
             )}
           </div>
+          )}
 
           {/* CPU / 内存 */}
           <div className="card">

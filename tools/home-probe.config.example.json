@@ -1,0 +1,5 @@
+{
+  "_说明": "复制本文件为 home-probe.config.json 并填写。真实配置含云端地址与 token,已被 .gitignore 挡住不入库。",
+  "url": "http://100.x.y.z:5173",
+  "token": "HOME_REPORT_TOKEN 的值(与云端 rana-web/.env 里 HOME_REPORT_TOKEN= 保持一致)"
+}

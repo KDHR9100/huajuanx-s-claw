@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "../store/useAppStore";
 import { gateway } from "../lib/gateway";
+import { HOST_IS_WINDOWS } from "../lib/platform";
 
 function fmtTime(ts?: number) {
   if (!ts) return "";
@@ -261,9 +262,11 @@ export default function Sidebar() {
       <button className="btn ghost" onClick={() => setCloudOpen(true)}>
         ☁ 云端模型
       </button>
-      <button className="btn ghost" onClick={() => setLmOpen(true)}>
-        🖥 本地模型
-      </button>
+      {HOST_IS_WINDOWS && (
+        <button className="btn ghost" onClick={() => setLmOpen(true)}>
+          🖥 本地模型
+        </button>
+      )}
       <button className="btn ghost" onClick={() => setSettingsOpen(true)}>
         ⚙ 外观设置
       </button>

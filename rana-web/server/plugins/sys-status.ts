@@ -8,15 +8,23 @@ import type { Plugin } from "vite";
 
 /**
  * 电脑状态端点（本机只读监控 + 电源计划切换）：
- * - GET /__rana/sys/status  聚合系统数据（硬盘/CPU/内存/开机时长/显卡+显存进程/电源计划/虚拟化/服务端口/网速/外网连通），8 秒缓存
- * - POST /__rana/sys/power {guid}  切换电源计划（仅接受 GUID 格式参数、仅本机回环来源）
- * 服务端口清单 = 默认四件套 + rana-web/services.json 用户自加项（{name,port}）。
+ * - GET /__rana/sys/status  聚合系统数据，8 秒缓存；按运行平台分派——
+ *   · win32（家里的电脑）：硬盘/CPU/内存/开机时长/显卡+显存进程/电源计划/虚拟化/服务端口/网速/外网连通（PowerShell 套件）
+ *   · linux（云服务器）：/proc + df + ss 同构数据（无电源/虚拟化/GPU 卡）
+ * - POST /__rana/sys/power {guid}  切换电源计划（仅接受 GUID 格式参数、仅本机回环来源；仅 win32）
+ * - POST /__rana/sys/virt {mode}   虚拟化模式切换（仅 win32）
+ * - POST /__rana/sys/home-report   家里探针上报（X-Home-Token 独立小 token 校验，无 token 配置则拒绝——fail-closed）
+ * - GET  /__rana/sys/home          读探针最后上报（给云端页面「🏠 家里」卡）
+ * 服务端口清单 = 平台默认项 + rana-web/services.json 用户自加项（{name,port}）。
  * 所有子进程调用均用 execFile 数组参数（不经 shell、无字符串拼接）。
  */
 export function ranaSysStatusMiddleware(): Plugin {
   const here = RANA_WEB;
+  const IS_WIN = process.platform === "win32";
+  const PLATFORM = IS_WIN ? "win32" : "linux";
   const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const CACHE_MS = 8000;
+  interface DiskRow { drive: string; label: string; sizeGB: number; freeGB: number }
   let cache: { at: number; data: unknown } | null = null;
 
   /** Windows 系统数据：一次 PowerShell 调用拿硬盘/CPU/内存/开机时长 */
@@ -110,13 +118,118 @@ export function ranaSysStatusMiddleware(): Plugin {
     return JSON.parse(stdout) as { hypervisorPresent: boolean; vbsStatus: number; hvciRunning: boolean };
   };
 
-  /** 服务端口清单：默认四件套 + rana-web/services.json 自加项（{name,port}，端口非法/重名的忽略） */
-  const DEFAULT_SERVICES: Array<{ name: string; port: number }> = [
-    { name: "OpenClaw 网关", port: 18789 },
-    { name: "rana-web 前端", port: 5173 },
-    { name: "LM Studio", port: 1234 },
-    { name: "Clash 代理", port: 7897 },
-  ];
+  /** Linux（云服务器）系统数据：df + /proc 三件套；CPU 为两次采样差分（首拍为 null） */
+  let lastCpuSample: { busy: number; total: number } | null = null;
+  const readCpuTimes = () => {
+    const parts = fs.readFileSync("/proc/stat", "utf8").split("\n")[0].trim().split(/\s+/).slice(1).map(Number);
+    const total = parts.reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0);
+    const idle = (parts[3] ?? 0) + (parts[4] ?? 0);
+    return { busy: total - idle, total };
+  };
+  const querySystemLinux = async () => {
+    const { stdout } = await execFileP("df", ["-B1G", "--output=source,target,size,avail", "-x", "tmpfs", "-x", "devtmpfs"], {
+      encoding: "utf8", timeout: 10000,
+    });
+    const disks: DiskRow[] = [];
+    for (const line of stdout.trim().split("\n").slice(1)) {
+      const cols = line.trim().split(/\s+/);
+      if (cols.length < 4) continue;
+      disks.push({ drive: cols[1], label: cols[0], sizeGB: Number(cols[2]), freeGB: Number(cols[3]) });
+    }
+    const meminfo = fs.readFileSync("/proc/meminfo", "utf8");
+    const memTotalKB = Number(meminfo.match(/^MemTotal:\s+(\d+) kB$/m)?.[1] ?? 0);
+    const memAvailKB = Number(meminfo.match(/^MemAvailable:\s+(\d+) kB$/m)?.[1] ?? 0);
+    const uptimeSec = Number(fs.readFileSync("/proc/uptime", "utf8").trim().split(" ")[0]);
+    const cpuTimes = readCpuTimes();
+    let cpu: number | null = null;
+    if (lastCpuSample && cpuTimes.total > lastCpuSample.total) {
+      cpu = Math.round(((cpuTimes.busy - lastCpuSample.busy) / (cpuTimes.total - lastCpuSample.total)) * 100);
+    }
+    lastCpuSample = cpuTimes;
+    return {
+      disks,
+      cpu,
+      memTotalGB: Math.round((memTotalKB / 1024 / 1024) * 10) / 10,
+      memFreeGB: Math.round((memAvailKB / 1024 / 1024) * 10) / 10,
+      uptimeHours: Math.round((uptimeSec / 3600) * 10) / 10,
+    };
+  };
+
+  /** Linux 服务端口：ss -tlnp + /proc/<pid>/stat 算进程已运行时长 */
+  const linuxBootTime = () => Number(fs.readFileSync("/proc/stat", "utf8").match(/^btime (\d+)$/m)?.[1] ?? 0);
+  const linuxProcUptimeSec = (pid: number): number | null => {
+    try {
+      const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+      const after = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      const startTimeJ = Number(after[19]); // after[0]=state(第3字段),第22字段=after[19]
+      const bt = linuxBootTime();
+      if (!startTimeJ || !bt) return null;
+      return Math.max(0, Math.floor(Date.now() / 1000 - (bt + startTimeJ / 100)));
+    } catch {
+      return null;
+    }
+  };
+  const queryServicesLinux = async () => {
+    const wanted = readServiceList();
+    const { stdout } = await execFileP("ss", ["-tlnp"], { encoding: "utf8", timeout: 10000 });
+    const rows = stdout.trim().split("\n").slice(1);
+    return wanted.map((s) => {
+      const hit = rows.find((r) => {
+        const cols = r.trim().split(/\s+/);
+        const local = cols[3] ?? "";
+        return local.endsWith(`:${s.port}`) || local.endsWith(`]:${s.port}`);
+      });
+      const pid = Number(hit?.match(/pid=(\d+)/)?.[1] ?? 0);
+      return {
+        ...s,
+        listening: Boolean(hit),
+        pid,
+        proc: pid ? (hit?.match(/users:\(\("([^"]+)"/)?.[1] ?? "listening") : hit ? "listening" : null,
+        uptimeSec: pid ? linuxProcUptimeSec(pid) : null,
+      };
+    });
+  };
+
+  /** Linux 网速：/proc/net/dev 差分（排除 lo） */
+  let lastNetSampleLinux: { recv: number; sent: number } | null = null;
+  const queryNetSpeedLinux = () => {
+    const recvTotal: number[] = [];
+    const sentTotal: number[] = [];
+    for (const line of fs.readFileSync("/proc/net/dev", "utf8").trim().split("\n").slice(2)) {
+      const [iface, rest] = line.split(":");
+      if (!iface?.trim() || iface.trim() === "lo") continue;
+      const cols = rest?.trim().split(/\s+/).map(Number) ?? [];
+      if (cols.length >= 9) {
+        recvTotal.push(cols[0]);
+        sentTotal.push(cols[8]);
+      }
+    }
+    const recv = recvTotal.reduce((a, b) => a + b, 0);
+    const sent = sentTotal.reduce((a, b) => a + b, 0);
+    let speed: { downKBs: number; upKBs: number } | null = null;
+    if (lastNetSampleLinux) {
+      speed = {
+        downKBs: Math.max(0, (recv - lastNetSampleLinux.recv) / 8000 / 1.024),
+        upKBs: Math.max(0, (sent - lastNetSampleLinux.sent) / 8000 / 1.024),
+      };
+    }
+    lastNetSampleLinux = { recv, sent };
+    return speed;
+  };
+
+  /** 服务端口清单：平台默认项 + rana-web/services.json 自加项（{name,port}，端口非法/重名的忽略） */
+  const DEFAULT_SERVICES: Array<{ name: string; port: number }> = IS_WIN
+    ? [
+        { name: "OpenClaw 网关", port: 18789 },
+        { name: "rana-web 前端", port: 5173 },
+        { name: "LM Studio", port: 1234 },
+        { name: "Clash 代理", port: 7897 },
+      ]
+    : [
+        { name: "OpenClaw 网关", port: 18789 },
+        { name: "rana-web 前端", port: 5173 },
+        { name: "SSE 修复代理", port: 18801 },
+      ];
   const readServiceList = () => {
     const list = [...DEFAULT_SERVICES];
     try {
@@ -199,7 +312,7 @@ export function ranaSysStatusMiddleware(): Plugin {
   const NET_PROBE_MS = 60000;
   let netProbeCache: { at: number; data: { probes: Array<{ label: string; ok: boolean; ms: number }> } } | null = null;
   const probeUrl = async (label: string, url: string, proxy?: string) => {
-    const args = ["-I", "-s", "-o", "NUL", "-w", "%{time_total}", "--connect-timeout", "3", "--max-time", "5"];
+    const args = ["-I", "-s", "-o", IS_WIN ? "NUL" : "/dev/null", "-w", "%{time_total}", "--connect-timeout", "3", "--max-time", "5"];
     if (proxy) args.push("-x", proxy);
     args.push(url);
     try {
@@ -223,7 +336,11 @@ export function ranaSysStatusMiddleware(): Plugin {
     } catch {
       // 读不到配置就只探 GitHub
     }
-    const jobs: Array<Promise<{ label: string; ok: boolean; ms: number }>> = [probeUrl("GitHub（走 Clash）", "https://github.com", "http://127.0.0.1:7897")];
+    const jobs: Array<Promise<{ label: string; ok: boolean; ms: number }>> = [
+      IS_WIN
+        ? probeUrl("GitHub（走 Clash）", "https://github.com", "http://127.0.0.1:7897")
+        : probeUrl("GitHub（直连）", "https://github.com"),
+    ];
     if (apiOrigin) jobs.push(probeUrl("模型 API（直连）", apiOrigin));
     const probes = await Promise.all(jobs);
     const data = { probes };
@@ -246,6 +363,26 @@ export function ranaSysStatusMiddleware(): Plugin {
   };
 
   const buildStatus = async () => {
+    // Linux（云服务器）：无电源/虚拟化/GPU 卡，其余同构
+    if (!IS_WIN) {
+      const [sys, services, netSpeed, netProbes] = await Promise.all([
+        querySystemLinux(),
+        queryServicesLinux().catch(() => readServiceList().map((s) => ({ ...s, listening: false, pid: 0, proc: null, uptimeSec: null }))),
+        Promise.resolve(queryNetSpeedLinux()).catch(() => null),
+        queryNetProbes().catch(() => ({ probes: [] })),
+      ]);
+      return {
+        platform: PLATFORM,
+        sys,
+        gpu: null as unknown,
+        power: null as unknown,
+        virt: null as unknown,
+        services,
+        net: { speed: netSpeed, probes: netProbes.probes },
+        patrol: readPatrol(),
+        ts: Date.now(),
+      };
+    }
     const [sys, gpu, power, virt, services, netSpeed, netProbes] = await Promise.all([
       querySystem(),
       queryGpu().catch(() => null),
@@ -255,7 +392,7 @@ export function ranaSysStatusMiddleware(): Plugin {
       queryNetSpeed().catch(() => null),
       queryNetProbes().catch(() => ({ probes: [] })),
     ]);
-    return { sys, gpu, power, virt, services, net: { speed: netSpeed, probes: netProbes.probes }, patrol: readPatrol(), ts: Date.now() };
+    return { platform: PLATFORM, sys, gpu, power, virt, services, net: { speed: netSpeed, probes: netProbes.probes }, patrol: readPatrol(), ts: Date.now() };
   };
 
 
@@ -285,6 +422,10 @@ export function ranaSysStatusMiddleware(): Plugin {
       return;
     }
     if (req.method === "POST") {
+      if (!IS_WIN) {
+        json(res, 400, { error: "电源计划切换只在家里 Windows 上有" });
+        return;
+      }
       if (!isLoopback(req)) {
         json(res, 403, { error: "仅本机可操作" });
         return;
@@ -345,6 +486,10 @@ export function ranaSysStatusMiddleware(): Plugin {
       json(res, 405, { error: "method not allowed" });
       return;
     }
+    if (!IS_WIN) {
+      json(res, 400, { error: "虚拟化切换只在家里 Windows 上有" });
+      return;
+    }
     const ra = req.socket?.remoteAddress ?? "";
     const loopback = ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(ra);
     const origin = String(req.headers?.origin ?? "");
@@ -375,17 +520,71 @@ export function ranaSysStatusMiddleware(): Plugin {
     });
   };
 
+  /** 家里探针：POST 上报（X-Home-Token 独立小 token，来自 rana-web/.env 的 HOME_REPORT_TOKEN；没配 token 一律拒收——fail-closed）；GET 读最后上报 */
+  const HOME_REPORT_PATH = path.join(here, ".health", "home-report.json");
+  const readHomeToken = (): string => {
+    try {
+      const env = fs.readFileSync(path.join(here, ".env"), "utf8");
+      return (env.match(/^HOME_REPORT_TOKEN=(.+)$/m)?.[1] ?? "").trim();
+    } catch {
+      return "";
+    }
+  };
+  const homeHandler = (
+    req: { method?: string; url?: string; headers?: Record<string, unknown>; on: (ev: string, cb: (c?: string) => void) => void },
+    res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void },
+  ) => {
+    if (req.method === "POST") {
+      const token = readHomeToken();
+      const given = String(req.headers?.["x-home-token"] ?? "");
+      if (!token || given !== token) {
+        json(res, 403, { error: "探针 token 不对或未配置" });
+        return;
+      }
+      let body = "";
+      req.on("data", (c?: string) => {
+        body += c ?? "";
+        if (body.length > 65536) body = ""; // 超限视为坏包
+      });
+      req.on("end", () => {
+        try {
+          const report = JSON.parse(body) as Record<string, unknown>;
+          if (!report || typeof report !== "object") throw new Error("bad");
+          fs.mkdirSync(path.dirname(HOME_REPORT_PATH), { recursive: true });
+          fs.writeFileSync(HOME_REPORT_PATH, JSON.stringify({ receivedAt: Date.now(), report }));
+          json(res, 200, { ok: true });
+        } catch {
+          json(res, 400, { error: "上报内容不是合法 JSON" });
+        }
+      });
+      return;
+    }
+    if (req.method === "GET") {
+      try {
+        json(res, 200, JSON.parse(fs.readFileSync(HOME_REPORT_PATH, "utf8")));
+      } catch {
+        json(res, 200, null);
+      }
+      return;
+    }
+    json(res, 405, { error: "method not allowed" });
+  };
+
   return {
     name: "rana-sys-status",
     configureServer(server) {
       server.middlewares.use("/__rana/sys/status", handler as Parameters<typeof server.middlewares.use>[1]);
       server.middlewares.use("/__rana/sys/power", handler as Parameters<typeof server.middlewares.use>[1]);
       server.middlewares.use("/__rana/sys/virt", virtHandler as Parameters<typeof server.middlewares.use>[1]);
+      server.middlewares.use("/__rana/sys/home-report", homeHandler as Parameters<typeof server.middlewares.use>[1]);
+      server.middlewares.use("/__rana/sys/home", homeHandler as Parameters<typeof server.middlewares.use>[1]);
     },
     configurePreviewServer(server) {
       server.middlewares.use("/__rana/sys/status", handler as Parameters<typeof server.middlewares.use>[1]);
       server.middlewares.use("/__rana/sys/power", handler as Parameters<typeof server.middlewares.use>[1]);
       server.middlewares.use("/__rana/sys/virt", virtHandler as Parameters<typeof server.middlewares.use>[1]);
+      server.middlewares.use("/__rana/sys/home-report", homeHandler as Parameters<typeof server.middlewares.use>[1]);
+      server.middlewares.use("/__rana/sys/home", homeHandler as Parameters<typeof server.middlewares.use>[1]);
     },
   };
 }

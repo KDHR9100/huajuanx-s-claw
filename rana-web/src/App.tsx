@@ -23,6 +23,7 @@ import TracePage from "./components/TracePage";
 import ErrorBoundary from "./components/ErrorBoundary";
 import SettingsModal from "./components/SettingsModal";
 import LmStudioModal from "./components/LmStudioModal";
+import { HOST_IS_WINDOWS } from "./lib/platform";
 import CloudConfigModal from "./components/CloudConfigModal";
 import SystemCleanupModal from "./components/SystemCleanupModal";
 
@@ -153,7 +154,7 @@ export default function App() {
         </div>
       </div>
       <SettingsModal />
-      <LmStudioModal />
+      {HOST_IS_WINDOWS && <LmStudioModal />}
       <CloudConfigModal />
       <SystemCleanupModal />
     </>
