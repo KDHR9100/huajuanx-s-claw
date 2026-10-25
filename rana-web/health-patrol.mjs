@@ -25,11 +25,12 @@ import { promisify } from "node:util";
 
 const execFileP = promisify(execFile);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const STATE_DIR = process.env.OPENCLAW_STATE_DIR || "K:/OpenClaw/.openclaw/.openclaw";
+const STATE_DIR = process.env.OPENCLAW_STATE_DIR || path.resolve(HERE, "..", ".openclaw", ".openclaw");
 const CONFIG_FILE = path.join(STATE_DIR, "openclaw.json");
 const HEALTH_FILE = path.join(HERE, ".health", "patrol.json");
-const BACKUP_REPO = "K:/openclaw-backup"; // robocopy 目标（盘根，与 backup-private.cmd 一致）
-const OPENCLAW_MJS = "C:/Users/Administrator/AppData/Roaming/npm/node_modules/openclaw/openclaw.mjs";
+// 2026-10-25 迁移批1:备份仓/CLI 位置改 env 注入(云端 systemd/cron 配 Linux 值),缺省保留本机旧值
+const BACKUP_REPO = process.env.RANA_BACKUP_REPO || "K:/openclaw-backup";
+const OPENCLAW_MJS = process.env.OPENCLAW_MJS || "C:/Users/Administrator/AppData/Roaming/npm/node_modules/openclaw/openclaw.mjs";
 const GATEWAY_PORT = 18789;
 const VITE_PORT = 5173;
 const SSEFIX_PORT = 18801;

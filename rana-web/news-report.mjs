@@ -13,12 +13,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveApiKey } from "./lib/rana-config.mjs";
+import { STATE_HOME, resolveApiKey } from "./lib/rana-config.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(HERE, ".news");
 const OUT_FILE = path.join(OUT_DIR, "report.json");
-const CFG = JSON.parse(fs.readFileSync("K:/OpenClaw/.openclaw/.openclaw/openclaw.json", "utf8"));
+const CFG = JSON.parse(fs.readFileSync(path.join(STATE_HOME, "openclaw.json"), "utf8"));
 const BOCHA_KEY = CFG?.mcp?.servers?.bocha?.env?.BOCHA_API_KEY;
 const BOCHA_API = "https://api.bochaai.com/v1/web-search";
 

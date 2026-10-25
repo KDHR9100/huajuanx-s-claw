@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { spawn } from 'node:child_process';
-import { STATE_HOME, resolveApiKey } from './lib/rana-config.mjs';
+import { STATE_HOME, resolveApiKey, resolveOpenclawMjs } from './lib/rana-config.mjs';
 import { makeParseEntries } from './memory-bridge-parse.mjs';
 
 // 状态目录与 SecretRef 解析统一走共享模块（env 优先，缺省回退仓库内布局）
@@ -483,8 +483,8 @@ if (mainEntries.length || rpEntries.length || qqEntries.length) {
 
 // 触发双边记忆索引刷新（失败不影响主流程；索引也会按 mtime 自动重扫）
 try {
-  const child = spawn('G:/node/node.exe', ['--tls-max-v1-2', 'C:/Users/Administrator/AppData/Roaming/npm/node_modules/openclaw/openclaw.mjs', 'memory', 'index'], {
-    env: { ...process.env, OPENCLAW_STATE_DIR: 'K:\\openclaw\\.openclaw\\.openclaw' },
+  const child = spawn(process.execPath, ['--tls-max-v1.2', resolveOpenclawMjs(), 'memory', 'index'], {
+    env: { ...process.env, OPENCLAW_STATE_DIR: STATE_HOME },
     detached: true, stdio: 'ignore',
   });
   child.unref();

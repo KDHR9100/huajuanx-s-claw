@@ -16,13 +16,15 @@
 import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 const PORT = Number(process.env.SSEFIX_PORT || 18801);
 const UPSTREAM = process.env.SSEFIX_UPSTREAM || 'https://api.sillytraven.dev/api/ai/v1';
 const UP = new URL(UPSTREAM);
 
-const logDir = path.join(process.env.TEMP || '.', 'openclaw');
+// 2026-10-25 迁移批1:process.TEMP 是 Windows 特有,Linux 下 undefined 落到当前目录;统一 os.tmpdir()。
+const logDir = path.join(os.tmpdir(), 'openclaw');
 fs.mkdirSync(logDir, { recursive: true });
 const LOG = path.join(logDir, 'sse-fix-proxy.log');
 function log(msg) {

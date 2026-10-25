@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { json } from "../lib/http";
+import { STATE_HOME } from "../lib/paths";
 import type { Plugin } from "vite";
 
 /**
@@ -9,9 +10,11 @@ import type { Plugin } from "vite";
  * 画像文件由 rana-qq-public 自己写（group-analyst skill），这里零写入；总结模型的切换走网关 WS RPC cron.update，不经过这里。
  */
 export function ranaQqProfileMiddleware(): Plugin {
-  const HOME = "K:/openclaw/.openclaw/.openclaw";
-  const memDir = `${HOME}/workspace-rana-qq-public/memory`;
-  const aliasFile = `${HOME}/shared-memory/qq-bridge.json`;
+  // 2026-10-25 迁移批1 修复:原硬编码小写 "K:/openclaw/..." 在 Windows 大小写不敏感下侥幸能用,Linux 必读不到。
+  // 改走 STATE_HOME(env 优先、缺省相对仓库推导),本地/云端同一条路径。
+  const HOME = STATE_HOME;
+  const memDir = path.join(HOME, "workspace-rana-qq-public", "memory");
+  const aliasFile = path.join(HOME, "shared-memory", "qq-bridge.json");
 
 
 

@@ -5,6 +5,8 @@
  * 变成 {source:"store",id} 对象——直读当 Bearer 用会发出 "[object Object]"。
  */
 import path from 'node:path';
+import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -29,4 +31,28 @@ export function resolveApiKey(raw) {
     } finally { db.close(); }
   }
   return undefined;
+}
+
+let cachedMjs = null;
+/**
+ * openclaw.mjs 的位置（2026-10-25 迁移批1 起，替代各脚本写死的 G:/node/node.exe + C:/Users/... 绝对路径）：
+ * env OPENCLAW_MJS 优先（云端 systemd/cron 注入）→ npm root -g 探测（openclaw 装在全局）→ 裸文件名让 PATH 兜底。
+ * 每个进程只探一次。
+ */
+export function resolveOpenclawMjs() {
+  if (cachedMjs) return cachedMjs;
+  if (process.env.OPENCLAW_MJS) {
+    cachedMjs = process.env.OPENCLAW_MJS;
+    return cachedMjs;
+  }
+  try {
+    const root = execFileSync('npm', ['root', '-g'], { encoding: 'utf8', shell: true, timeout: 15000 }).trim();
+    const cand = path.join(root, 'openclaw', 'openclaw.mjs');
+    if (fs.existsSync(cand)) {
+      cachedMjs = cand;
+      return cachedMjs;
+    }
+  } catch { /* npm 不在或慢，走 PATH 兜底 */ }
+  cachedMjs = 'openclaw.mjs';
+  return cachedMjs;
 }

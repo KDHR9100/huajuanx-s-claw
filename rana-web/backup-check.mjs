@@ -17,12 +17,15 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
-const LOG = 'K:/openclaw-backup-run.log';
-const REPO = 'K:/openclaw-backup';
-const GIT = 'G:/Git/cmd/git.exe';
-const OUT_DIR = 'K:/OpenClaw/rana-web/.backup-check';
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+// 2026-10-25 迁移批1:全改 env 注入(云端备份链路批3 重定义时配 Linux 值),缺省保留本机旧值;git 走 PATH
+const LOG = process.env.RANA_BACKUP_LOG || 'K:/openclaw-backup-run.log';
+const REPO = process.env.RANA_BACKUP_REPO || 'K:/openclaw-backup';
+const GIT = process.env.RANA_GIT_BIN || 'git';
+const OUT_DIR = path.join(HERE, '.backup-check');
 const OUT = path.join(OUT_DIR, 'status.json');
 const MAX_AGE_H = 26;
 const RUNNING_GRACE_H = 2;
@@ -79,7 +82,7 @@ if (!lastRun || Number.isNaN(lastRun.ts.getTime())) {
       detail = `最后记录：${lastRun.line}`;
     } else if (ahead > 0) {
       reason = `本地已备份但远端落后 ${ahead} 个提交（push 失败）`;
-      detail = '修复：挂好代理后 git -C K:/openclaw-backup push origin main';
+      detail = `修复：网络通了以后 git -C ${REPO} push origin main`;
     } else if (lastRun.kind === 'error') {
       ok = true;
       detail = `最后运行有 ERROR 但远端已同步，无需处理（${lastRun.line}）`;
