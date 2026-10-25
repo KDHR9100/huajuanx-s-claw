@@ -21,8 +21,8 @@
 渠道层   微信→rana-rp   QQ私聊→main   QQ群→rana-qq-public   浏览器:5173→rana-web
            └────────────┴──────┬──────┴────────────┘
 调度层   OpenClaw 网关 :18789（WebSocket 协议 v4，SQLite 存会话/cron，openclaw.json 热重载）
-           bindings 路由 · cron 班表 · 记忆桥 · 插件 8 个 · acpx 派活
-干活层   轻活 main 自己干（搜索/浏览器/文件）；编码重活→acpx→DSH（WSL 里的 DeepSeek 工人）
+           bindings 路由 · cron 班表 · 记忆桥 · 插件 8 个
+干活层   main 自己干（搜索/浏览器/文件）；（DSH/acpx 派活 10-25 迁移批1 移除）
 模型层   云端：main/公共号 deepseek-v4.1-flash、RP nalang（经本地 sse-fix-proxy :18801）
          本地：LM Studio :1234（微调 14B 在库可切回）+ qwen3-embedding（CPU 常驻，看门狗锁单实例）
 ```
@@ -51,7 +51,7 @@
 | `rana-web/` | ★ 自建 Web 前端 + 边车脚本（见 §1.2–1.4） | ✅ |
 | `.openclaw/.openclaw/` | **OpenClaw 运行时状态**（配置/会话库/记忆/人格），gitignore | ❌ 私有 |
 | `push-public.cmd` / `backup-private.cmd` | 公开推送 / 私有备份脚本（含私有地址），gitignore | ❌ 私有 |
-| `rp-tune/` / `rp-eval/` / `lmctl/` / `dsh-reference/` | RP 微调管线 / RP 评测 / LM Studio 控制台 / DSH 参考仓克隆，gitignore | ❌ 私有 |
+| `rp-tune/` / `rp-eval/` / `lmctl/` / `dsh-reference/` | RP 微调管线 / RP 评测 / LM Studio 控制台 / DSH 参考仓克隆（DSH 已移除，纯留档），gitignore | ❌ 私有 |
 | `.zcode/ .trae/ .workbuddy/ .mimosa/ .kilo/` | 各 AI 工具的本地会话数据，gitignore | ❌ 私有 |
 
 ### 1.2 rana-web 前端（React 18 + TS + Vite 6 + zustand，无 UI 框架全手写 CSS）
@@ -60,14 +60,14 @@
 | --- | --- | --- |
 | `src/lib/gateway.ts` | ★ 连接层核心（约 760 行）：Ed25519 握手、req/事件 RPC、无限指数退避重连、乐观创建/删除、三路去重 | **别乱动**（踩坑换来的防御工事） |
 | `src/lib/reconnectBackoff.ts` | 重连退避纯函数（1s→30s 封顶），vitest 4 用例 | 10-17 批次 D 抽取 |
-| `src/lib/types.ts` | ★ `NAV_TABS` 页签**单一来源**（12 页签，拖拽排序记本地） | 加页签必经此处，别处别抄清单 |
+| `src/lib/types.ts` | ★ `NAV_TABS` 页签**单一来源**（11 页签，拖拽排序记本地） | 加页签必经此处，别处别抄清单 |
 | `src/lib/reasoning.ts` | 脏输出清洗管线：`<think>`/`<details>` 折叠、信封剥离、回声检测 | vitest 覆盖 |
 | `src/lib/fateCore.ts` / `fateGlossary.ts` / `hexagrams.json` | 八字/紫微/干支/64 卦**纯浏览器本地计算** + 术语大白话注释 | 有"卦表系统性颠倒"前科，改命理表必须全量对拍权威源 |
 | `src/lib/identity.ts` / `fetchRetry.ts` / `theme.ts` / `lmstudio.ts` / `studyNotify.ts` | 设备身份 / 带重试取数 / 主题 / LM Studio 面板 / 课表通知 | — |
 | `src/store/useAppStore.ts` | zustand 全局状态（会话/消息/运行态/未读/置顶/页签顺序） | — |
-| `src/App.tsx` | 12 个页面视图装配，每页套 ErrorBoundary（坏一块不白全站） | — |
+| `src/App.tsx` | 11 个页面视图装配，每页套 ErrorBoundary（坏一块不白全站） | — |
 | `src/styles.css` | 单体样式表（约 2489 行，房间场景/主题变量都在这） | 尾部追加别重排 |
-| `src/components/` | 会话三件套 Sidebar/ChatStream/Composer + Topbar/TopNav/Room/Markdown/RanaArt；12 页面组件（SysPage/CronPage/ApprovalsPage/NewsPage/PlanningPage 四合一/BangumiPage/AppsPage/GroupsPage/DshPage/MemoryPage/**TracePage**🔍过程/CalendarPage）；面板弹窗（UsagePanel/SettingsModal/CloudConfigModal/LmStudioModal/SystemCleanupModal/ModelTuningCard/AgentKitCard） | 玄学子组件在 `apps/`（排盘/摇卦/万年历/术语） |
+| `src/components/` | 会话三件套 Sidebar/ChatStream/Composer + Topbar/TopNav/Room/Markdown/RanaArt；11 页面组件（SysPage/CronPage/ApprovalsPage/NewsPage/PlanningPage 四合一/BangumiPage/AppsPage/GroupsPage/MemoryPage/**TracePage**🔍过程/CalendarPage）；面板弹窗（UsagePanel/SettingsModal/CloudConfigModal/LmStudioModal/SystemCleanupModal/ModelTuningCard/AgentKitCard） | 玄学子组件在 `apps/`（排盘/摇卦/万年历/术语） |
 | `tests/unit/` + `vitest.config.ts` | 5 个测试文件共 **109 用例**：reasoning / fateCore / git-activity-lib / memory-bridge-parse / reconnect-backoff | `npm test` 跑 |
 | `vite.config.ts` | 仅约 35 行装配（react + buildServerPlugins + /gateway、/lmstudio 代理） | **别往里塞功能**，实现在 server/ |
 
@@ -94,7 +94,6 @@
 | bangumi.ts | `/__rana/bangumi/*` | 追番：今日放送/搜索/封面代理转发（60 分钟缓存，白名单 CDN） |
 | agent-info.ts | `GET /__rana/agent-info` | 技能+MCP 装备清单（CLI 子进程，按 agent 缓存 120s） |
 | qq-profile.ts | `GET /__rana/qq-profile` | 群画像**纯只读**展示 |
-| dsh-models.ts | `GET /__rana/dsh-models` | 读 WSL 里 DSH 的模型清单（读不到返回空） |
 | approvals.ts | `/__rana/approvals*` | 审批挂起卡/历史/长期许可（2026-09-22 起审批已整体关闭，页保留查询） |
 | context.ts | `GET /__rana/context` | 会话上下文体检（token 构成，只读） |
 | memory.ts | `/__rana/memory` | 记忆页读写（**白名单制**：key→路径映射在服务端，机器维护文件 editable=false） |
@@ -119,7 +118,7 @@
 | lib/agent-bridge.mjs / lib/rana-config.mjs | （共享库） | 三桥共享实现 / 状态目录定位+SecretRef 解析 |
 | cron-session-cleanup.mjs | 手动（会话页入口） | 系统会话清理手术 |
 | start-rana.cmd / start-gateway.cmd | 双击 | 一键启动（网关+Vite+浏览器）/ 网关启动器（顺带拉起两个看门狗，端口锁防多开） |
-| local-overrides.cmd（gitignore）/ local-config.json（gitignore） | — | 本机个性化覆盖；模板见 `.example.cmd` / `.example.json` |
+| local-overrides.cmd（gitignore） | — | 本机个性化覆盖；模板见 `.example.cmd` |
 | docs/observability.md | — | 可观测性字典（chat 五态/事件面/导出格式） |
 | design-mockups/ | — | v2 界面五版设计稿（纯 HTML 原型） |
 
@@ -238,6 +237,7 @@ npm run preview   # 生产预览（中间件同样挂载，token 端点除外—
 - **10-20**：群算卦断链三段案收口——自建 fate MCP 八工具（不开 exec）；exec 空 allowlist 空转修复；skills/ 公开母本（daily-report）。
 - **10-23 ~ 10-24**：tools/rp-soul-test 人格回归工具（智谱双档对比，未提交）。
 - **10-24**：面向 AI 文档体系落地（本地图谱/AGENTS 入口/台账索引）；真名脱敏手术——公开仓历史重写强推（**10-02 起 hash 全部换代，旧 hash 引用仅作时间线索**）；私有仓越权手术当日全部还原（详见台账 10-24 条目）。
+- **10-25**：腾讯云香港迁移批1 开工（方案=MIGRATION-PLAN-2026-10.md）：DSH/acpx 派活体系整体移除、LM Studio 服务性生态退役（面板保留给本地玩）、状态页拆「服务器/本机」两页、门禁放宽到 Tailscale、embedding 云端化、cron 全量 Linux 化、记忆正本留家+每日云→家同步。
 
 ---
 

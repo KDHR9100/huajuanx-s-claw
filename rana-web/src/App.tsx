@@ -18,7 +18,6 @@ import PlanningPage from "./components/PlanningPage";
 import BangumiPage from "./components/BangumiPage";
 import AppsPage from "./components/AppsPage";
 import GroupsPage from "./components/GroupsPage";
-import DshPage from "./components/DshPage";
 import MemoryPage from "./components/MemoryPage";
 import TracePage from "./components/TracePage";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -137,12 +136,6 @@ export default function App() {
             <main className="main">
               {connBanner}
               {page("群画像", <GroupsPage />)}
-            </main>
-          )}
-          {view === "dsh" && (
-            <main className="main">
-              {connBanner}
-              {page("派活", <DshPage />)}
             </main>
           )}
           {view === "memory" && (
