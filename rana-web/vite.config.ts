@@ -7,9 +7,6 @@ import { buildServerPlugins } from "./server/index";
 // 路径/配置/HTTP 小工具见 server/lib/*，各端点实现见 server/plugins/*。
 // 形态区分：家里 Windows(默认)保留本地模型面板/本机操作卡;云端以 RANA_HOST_PLATFORM=linux 启动时隐藏(见 src/lib/platform.ts)。
 export default defineConfig({
-  // RANA_ 前缀环境变量暴露给 import.meta.env(云端部署用 RANA_HOST_PLATFORM=linux 区分形态;
-  // define 注入方案在 dev 模式实测不生效导致白屏,故改走 env 通道)
-  envPrefix: ["RANA_", "VITE_"],
   plugins: [react(), ...buildServerPlugins()],
   server: {
     port: 5173,
