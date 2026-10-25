@@ -1,4 +1,4 @@
-# 家里电脑状态探针(手动小工具,不注册任何自启)——迁移后云端状态页「🏠家里电脑」卡的数据源。
+﻿# 家里电脑状态探针(手动小工具,不注册任何自启)——迁移后云端状态页「🏠家里电脑」卡的数据源。
 # 配置:同目录 home-probe.config.json({"url":"http://<云的Tailscale地址>:5173","token":"..."},gitignore,模板见 home-probe.config.example.json)
 # 用法:单次上报  powershell -File home-probe.ps1
 #       持续上报  powershell -File home-probe.ps1 -Loop   (每 60 秒一报,关窗口即停)

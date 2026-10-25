@@ -59,18 +59,21 @@ try {
 
 const tmpPath = outPath + ".part";
 let bytes = 0;
-using handle = fs.openSync(tmpPath, "w");
-const reader = res.body.getReader();
-for (;;) {
-  const { done, value } = await reader.read();
-  if (done) break;
-  fs.writeSync(handle, value);
-  bytes += value.byteLength;
-  if (totalHeader && bytes % (50 * 1024 * 1024) < value.byteLength) {
-    console.log(`  已收 ${(bytes / 1024 / 1024).toFixed(0)} MB …`);
+const fd = fs.openSync(tmpPath, "w");
+try {
+  const reader = res.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    fs.writeSync(fd, value);
+    bytes += value.byteLength;
+    if (totalHeader && bytes % (50 * 1024 * 1024) < value.byteLength) {
+      console.log(`  已收 ${(bytes / 1024 / 1024).toFixed(0)} MB …`);
+    }
   }
+} finally {
+  fs.closeSync(fd);
 }
-fs.closeSync(handle);
 fs.renameSync(tmpPath, outPath);
 
 // 只留最近 KEEP 份
