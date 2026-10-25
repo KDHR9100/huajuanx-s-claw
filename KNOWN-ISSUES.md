@@ -61,6 +61,12 @@
 
 ## 登记区
 
+## [已解决·切换夜战] 云端切换夜三坑——混血路径/配置指纹死锁/QQ令牌域漏白（2026-10-26 02:40）
+- 症状：切换夜（家停→云开渠道）网关反复拒启；①「Refusing to run gateway state preparation…config validity changed」死循环 21 次；②修完循环后 QQ 渠道「Network error getting access_token: operation was aborted」。
+- 根因：①字符串替换 openclaw.json 时把 MCP args 改成「/usr/lib/node_modules\\@model…」正反斜杠混血路径（schema 拒）；②快照带来的 `config-journal-fingerprint.key` 是家里配置指纹，云端多轮外部改 json 后每次启动都判「启动中被改」——**外部改云上 openclaw.json 后必须一并删该 key**；③QQ 取令牌走 `bots.qq.com`（不在初版白名单，api.sgroup.qq.com 之外还有它——微信能通纯属同段 IP 蹭进白名单）。
+- 解决方案：修法分别=结构化 node 遍历替换（禁内联 ssh+node -e 正则，转义地狱必踩）；改 json→rm config-journal-fingerprint.key→restart；白名单补 bots.qq.com/graph.qq.com/ilinkai.weixin.qq.com。**02:34 终态：QQ wss connected+gateway READY、微信 monitor started、网关 active（6 插件），她在云端正式上班。** 云端每日 03:30 自备份（/usr/local/sbin/cloud-daily-snapshot.sh，留 3 份）。
+- 状态：已闭环。遗留：云端 openclaw.json 仍有 13 处盘符文本残留在提示词字段（无害文本，不阻塞）；升级 openclaw 后此 json 的手工适配要重做一遍（load.paths/installDir/MCP 三处）。
+
 ## [已解决·迁移批1] 腾讯云迁移批1 本地代码改造五刀——含两处顺手排掉的雷（2026-10-25）
 - 症状：迁移准备（方案=MIGRATION-PLAN-2026-10.md）；勘探发现两处雷：①qq-profile.ts 硬编码小写 `K:/openclaw/...`（Windows 大小写不敏感侥幸能跑，Linux 必读不到）；②dev-config 的 `GET /__rana/config` **无任何校验明文下发网关 token**（本机回环时代没人够得着=无害，上云=钥匙挂门上）。
 - 根因：①当年手写路径笔误，被 Windows 文件系统大小写不敏感掩盖；②设计前提是「仅本机回环可达」，公网/Tailscale 部署下前提失效。
