@@ -2,7 +2,9 @@
 // 数据来自 /__rana/memory（白名单制：前端只传 key，key→路径映射在服务端，不接受传路径）。
 // 私密组 danger=true：进入和保存各有一次确认；内容仅本地 UI 展示。
 // 机器维护文件（MEMORY.md/共享纪要/巡检状态等）服务端标记 editable=false，保存会被 400 拒绝。
+// 2026-10-25 迁移批1 加「☁️ 云端同步」卡：家里(win32)=拉取按钮+上次拉取；云端(linux)=家里最后拉取时间。
 import { useCallback, useEffect, useState } from "react";
+import { HOST_IS_WINDOWS } from "../lib/platform";
 
 interface MemFile {
   key: string;
@@ -21,6 +23,86 @@ interface MemGroup {
 }
 
 const fmtSize = (n: number) => (n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`);
+const fmtMB = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
+const fmtAgo = (ts: number) => {
+  const min = Math.max(1, Math.round((Date.now() - ts) / 60000));
+  if (min < 60) return `${min} 分钟前`;
+  if (min < 60 * 24) return `${Math.round(min / 60)} 小时前`;
+  return `${Math.floor(min / 60 / 24)} 天前`;
+};
+
+interface SyncState {
+  platform?: string;
+  pulling?: boolean;
+  error?: string | null;
+  log?: string[];
+  local?: { lastPullAt?: number; file?: string; bytes?: number } | null;
+  cloud?: { lastPullAt?: number; totalBytes?: number } | null;
+}
+
+/** ☁️ 云端同步卡：家里(win32)=「现在拉取」按钮+上次拉取；云端(linux)=只显示家里最后拉取时间（拉取动作在家里发起，不放假按钮） */
+function CloudSyncCard() {
+  const [st, setSt] = useState<SyncState | null>(null);
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch("/__rana/cloud-sync");
+      setSt((await r.json()) as SyncState);
+    } catch {
+      setSt(null);
+    }
+  }, []);
+  useEffect(() => {
+    void load();
+    const t = window.setInterval(() => void load(), 15000);
+    return () => window.clearInterval(t);
+  }, [load]);
+
+  const pull = async () => {
+    try {
+      await fetch("/__rana/cloud-sync/pull", { method: "POST" });
+      setTimeout(() => void load(), 1000);
+    } catch {
+      /* 下轮轮询会看到状态 */
+    }
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 12 }}>
+      <h3 style={{ margin: "10px 14px 6px", fontSize: 14 }}>
+        <span className="ic">☁️</span>云端同步 <small style={{ color: "var(--text-dim)", fontWeight: 400 }}>记忆正本在家里 · 云端是运行副本</small>
+      </h3>
+      <div style={{ padding: "0 14px 12px" }}>
+        {HOST_IS_WINDOWS ? (
+          <>
+            <div className="kv">
+              <span className="k">上次拉回</span>
+              <span className="v">{st?.local?.lastPullAt ? `${fmtAgo(st.local.lastPullAt)}（${st.local.bytes ? fmtMB(st.local.bytes) : "—"}）` : "从没拉过"}</span>
+            </div>
+            <button
+              className="mem-save"
+              style={{ marginTop: 8, opacity: st?.pulling ? 0.6 : 1 }}
+              disabled={st?.pulling}
+              onClick={() => void pull()}
+            >
+              {st?.pulling ? "拉取中…" : "☁️ 拉回云端记忆"}
+            </button>
+            {st?.pulling && st?.log?.length ? <div className="plan-hint">{st.log[st.log.length - 1]}</div> : null}
+            {st?.error && <div className="set-error">⚠ {st.error}</div>}
+            <div className="plan-hint">快照存 rana-web\.migration-sync\，留最近 14 份；也可双击 tools\sync-now.cmd。</div>
+          </>
+        ) : (
+          <>
+            <div className="kv">
+              <span className="k">家里最后拉取</span>
+              <span className="v">{st?.cloud?.lastPullAt ? `${fmtAgo(st.cloud.lastPullAt)}（${st.cloud.totalBytes ? fmtMB(st.cloud.totalBytes) : "—"}）` : "家里还没来拉过"}</span>
+            </div>
+            <div className="plan-hint">拉取在家里电脑发起（开机自动一趟 / 双击 tools\sync-now.cmd / 本地页面按钮）。</div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function MemoryPage() {
   const [groups, setGroups] = useState<MemGroup[]>([]);
@@ -129,6 +211,7 @@ export default function MemoryPage() {
           <p>她的记忆与人设文件。可编辑的文件保存时自动留 .bak；「系统维护」文件只读（手改会被覆盖）。</p>
         </div>
         {loadErr && <div className="set-error">⚠ 读取文件树失败：{loadErr}</div>}
+        <CloudSyncCard />
         <div className="mem-wrap">
           <div className="card mem-tree">
             {groups.map((g) => (

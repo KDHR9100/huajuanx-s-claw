@@ -1,0 +1,5 @@
+{
+  "_说明": "复制本文件为 cloud-sync.config.json 并填写。真实配置含云端地址与 token,已 gitignore。token 与云端 rana-web/.env 里的 HOME_REPORT_TOKEN 保持一致。",
+  "url": "http://100.x.y.z:5173",
+  "token": "与云端 HOME_REPORT_TOKEN 相同的值"
+}

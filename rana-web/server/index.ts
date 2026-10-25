@@ -20,6 +20,7 @@ import { ranaApprovalsMiddleware } from "./plugins/approvals";
 import { ranaMemoryMiddleware } from "./plugins/memory";
 import { ranaTrajectoryMiddleware } from "./plugins/trajectory";
 import { bridgeSyncMiddleware } from "./plugins/bridge-sync";
+import { cloudSyncMiddleware } from "./plugins/cloud-sync";
 
 /** 按原有顺序装配全部 /__rana 中间件（react() 由 vite.config.ts 自行前置）。 */
 export function buildServerPlugins(): Plugin[] {
@@ -45,5 +46,6 @@ export function buildServerPlugins(): Plugin[] {
     ranaMemoryMiddleware(),
     ranaTrajectoryMiddleware(),
     bridgeSyncMiddleware(),
+    cloudSyncMiddleware(),
   ];
 }

@@ -56,3 +56,5 @@ rana-web/local-config.json
 # Git 活动报告产物（含 WSL 私人仓库提交标题，不入公开仓库）
 rana-web/.git-activity/
 tools/home-probe.config.json
+cloud-sync.config.json
+.migration-sync/
