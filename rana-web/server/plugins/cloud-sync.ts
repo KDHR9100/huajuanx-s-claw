@@ -17,7 +17,6 @@ import type { Plugin } from "vite";
 export function cloudSyncMiddleware(): Plugin {
   const IS_WIN = process.platform === "win32";
   const HERE = RANA_WEB;
-  const SYNC_DIR = path.join(HERE, ".migration-sync");
   const LOCAL_STATE_FILE = path.join(HERE, ".health", "home-sync-state.json"); // 家里:上次拉取记录
   const CLOUD_STATE_FILE = path.join(HERE, ".health", "cloud-sync-state.json"); // 云端:最近被拉取记录
   const STATUS = { pulling: false, startedAt: 0, updatedAt: 0, log: [] as string[], error: null as string | null };
