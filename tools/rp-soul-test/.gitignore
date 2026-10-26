@@ -1,0 +1,4 @@
+# 报告内容是 RP 回答（源自私有人格文件），与 rp-eval/ 同类，不进公开仓库
+reports/
+# Python 字节码缓存（仓库根 .gitignore 未覆盖，防 push-public 全量收编）
+__pycache__/
