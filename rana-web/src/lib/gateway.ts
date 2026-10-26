@@ -84,6 +84,23 @@ function mapServerAttachments(m: Record<string, unknown>): ChatAttachment[] | un
   return out.length ? out : undefined;
 }
 
+/**
+ * 初始 WebSocket 地址：按「页面从哪来」决定连哪台网关。
+ * - 页面由本机 vite 直接打开（localhost/127.0.0.1）→ 走本机网关 127.0.0.1:18789；
+ * - 其余情况（云端页面、内网穿透地址、局域网 IP）→ 走同源 /gateway 代理，由该页面自己的服务端转发。
+ * 不这么分会出现两类事故：①浏览器里的 127.0.0.1 永远指「看页面那台机器」，家里开着网关时
+ * 打开云端页面会连到家里那台（数据串台）；②该网关不认云端来源，直接回
+ * INVALID_REQUEST: origin not allowed。
+ */
+function resolveInitialWsUrl(): string {
+  if (typeof location === "undefined") return "ws://127.0.0.1:18789";
+  const { protocol, hostname, host } = location;
+  const isLocalPage =
+    hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+  if (isLocalPage) return "ws://127.0.0.1:18789";
+  return `${protocol === "https:" ? "wss" : "ws"}://${host}/gateway`;
+}
+
 class GatewayConnection {
   private ws: WebSocket | null = null;
   private reqSeq = 0;
@@ -91,7 +108,7 @@ class GatewayConnection {
   private reconnects = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private manualClose = false;
-  private wsUrl = "ws://127.0.0.1:18789";
+  private wsUrl = resolveInitialWsUrl();
   private token = "";
   private hello: HelloOk | null = null;
   private connecting: Promise<void> | null = null;

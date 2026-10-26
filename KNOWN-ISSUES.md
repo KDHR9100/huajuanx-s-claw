@@ -47,6 +47,8 @@
 | 前端白屏/闪回/显示错 | `白屏`、`闪回`、`气泡弹两遍`、`页签不可达`、`闰`、`复读` |
 | cron 不跑/静默停摆 | `store 孤儿`、`静默降级`、`水位`、`罐头话`、`timed out`、`did not finish stopping` |
 | 备份/git 推送挂死 | `100MB`、`winnat`、`TLS connect`、`ECONNRESET`、`静默失败` |
+| Tailscale/内网穿透不通 | `rx 0`、`DERP`、`3478`、`home DERP`、`lax`、`LastHandshake` |
+| WebUI 报来源被拒/连错网关 | `origin not allowed`、`allowedOrigins`、`publicOrigin`、`rewriteWsOrigin`、`18789`、`webchat connected` |
 | Windows 环境怪癖 | `GBK`、`heredoc`、`反斜杠`、`DPI`、`IAB` |
 | 升级 openclaw/补丁重打 | `升级`、`重打`、`schema 24`、`dist 补丁`、`allowlist` |
 | 隐私/安全/闸门 | `pmgate`、`私密`、`脱敏`、`Mimosa`、`审查` |
@@ -60,6 +62,31 @@
 ***
 
 ## 登记区
+
+## [已解决] 云端页面报 INVALID_REQUEST: origin not allowed——前端硬编码 127.0.0.1:18789 连到了「看页面那台机器」的网关（2026-10-26，紧接 5173 三重案之后）
+- 症状：Tailscale 修好后浏览器能打开 `http://100.69.115.62:5173`，但页面横幅报 `INVALID_REQUEST: origin not allowed (use gateway.publicOrigin with allowedOrigins omitted, or allow this origin in gateway.controlUi.allowedOrigins)`，点「重新连接」无效。
+- 根因（两层，缺一不可）：
+  1. **前端连错网关**（主因）：`rana-web/src/lib/gateway.ts` 的 `wsUrl` 硬编码 `ws://127.0.0.1:18789`，只在 `onopen` 前超时才回退到同源 `/gateway`。浏览器里的 `127.0.0.1` 指**看页面那台机器**——家里也跑着网关（`127.0.0.1:18789` LISTENING），于是云端页面实际连的是**家里网关**，它不认来源 `http://100.69.115.62:5173` → 报错；因 WS 已 open，不会触发回退，永远重连不上（数据也会串台）。
+  2. **云端网关白名单缺项**：vite `/gateway` 代理设了 `rewriteWsOrigin: true`，网关看到的 `Origin` 被改写为 `http://127.0.0.1:18789`，而 `Host` 仍是 `100.69.115.62:5173`（两者不一致，同源规则失效）；网关把「回环连接带非本地 Host」按远程处理（日志 `Loopback connection with non-local Host header. Treating it as remote`），只剩 `allowedOrigins` 一条路，而旧值只有 `localhost:5173`/`127.0.0.1:5173`。迁移方案 §4.4「补 Tailscale 地址」一直没落地。
+- 解决方案：
+  - 前端 `gateway.ts` 新增 `resolveInitialWsUrl()`：页面 host 是 localhost/127.0.0.1 才直连 `127.0.0.1:18789`，其余（云端地址/局域网 IP/穿透域名）一律走 `ws(s)://${location.host}/gateway` 同源代理。本地页行为不变。
+  - 云端 `openclaw.json` 的 `gateway.controlUi.allowedOrigins` 补 `http://100.69.115.62:5173`、`http://127.0.0.1:18789`、`http://localhost:18789`（原两条保留）；用 `openclaw config patch --file` 写入，验证走 `--dry-run`，网关**热重载**生效（日志 `[reload] config hot reload applied (gateway.controlUi.allowedOrigins)`，无需重启）。
+  - 两处都已备份：`gateway.ts.bak-1026-2059`（云端）、`openclaw.json.bak-1026-2054`（云端）。
+- 验证证据：家里用 `ws` 模块复刻前端 `connect` RPC（client `webchat-ui`），Origin `http://127.0.0.1:18789` + Host `100.69.115.62:5173` 经云端 vite 代理 → 网关日志 `webchat connected`；但对**家里网关**同款参数则精确复现 `INVALID_REQUEST: origin not allowed`（bogus token 也先报来源错，证明来源校验早于鉴权）。
+- 教训：①浏览器环境里 `127.0.0.1` 是「客户端本机」，任何跨机访问都要走同源代理，不能直连回环端口；②`rewriteWsOrigin` 会让网关看到的是**改写后**的 Origin，白名单必须按改写值配；③复现 WebSocket 类问题要带 `Sec-Fetch-*`/UA 头且**经真实代理链路**，否则 `ws` 直连拿到的 101 是假阳性；④排障时先看 `journalctl -u openclaw-gateway`，日志里 `origin=`/`host=` 会把整条链路摊开。
+- 状态：已解决（待主人浏览器硬刷新确认）。
+
+## [已解决·迁移批0-3收尾] 云端 5173 打不开三重案——出站白名单 19 个假 DERP 域名+STUN 3478 未放行+家里 home DERP 在 lax 不在白名单（2026-10-26，交接书 HANDOFF-WORKBUDDY-20261026.md）
+- 症状：主人浏览器打不开 `http://100.69.115.62:5173`（Tailscale IP）；家里 tailscale status 云端 `active; relay "hkg", tx 5772 rx 0` 只发不收；双向 tailscale ping 超时；服务器 `tailscale netcheck` 报 `UDP: false / Nearest DERP: unknown`。前端/网关/入站防火墙全排除了（交接书已证）。
+- 根因（三层叠加，全部在**服务器出站侧**）：
+  ① `refresh-wan-allow.sh` 白名单里 19 个 DERP 域名**全部不存在**（`derp-hkg.tailscale.com` 按城市命名是猜错的；真实命名=derp<RegionID><字母>，如 derp20b=香港，官方 map：`https://controlplane.tailscale.com/derpmap/default`）→ 每小时刷新解析全空，DERP IP 从未进白名单，TCP 443 到 DERP 全被挡；
+  ② output 链无 UDP 3478（STUN），netcheck 全灭；且 nftables.conf 里 `oifname tailscale0` 注释「含 DERP/控制面经隧道流量」是**误解**——DERP 走公网口不走 tailscale0；
+  ③ 修完①②仍半通（disco pong 通、载荷死）：**家里节点 home DERP 实测在 lax(region 17)**，服务器日志刷 `derp.Send(127.3.3.40:17) region 17 (lax): context deadline exceeded` → WireGuard 握手永远完不成（status --json 里 `LastHandshake=零值`），disco pong 偶经 region 互联转发造成「ping 通」假象。
+- 解决方案（全部纯加法，可回滚）：`/etc/nftables.conf` v3 加 `ip daddr @wan_allow_v4 udp dport 3478 accept`（STUN 仅限白名单目的地）+修正误导注释；refresh 脚本 v3 域名换真实 hkg(20)×3/tok(7)×4/sin(3)×4，实测后再补 lax(17)×3+sfo(2)×3（家里 home DERP 漂移备选）；服务器侧备份三件套（~/nft-backup-1026-1956.conf / ~/nftables.conf.bak-1026-1956 / ~/refresh-wan-allow.sh.bak-1026-1956）。终态：服务器 netcheck `UDP:true, Nearest=hkg 3ms`、双向 pong、家→云 5173 HTTP 200 三连稳定 0.6s、/gateway 200。留档同步：`~/.ssh/nftables-rana-v3.conf` + `~/.ssh/refresh-wan-allow.sh`。
+- 排障干扰项（记档防再踩）：①家里 WorkBuddy 沙箱 `sandbox-cli` 会向工具 shell 注入 `HTTP_PROXY=127.0.0.1:12802`，curl/Go 程序测内网服务会被劫持回 **502 "upstream connect failed"**（冒充 Vite 报错！），一律 `curl --noproxy '*'`；`tailscale nc` 等部分子命令也被劫持；系统注册表代理 ProxyEnable=0 与此无关。②云→家 5173 超时属预期（家里 vite 仅 localhost + Windows 防火墙挡入站），非故障不修。
+- 遗留：①手机节点（vivo-v2509a）离线 11h 未验证，下次上线自动受益；②家里 home DERP 若再漂到其他 region（fra/ams 等），往 WHITE 里补对应 derp<id><字母> 域名即可，别猜城市名；③服务器 tailscaled 已重启过一次（施工措施，SSH 走公网 22 无风险）；④journalctl 偶见 `bootstrapDNS("derpXX") for "log.tailscale.com": context deadline exceeded` 属**良性噪音**——log.tailscale.com 无公网 A 记录，是 Tailscale 设计为经各 DERP 的 /bootstrap-dns 解析的，与白名单策略无关，不影响任何功能，别为它放行全部 DERP region。
+- 教训：①Tailscale DERP 主机名=derp<RegionID><字母>，**别按城市名猜**；②`tailscale ping` 通≠数据面通——disco 不需要 WireGuard 会话、载荷需要，握手看 `status --json` 的 `LastHandshake` 是否零值；③两节点 home DERP 可选不同 region（家=lax 云=hkg），出站白名单必须**双向 region 覆盖**；④交接书里「DERP 域名解析为空」推断有误——域名本身不存在，服务器 DNS 是好的（dig 真名秒出）。
+- 状态：已解决（家→云 5173 三连 200 验收，2026-10-26 20:30）。
 
 ## [已解决·切换夜战] 云端切换夜三坑——混血路径/配置指纹死锁/QQ令牌域漏白（2026-10-26 02:40）
 - 症状：切换夜（家停→云开渠道）网关反复拒启；①「Refusing to run gateway state preparation…config validity changed」死循环 21 次；②修完循环后 QQ 渠道「Network error getting access_token: operation was aborted」。
