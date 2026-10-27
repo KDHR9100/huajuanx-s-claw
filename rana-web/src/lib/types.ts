@@ -42,6 +42,8 @@ export interface SessionRow {
   title?: string;
   updatedAt?: number;
   model?: string;
+  /** 会话当前模型所属 provider（服务端 modelProvider 字段，model 本身是裸名） */
+  modelProvider?: string;
   totalTokens?: number;
   inputTokens?: number;
   outputTokens?: number;
@@ -110,3 +112,20 @@ export function modelSuffix(id?: string): string {
   if (!id) return "";
   return id.split("/").pop() ?? id;
 }
+
+/** 选择器条目 → 服务端可解析的模型引用（provider 已知时带前缀；裸名会落到 agent 默认 provider） */
+export function modelRef(m: { id: string; provider?: string }): string {
+  return m.provider ? `${m.provider}/${m.id}` : m.id;
+}
+
+/** 会话当前模型是否指向该条目：provider 与裸名都比，缺一侧时退回裸名比较 */
+export function isSameModel(
+  currentModel: string | undefined,
+  currentProvider: string | undefined,
+  m: { id: string; provider?: string },
+): boolean {
+  if (!currentModel) return false;
+  if (modelSuffix(currentModel) !== modelSuffix(m.id)) return false;
+  return !currentProvider || !m.provider || currentProvider === m.provider;
+}
+

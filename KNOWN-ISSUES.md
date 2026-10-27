@@ -63,6 +63,16 @@
 
 ## 登记区
 
+## [已解决] 顶栏模型选择器与左下角「云端模型」档案不一致——选择只发裸模型名，provider 被落到 agent 默认接口（2026-10-27）
+- 症状：右下/左下「云端模型（多接口档案）」里同一模型按 provider 分别录入（如 `qwen3.8-flash` 同时在 `aliyun-maas`、`qwenanliang`），顶栏 ⚡ 选择器也按 provider 分组列出；但在顶栏点某个档案下的模型后，实际生效的接口不是点的那家；且多个同名条目会一起高亮。
+- 根因（两层）：
+  1. `Topbar.tsx` 的 `apply` 把目录行的**裸 id**（gateway `models.list` 返回 `id=glm-5.3`、`provider` 单独字段）直接发 `sessions.patch {model}`；服务端会把裸名解析到 **agent 默认 provider**，与点击行所属 provider 无关（实测：`sessions.patch model:"qwen3.8-flash"` → `modelProvider=glm`，而点的是 aliyun-maas/qwenanliang）。`isActive` 也只比裸名，故跨 provider 同名模型全部高亮。
+  2. 前端 `SessionRow` 未接 `modelProvider`，`setModel` 也不回填 provider，UI 无法区分同名模型。
+- 解决方案（2026-10-27 两批）：① `types.ts` 抽出 `modelRef(m)=provider/id` 与 `isSameModel()`；`Topbar.tsx` 的 apply/连通测试缓存键/React key 全用完整引用，`isActive` 同时比 provider；`gateway.setModel` 回填 provider；`refreshSessions` 接 `modelProvider`。② 同 bug 残留点一并修：`PlanningLibrary.tsx` 选项改 `provider/id` 并把 `life.model.v1` 旧裸名自动迁移；`StudyPage.tsx` 排课模型用 `modelProvider/model` 拼回完整引用（服务端 `study.ts` 的 model 白名单正则 `[A-Za-z0-9:./_-]+` 本就允许 `/`）。③ 数据订正：`aliyun-maas`/`bailian`/`qwenanliang` 的 `glm-5.3` 显示名统一为 `GLM-5.3`，网关热重载后已核实。
+- 验证证据：用 `ws` 复刻 `connect`（Ed25519 设备签名 + 网关 token）后实测：`sessions.patch model:"qwenanliang/qwen3.8-flash"` → `modelProvider=qwenanliang`；同一条会话发裸名 `qwen3.8-flash` → `modelProvider=glm`（复现错配）。新增 `tests/unit/model-ref.test.ts` 8 条；`npm test` 117/117、`tsc -b` 通过。
+- 存档/回滚：源码备份 `*.bak-1027-2112`，运行时配置备份 `openclaw.json.bak-1027-modelname`（状态目录）。
+- 状态：已解决。注意：旧页面缓存里 `modelProvider` 为空时会退回裸名比较，刷新一次即恢复精确高亮。
+
 ## [已解决] 云端页面报 INVALID_REQUEST: origin not allowed——前端硬编码 127.0.0.1:18789 连到了「看页面那台机器」的网关（2026-10-26，紧接 5173 三重案之后）
 - 症状：Tailscale 修好后浏览器能打开 `http://100.69.115.62:5173`，但页面横幅报 `INVALID_REQUEST: origin not allowed (use gateway.publicOrigin with allowedOrigins omitted, or allow this origin in gateway.controlUi.allowedOrigins)`，点「重新连接」无效。
 - 根因（两层，缺一不可）：

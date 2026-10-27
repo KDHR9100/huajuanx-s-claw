@@ -564,6 +564,7 @@ class GatewayConnection {
         title: String(r.label ?? r.displayName ?? r.derivedTitle ?? r.key),
         updatedAt: (r.updatedAt as number) ?? (r.lastActivityAt as number),
         model: r.model ? String(r.model) : undefined,
+        modelProvider: r.modelProvider ? String(r.modelProvider) : undefined,
         inputTokens: r.inputTokens as number | undefined,
         outputTokens: r.outputTokens as number | undefined,
         totalTokens: r.totalTokens as number | undefined,
@@ -712,8 +713,12 @@ class GatewayConnection {
   async setModel(sessionKey: string, model: string) {
     try {
       const res = (await this.request("sessions.patch", { key: sessionKey, model })) as Record<string, unknown>;
-      const resolved = (res.model as string) ?? model;
-      store().mergeSession({ key: sessionKey, model: resolved });
+      // 服务端把 provider 与裸模型名分开存（modelProvider / model），响应里的 model 是裸名；
+      // 传 "provider/id" 时按入参回填 provider，避免 UI 只记住裸名导致同名模型分不清接口。
+      const slash = model.indexOf("/");
+      const provider = slash > 0 ? model.slice(0, slash) : undefined;
+      const resolved = (res.model as string) ?? (slash > 0 ? model.slice(slash + 1) : model);
+      store().mergeSession({ key: sessionKey, model: resolved, ...(provider ? { modelProvider: provider } : {}) });
     } catch (e) {
       console.warn("[gateway] sessions.patch 失败:", e);
       throw e;
