@@ -4,7 +4,7 @@ import { generateKeyPairSync, sign as cryptoSign, createHash, randomUUID } from 
 // @ts-ignore —— ws 无类型声明（仅服务端中间件用）
 import WebSocket from "ws";
 import { buildDeviceAuthPayloadV3 } from "@openclaw/gateway-client/browser";
-import { readGatewayToken } from "../lib/paths";
+import { readGatewayToken, OPENCLAW_CONFIG, STATE_HOME } from "../lib/paths";
 import type { Plugin } from "vite";
 
 /**
@@ -80,7 +80,7 @@ const parseContextReport = (text: string) => {
 /** agentId → 工作区目录（openclaw.json 显式配置优先，缺省按约定路径推） */
 const resolveAgentWorkspace = (agentId: string): string => {
   try {
-    const cfg = JSON.parse(fs.readFileSync("K:\\openclaw\\.openclaw\\.openclaw\\openclaw.json", "utf8")) as {
+    const cfg = JSON.parse(fs.readFileSync(OPENCLAW_CONFIG, "utf8")) as {
       agents?: { entries?: Record<string, { workspace?: string }> };
     };
     const ws = cfg.agents?.entries?.[agentId]?.workspace;
@@ -88,7 +88,7 @@ const resolveAgentWorkspace = (agentId: string): string => {
   } catch {
     /* 配置读不到走约定路径 */
   }
-  return `K:\\openclaw\\.openclaw\\.openclaw\\workspace-${agentId}`;
+  return path.join(STATE_HOME, `workspace-${agentId}`);
 };
 
 /** 该 agent 会话注入、但 /context 临时会话估算不到的底稿文件（中文按 chars/4 粗算，与官方口径一致）。
