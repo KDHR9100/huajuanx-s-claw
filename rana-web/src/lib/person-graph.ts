@@ -11,7 +11,7 @@ export function escLabel(s: string): string {
     .replace(/>/g, "＞");
 }
 
-/** 数据 -> mermaid flowchart 定义（星型拓扑：所有节点连中心，按圈层 subgraph 分组）。 */
+/** 数据 -> mermaid flowchart 定义。星型（全员连中心）+ 连线表的人物/事件间连线。 */
 export function buildMermaidDef(data: PersonGraphData, centerLabel = "轩瑜"): string {
   const lines: string[] = ["graph LR", `  XY(("${escLabel(centerLabel)}"))`];
   const groups = new Map<string, number[]>();
@@ -32,8 +32,18 @@ export function buildMermaidDef(data: PersonGraphData, centerLabel = "轩瑜"): 
     data.events.forEach((e, k) => lines.push(`    ev${k}["${escLabel(e.name)}"]`));
     lines.push("  end");
   }
+  const idByName = new Map<string, string>();
+  data.people.forEach((p, k) => idByName.set(p.name, `n${k}`));
+  data.events.forEach((e, k) => idByName.set(e.name, `ev${k}`));
   for (let k = 0; k < data.people.length; k++) lines.push(`  XY --- n${k}`);
   data.events.forEach((_, k) => lines.push(`  XY --- ev${k}`));
+  const links = Array.isArray(data.links) ? data.links : [];
+  for (const l of links) {
+    const a = idByName.get(l.a);
+    const b = idByName.get(l.b);
+    if (!a || !b || a === b || l.a === centerLabel || l.b === centerLabel) continue; // 中心已星型全连，对不上的静默跳过
+    lines.push(l.note ? `  ${a} ---|${escLabel(l.note)}| ${b}` : `  ${a} --- ${b}`);
+  }
   lines.push(`  classDef center fill:#77DD77,stroke:#4a9e57,color:#000;`);
   lines.push("  class XY center");
   return lines.join("\n");

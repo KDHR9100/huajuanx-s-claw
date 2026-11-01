@@ -64,6 +64,18 @@
 
 ## 登记区
 
+## [已解决] canon-rag 检索钩子被信任机制拦截——allowConversationAccess 缺失，RAG 注入静默不生效（2026-11-01）
+- 症状：canon-rag 在 plugins.allow 白名单且 CLI 显示 enabled，但启动日志报 `[plugins] typed hook "before_prompt_build" blocked ... must set plugins.entries.canon-rag.hooks.allowConversationAccess=true`，RAG 检索注入（prependContext）静默不工作；插件本体照常出现在激活列表（"5 plugins"），极难察觉。
+- 根因：openclaw 对**非内置插件的会话访问钩子**有独立开关（与 plugins.allow 信任机制是两道门）：`plugins.entries.<id>.hooks.allowConversationAccess=true`，缺省拒绝。canon-rag 只配了 allow 白名单，没建 entries 条目。
+- 解决方案：`openclaw.json` 的 `plugins.entries` 加 `"canon-rag": {"enabled": true, "hooks": {"allowConversationAccess": true}}`（备份 openclaw.json.bak-convaccess-20261101），重启网关后 WARN 消失、probe 日志出现（`canon-rag probe: agentId=... eventKeys=prompt|messages`）。**排障抓手：启动日志 grep "blocked"——钩子被拦只打 WARN 不报错**。
+- 状态：已解决（11-01 三启网关验证）。
+
+## [已解决] LM Studio server 未启动 → canon-rag 重建索引循环失败 code=1（2026-11-01）
+- 症状：canon-rag 启动后每 2 秒打 `source changed, rebuilding index... → rebuild failed code=1, keep old index`，无限重试；手动 `node build-index.mjs` 尾部 `[fail] fetch failed`。
+- 核因：LM Studio 应用开着但 **server 功能没开**（`lms server status` = not running；embedding 看门狗只管模型实例数/ctx 参数，不管 server 开关）——embedding 端点 :1234 无人监听，build-index 调 /v1/embeddings fetch failed。
+- 解决方案：`lms.exe server start`（或 LM Studio 界面开 server）；看门狗 60s 内自动按标准参数（ctx=2048 纯 CPU）加载 embedding 模型，canon-rag 指纹机制自动重建成功（1071 块）。**排障抓手：先 `lms server status` 再查模型**；应用开≠server 开。
+- 状态：已解决（11-01 手动拉起+自动闭环验证）。
+
 ## [未解决·暂不修] 10-26 重启后 Hypervisor 未恢复——WSL2 全线起不来，git 统计 WSL 仓持续跳过（2026-10-28）
 - 症状：10-28 21:33 git 活动统计班：5 仓中 WSL 侧 4 个（ragwei/psychology_project/MP4/CrossLister）全部 `git -C \\wsl.localhost\Ubuntu-22.04\...` 读取失败跳过；主会话手工验证 `wsl -d Ubuntu-22.04` 报 `HCS_E_HYPERV_NOT_INSTALLED`（虚拟机平台或 hypervisor 未运行），`\\wsl.localhost` 整个路径不存在。`wsl -l -v`：Ubuntu-22.04 与 docker-desktop 均在（Stopped）——发行版本体没丢，是虚拟机层没起来。
 - 根因：BIOS 虚拟化开（`VirtualizationFirmwareEnabled=True`）、vmcompute 服务 Running，但 `HypervisorPresent=False`。9-11 起主人玩《三角洲行动》时腾讯 ACE 反作弊要求关虚拟化（USER.md 环境节有档）；这类关闭落在启动配置（hypervisorlaunchtype），**重启不会自动恢复**——10-26 凌晨切换夜重启后 hypervisor 一直没起来，git 统计的 WSL 仓因此持续跳过。（bcdedit 具体值需管理员读，本轮未实测确认；四项旁证一致。）

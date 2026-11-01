@@ -35,3 +35,27 @@ describe("buildMermaidDef", () => {
     expect(def).not.toContain("SGEV");
   });
 });
+
+describe("buildMermaidDef 连线", () => {
+  it("两端对上号成边带说明；对不上/连中心/自环静默跳过；无 links 字段不炸", () => {
+    const def = buildMermaidDef({
+      lastChecked: null,
+      people: [{ name: "测试甲", group: "家人", blurb: "", relation: "", source: "" }],
+      events: [{ name: "测试事件三", status: "", people: "", source: "" }],
+      links: [
+        { a: "测试事件三", b: "测试甲", note: "事件挂人" },
+        { a: "测试甲", b: "不存在的人", note: "这个跳过" },
+        { a: "测试甲", b: "轩瑜", note: "中心跳过" },
+        { a: "测试甲", b: "测试甲", note: "自环跳过" },
+      ],
+    }, "轩瑜");
+    expect(def).toContain("---|事件挂人|");
+    expect(def).not.toContain("这个跳过");
+    expect((def.match(/XY ---/g) || []).length).toBe(2);
+  });
+
+  it("links 缺字段（老调用方）不炸", () => {
+    const def = buildMermaidDef(DATA, "测试中心");
+    expect(def).toContain("XY --- n0");
+  });
+});

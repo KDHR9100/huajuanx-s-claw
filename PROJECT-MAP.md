@@ -97,7 +97,7 @@
 | approvals.ts | `/__rana/approvals*` | 审批挂起卡/历史/长期许可（2026-09-22 起审批已整体关闭，页保留查询） |
 | context.ts | `GET /__rana/context` | 会话上下文体检（token 构成，只读） |
 | memory.ts | `/__rana/memory` | 记忆页读写（**白名单制**：key→路径映射在服务端，机器维护文件 editable=false） |
-| person-graph.ts | `GET /__rana/person-graph`、`/source` | 人物·事件图谱：graph.md 两张表→结构化数据给记忆页「🕸 人物图谱」画 mermaid 星型图（**路径写死只放行 graph.md**，personal/ 其余文件零暴露；ADR-0001） |
+| person-graph.ts | `GET /__rana/person-graph`、`/source`、`POST /save` | 人物·事件图谱：graph.md 三张表（人物/事件/连线）→结构化数据给记忆页「🕸 人物图谱」画图（节点间连线+点击弹卡+✏️编辑原文：回环+.bak+2MB；**路径写死只放行 graph.md**，personal/ 其余文件零暴露；ADR-0001） |
 | bridge-sync.ts | `/__rana/bridge-sync` | 🔗 记忆同步按钮：启动/轮询双桥一轮 |
 | sessions-cleanup.ts | `/__rana/sessions-cleanup` | 系统会话清理手术（--dry-run 只盘点） |
 | trajectory.ts | `/__rana/trajectory` | 🔍 过程页：按 run 导出会话轨迹（events.jsonl，瘦身 2137KB→212KB） |

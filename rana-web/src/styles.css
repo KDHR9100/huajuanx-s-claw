@@ -2469,3 +2469,8 @@ label.lib-cand { cursor: pointer; }
   border: 1px solid var(--danger); background: transparent; color: var(--danger); font-size: 12px;
 }
 .conn-retry-btn:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+
+/* 人物图谱：节点可点击弹卡片 */
+.pg-clickable g.node {
+  cursor: pointer;
+}

@@ -6,6 +6,7 @@ import {
   parseLastChecked,
   parsePeopleTable,
   parseEventsTable,
+  parseLinksTable,
   parsePersonGraph,
 } from "../../server/lib/person-graph-parse.ts";
 
@@ -89,5 +90,29 @@ describe("parsePersonGraph 整页入口", () => {
   it("error 字段只在文件级问题时出现（本组不触发）", () => {
     const r = parsePersonGraph("");
     expect(r.error).toBeUndefined();
+  });
+});
+
+describe("parseLinksTable", () => {
+  it("正常两行 + 缺端点的行跳过", () => {
+    const sec = "| 人物A | 人物B | 一句话 |\n|---|---|---|\n| 测试甲 | 测试乙 | 甲乙同事 |\n| 测试甲 |  | 缺B跳过 |\n";
+    const r = parseLinksTable(sec);
+    expect(r.length).toBe(1);
+    expect(r[0]).toEqual({ a: "测试甲", b: "测试乙", note: "甲乙同事" });
+  });
+
+  it("没有连线小节 -> 空数组（老数据无感）", () => {
+    expect(parseLinksTable("")).toEqual([]);
+  });
+});
+
+describe("parsePersonGraph 连线整合", () => {
+  it("三张表一起解析 + CRLF", () => {
+    const md = "## 人物节点\r\n\r\n| 节点 | 圈层 | 一句话 | 与轩瑜 | 来源 |\r\n|---|---|---|---|---|\r\n| 测试己 | 家人 | 一句话己 | 亲缘 | 11/05 |\r\n\r\n## 事节点\r\n\r\n| 事件 | 状态 | 关联人 | 来源 |\r\n|---|---|---|---|\r\n| 测试事件二 | 进行中 | 测试己 | 11/05 |\r\n\r\n## 连线\r\n\r\n| 人物A | 人物B | 一句话 |\r\n|---|---|---|\r\n| 测试事件二 | 测试己 | 己挂在事件二上 |\r\n";
+    const r = parsePersonGraph(md);
+    expect(r.people.length).toBe(1);
+    expect(r.events.length).toBe(1);
+    expect(r.links.length).toBe(1);
+    expect(r.links[0]).toEqual({ a: "测试事件二", b: "测试己", note: "己挂在事件二上" });
   });
 });

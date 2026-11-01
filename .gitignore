@@ -39,6 +39,8 @@ rana-web/private-memory-bridge.mjs
 rp-eval/
 # RP 微调：数据管线、数据集（含真实 NSFW RP 日志）、训练配置与产物，全部本地
 rp-tune/
+# 会话交接书（含私密工程叙述、主人待办与原作台词讨论，不入公开仓库）
+HANDOFF-*.md
 
 # LM Studio 控制台（本地模型加载管理，node_modules 不入库）
 node_modules/

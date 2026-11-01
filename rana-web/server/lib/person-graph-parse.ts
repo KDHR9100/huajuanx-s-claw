@@ -119,9 +119,10 @@ export function parsePersonGraph(md: string): PersonGraphData {
       lastChecked: parseLastChecked(md),
       people: parsePeopleTable(sectionOf(md, "人物节点")),
       events: parseEventsTable(sectionOf(md, "事节点")),
+      links: parseLinksTable(sectionOf(md, "连线")),
     };
   } catch (e) {
-    return { lastChecked: null, people: [], events: [], error: (e as Error).message };
+    return { lastChecked: null, people: [], events: [], links: [], error: (e as Error).message };
   }
 }
 
@@ -129,5 +130,34 @@ export interface PersonGraphData {
   lastChecked: string | null;
   people: PersonNode[];
   events: EventNode[];
+  links: LinkEdge[]; // 人物/事节点之间的连线（星型中心连线另由前端生成）
   error?: string; // 文件不可读等整页级问题；表格级坏行不算
+}
+
+export interface LinkEdge {
+  a: string; // 人物A（须与人物/事节点名一致，对不上的边前端静默跳过）
+  b: string; // 人物B
+  note: string; // 一句话说明（画在连线标签上）
+}
+
+/** 解析连线表（## 连线：人物A|人物B|一句话）。 */
+export function parseLinksTable(sec: string): LinkEdge[] {
+  const rows = tableRows(sec);
+  if (rows.length === 0) return [];
+  const idx = headerIndex(rows[0], ["人物A", "人物B", "一句话"]);
+  if (!idx.has("人物A") || !idx.has("人物B")) return [];
+  const get = (cells: string[], key: string): string => {
+    const i = idx.get(key);
+    return i === undefined ? "" : (cells[i] ?? "");
+  };
+  const out: LinkEdge[] = [];
+  for (const cells of rows.slice(1)) {
+    if (cells.every((c) => c === "")) continue;
+    if (/^:?-{3,}:?$/.test(cells[0])) continue;
+    const a = get(cells, "人物A");
+    const b = get(cells, "人物B");
+    if (!a || !b) continue;
+    out.push({ a, b, note: get(cells, "一句话") });
+  }
+  return out;
 }
