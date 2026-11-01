@@ -5,6 +5,7 @@
 // 2026-10-25 迁移批1 加「☁️ 云端同步」卡：家里(win32)=拉取按钮+上次拉取；云端(linux)=家里最后拉取时间。
 import { useCallback, useEffect, useState } from "react";
 import { HOST_IS_WINDOWS } from "../lib/platform";
+import PersonGraph from "./PersonGraph";
 
 interface MemFile {
   key: string;
@@ -116,6 +117,8 @@ export default function MemoryPage() {
   const [msg, setMsg] = useState("");
   // 私密组解锁记录：每组每次进页只确认一次
   const [unlocked, setUnlocked] = useState<Set<string>>(new Set());
+  // 文件/图谱双视图：图谱数据走专用通道（服务端只放行 graph.md 一个文件）
+  const [view, setView] = useState<"files" | "graph">("files");
 
   const loadTree = useCallback(async () => {
     try {
@@ -212,6 +215,13 @@ export default function MemoryPage() {
         </div>
         {loadErr && <div className="set-error">⚠ 读取文件树失败：{loadErr}</div>}
         <CloudSyncCard />
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <button className="mem-save" style={{ opacity: view === "files" ? 1 : 0.5 }} onClick={() => setView("files")}>📂 文件</button>
+          <button className="mem-save" style={{ opacity: view === "graph" ? 1 : 0.5 }} onClick={() => setView("graph")}>🕸 人物图谱</button>
+        </div>
+        {view === "graph" ? (
+          <PersonGraph />
+        ) : (
         <div className="mem-wrap">
           <div className="card mem-tree">
             {groups.map((g) => (
@@ -279,6 +289,7 @@ export default function MemoryPage() {
             )}
           </div>
         </div>
+        )}
       </div>
     </div>
   );

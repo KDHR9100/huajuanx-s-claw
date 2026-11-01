@@ -13,7 +13,7 @@
 个人项目「Rana · OpenClaw」：以开源 AI 助手框架 **OpenClaw**（npm 包 `openclaw`）为底座，在一台 Windows 主机上跑多个性格分工的 AI 智能体，再用全自研 Web 前端 **rana-web** 装进一个界面。人格原型是 MyGO!!!!! 的要乐奈（主色 #77DD77）。
 
 - 三个 agent（作者自用配置，开箱默认单 agent）：`main`（云端干活主力，QQ 私聊+网页）、`rana-rp`（RP 陪伴人格，微信，云端中转模型经本地小代理）、`rana-qq-public`（QQ 群公共号，物理隔离）。
-- **rana-web 没有独立后端进程**：22 组 Vite 中间件（`/__rana/*`，仅本机回环）就是"后端"。
+- **rana-web 没有独立后端进程**：23 组 Vite 中间件（`/__rana/*`，仅本机回环）就是"后端"。
 - 自动化全是**边车脚本 + cron + 文件契约**：脚本独立进程跑完退出，输出落本地 JSON，前端只读文件。
 - 隐私是一等公民：本仓库经 `push-public.cmd`（`git add -A` 全量）镜像到公开仓库，**任何入库文件默认视为公开**。
 
@@ -68,12 +68,12 @@
 | `src/App.tsx` | 11 个页面视图装配，每页套 ErrorBoundary（坏一块不白全站） | — |
 | `src/styles.css` | 单体样式表（约 2489 行，房间场景/主题变量都在这） | 尾部追加别重排 |
 | `src/components/` | 会话三件套 Sidebar/ChatStream/Composer + Topbar/TopNav/Room/Markdown/RanaArt；11 页面组件（SysPage/CronPage/ApprovalsPage/NewsPage/PlanningPage 四合一/BangumiPage/AppsPage/GroupsPage/MemoryPage/**TracePage**🔍过程/CalendarPage）；面板弹窗（UsagePanel/SettingsModal/CloudConfigModal/LmStudioModal/SystemCleanupModal/ModelTuningCard/AgentKitCard） | 玄学子组件在 `apps/`（排盘/摇卦/万年历/术语） |
-| `tests/unit/` + `vitest.config.ts` | 5 个测试文件共 **109 用例**：reasoning / fateCore / git-activity-lib / memory-bridge-parse / reconnect-backoff | `npm test` 跑 |
+| `tests/unit/` + `vitest.config.ts` | 7 个测试文件共 **120 用例**：reasoning / fateCore / git-activity-lib / memory-bridge-parse / reconnect-backoff / person-graph-parse / person-graph-def | `npm test` 跑 |
 | `vite.config.ts` | 仅约 35 行装配（react + buildServerPlugins + /gateway、/lmstudio 代理） | **别往里塞功能**，实现在 server/ |
 
 **加一个页面的四步链**：`src/components/` 建组件 → `App.tsx` 挂视图 → `types.ts` 的 `NAV_TABS` 加页签 → 需要本地数据就在 `server/plugins/` 加中间件并到 `server/index.ts` 装配。（历史上"四处注册漏一处"出过页签永不可达的 bug，见台账 09-14 条目。）
 
-### 1.3 rana-web/server/ — 没有后端的全栈（22 组中间件，`/__rana/*`）
+### 1.3 rana-web/server/ — 没有后端的全栈（23 组中间件，`/__rana/*`）
 
 `server/index.ts` 装配 `buildServerPlugins()`；`server/lib/` 四个公共工具（paths 状态目录/config 读 openclaw.json/exec/http 回环校验）。所有**写操作**端点双重来源校验：socket 本机回环 + Origin 匹配 localhost。
 
@@ -97,6 +97,7 @@
 | approvals.ts | `/__rana/approvals*` | 审批挂起卡/历史/长期许可（2026-09-22 起审批已整体关闭，页保留查询） |
 | context.ts | `GET /__rana/context` | 会话上下文体检（token 构成，只读） |
 | memory.ts | `/__rana/memory` | 记忆页读写（**白名单制**：key→路径映射在服务端，机器维护文件 editable=false） |
+| person-graph.ts | `GET /__rana/person-graph`、`/source` | 人物·事件图谱：graph.md 两张表→结构化数据给记忆页「🕸 人物图谱」画 mermaid 星型图（**路径写死只放行 graph.md**，personal/ 其余文件零暴露；ADR-0001） |
 | bridge-sync.ts | `/__rana/bridge-sync` | 🔗 记忆同步按钮：启动/轮询双桥一轮 |
 | sessions-cleanup.ts | `/__rana/sessions-cleanup` | 系统会话清理手术（--dry-run 只盘点） |
 | trajectory.ts | `/__rana/trajectory` | 🔍 过程页：按 run 导出会话轨迹（events.jsonl，瘦身 2137KB→212KB） |
@@ -161,7 +162,7 @@
 # 日常启动：双击 rana-web\start-rana.cmd（网关 18789 + 前端 5173 + 自动开浏览器，可重复执行）
 
 # 测试与构建（在 rana-web/ 下）
-npm test          # vitest，109 用例（CI 同款）
+npm test          # vitest，120 用例（CI 同款）
 npm run build     # tsc -b && vite build
 npm run preview   # 生产预览（中间件同样挂载，token 端点除外——刻意设计）
 ```

@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { buildServerPlugins } from "./server/index";
 
-// 自建前端 + Vite 中间件充当零部署本地后端：22 组 /__rana 端点已拆到 server/ 目录，
+// 自建前端 + Vite 中间件充当零部署本地后端：23 组 /__rana 端点已拆到 server/ 目录，
 // 这里只剩装配（react 前置，其余按域分模块）。
 // 路径/配置/HTTP 小工具见 server/lib/*，各端点实现见 server/plugins/*。
 // 形态区分：家里 Windows(默认)保留本地模型面板/本机操作卡;云端以 RANA_HOST_PLATFORM=linux 启动时隐藏(见 src/lib/platform.ts)。

@@ -18,12 +18,12 @@
 | 智能体 | **开箱默认单 agent**：`main`（云端模型，网页控制台直接聊）。作者自用为三 agent：`main`（云端 deepseek-v4.1-flash）+ `rana-rp`（RP 专精模型接微信——云端中转为主力、本地微调 14B 保留可切回）+ `rana-qq-public`（QQ 群公共号，物理隔离），`ownership=explicit` 显式路由，前端按实际存在的 agent 自动显隐 |
 | 前端 | React 18 + TypeScript + Vite 6 + zustand，无 UI 框架、全手写 CSS（约 14,800 行源码） |
 | 连接方式 | 浏览器 WebCrypto 生成 **Ed25519 设备身份**，挑战-签名握手 + token 鉴权；直连失败自动回退同源 `/gateway` 代理 |
-| 「后端」 | **没有独立后端进程**——Vite dev/preview 插件挂了二十二组 loopback-only 中间件（`/__rana/*`）充当本地后端 |
+| 「后端」 | **没有独立后端进程**——Vite dev/preview 插件挂了二十三组 loopback-only 中间件（`/__rana/*`）充当本地后端 |
 | 编码外包 | ~~acpx→DSH 派活~~（2026-10-25 迁移批1 随 WSL 生产链路一并移除） |
 | 边车自动化 | 独立 Node 脚本：记忆桥（每小时，三腿）、私密记忆桥（每小时）、系统巡检（30 分钟，异常主动 QQ 汇报）、早报（每天 8:00 + 页面按需）、备份健康自检（每晚两段式）、Git 活动统计（日/周/月报直跑+QQ 推送）、学习睡前小结/周报（cron 驱动）；学习排课与问卜解卦走「专用会话桥」（页面按需触发）；embedding 看门狗与 SSE 修复代理随网关常驻 |
 | 本地算力 | LM Studio `:1234` 保留（RP 本地路：微调模型在库、可切回）；qwen3-embedding-0.6b 纯 CPU 常驻供记忆检索（看门狗锁单实例）；`tools/sse-fix-proxy.mjs` 本地小代理给 RP 中转站补流式结束标记 |
 | 硬件约束 | RTX 4070 Ti 12GB + 48GB 内存——14B 本地常驻时代的显存决策史见「模型运维」一章（RP 上云后显存压力已解除） |
-| 工程方法 | `KNOWN-ISSUES.md` 问题台账（症状/根因/方案/状态，顶部有索引）、两层 AGENTS.md（人机共读规范）、`PROJECT-MAP.md` 面向 AI 的项目地图、`PROJECT-STATE-2026-10-17.md` 实查状态快照、vitest 109 用例 + GitHub Actions CI（build+test）、公开镜像的 gitignore 隐私纪律 |
+| 工程方法 | `KNOWN-ISSUES.md` 问题台账（症状/根因/方案/状态，顶部有索引）、两层 AGENTS.md（人机共读规范）、`PROJECT-MAP.md` 面向 AI 的项目地图、`PROJECT-STATE-2026-10-17.md` 实查状态快照、vitest 120 用例 + GitHub Actions CI（build+test）、公开镜像的 gitignore 隐私纪律 |
 
 代码量：前端 + 边车脚本合计约 22,600 行。下面从零讲起。
 
@@ -69,7 +69,7 @@
 │         qwen3-embedding-0.6B（CPU 常驻，记忆检索用，看门狗锁单实例）        │
 └────────────────────────────────────────────────────────────────────────────┘
 
- rana-web 本地后端 (server/ 下二十二组 Vite 中间件，/__rana/*)：学习计划文件读写、
+ rana-web 本地后端 (server/ 下二十三组 Vite 中间件，/__rana/*)：学习计划文件读写、
  GPU/网络/服务端口状态、模型连通测试、群画像数据 —— 同源无跨域，零部署
 ```
 
@@ -198,13 +198,13 @@ K:\OpenClaw
 │   └── rp-soul-test/          ← RP 人格回归测试（智谱 glm-5.3 / glm-5.3-flash 双档对比；reports/ 已 gitignore）
 └── rana-web/              ← ★ 自建 Web 前端 + 边车脚本
     ├── index.html / vite.config.ts / tsconfig.json
-    ├── vitest.config.ts / tests/unit/ ← 单测 109 用例（reasoning/fateCore/git-activity-lib/memory-bridge-parse/reconnect-backoff）
-    ├── server/               ← ★ 本地后端：2026-10 把原挤在 vite.config.ts 的二十二组中间件按域拆分
+    ├── vitest.config.ts / tests/unit/ ← 单测 120 用例（reasoning/fateCore/git-activity-lib/memory-bridge-parse/reconnect-backoff/person-graph-parse/person-graph-def）
+    ├── server/               ← ★ 本地后端：2026-10 把原挤在 vite.config.ts 的二十三组中间件按域拆分
     │   ├── index.ts          装配 buildServerPlugins()（vite.config.ts 只剩约 40 行）
     │   ├── lib/              公共工具：paths(状态目录 / 可移植根 RANA_WEB) · config(读 openclaw.json) · exec · http(json/readBody/isLoopback)
     │   └── plugins/          每域一个文件：provider-config/sys-status/avatar/news/study/events/bangumi/life/fate/
     │                         model-params/model-test/agent-info/qq-profile/dev-config/agents/
-    │                         sessions-cleanup/context/approvals/memory/bridge-sync/trajectory
+    │                         sessions-cleanup/context/approvals/memory/person-graph/bridge-sync/trajectory
     ├── src/
     │   ├── App.tsx            根组件：全部页面视图的装配（每页套 ErrorBoundary 兜底，坏一块不白全站）
     │   ├── styles.css         全部样式（2,000+ 行，房间场景/主题变量都在这）
@@ -361,7 +361,7 @@ QQ 公共号**自己养出来的**群画像：群档案、群友档案、每周�
 
 ## 🧩 深入：没有后端的全栈——Vite 中间件当后端
 
-「网页要读电脑状态、要改配置文件，后端呢？」——**没有独立后端进程**。二十二组 Vite 插件（2026-10 起按域拆分在 `rana-web/server/`，`vite.config.ts` 只剩约 40 行装配）直接把接口挂到开发服务器上；`configurePreviewServer` 把同样的中间件挂到生产预览服务上，所以 `npm run dev` 和 `npm run preview` 行为一致，始终是单进程。
+「网页要读电脑状态、要改配置文件，后端呢？」——**没有独立后端进程**。二十三组 Vite 插件（2026-10 起按域拆分在 `rana-web/server/`，`vite.config.ts` 只剩约 40 行装配）直接把接口挂到开发服务器上；`configurePreviewServer` 把同样的中间件挂到生产预览服务上，所以 `npm run dev` 和 `npm run preview` 行为一致，始终是单进程。
 
 > 给新手的一句话：Vite 的开发服务器本质是个 Node 程序，允许你往它身上挂自己的接口。请求不进打包产物，只在本地服务器这一层就被拦下处理了。这对「纯本地自用」的工具来说是零成本的架构简化。
 
@@ -388,6 +388,7 @@ QQ 公共号**自己养出来的**群画像：群档案、群友档案、每周�
 | `/__rana/approvals*` | 审批页数据：挂起卡 / 历史（最近 60 条）/ 长期许可清单 | 页签角标每 30 秒轮询挂起数；批准/拒绝走网关 RPC；历史与许可只读展示 |
 | `/__rana/context` | 会话上下文体检面板 | 经网关 RPC 拿会话 token 构成，只读 |
 | `/__rana/memory` | 🧠 记忆页数据：记忆/人设文件读改 | **白名单制**：前端只传 key，key→路径映射在服务端；机器维护文件标 editable=false 保存被拒；私密组前端二次确认 |
+| `/__rana/person-graph` | 🕸 人物图谱页签数据：graph.md 两张表 → 结构化节点 + 最后核对日期（另有 `/source` 出原文） | 路径在服务端写死，**只放行 graph.md 一个文件**（personal/ 其余文件零暴露）；表格即数据源（ADR-0001），图由前端 mermaid 按需渲染 |
 | `/__rana/bridge-sync` | 🔗 记忆同步按钮后端：GET 轮询进度 / POST 启动一轮双桥 | 仅本机回环；上一轮没跑完拒绝重复启动；必要时 `lms` 拉起本地模型跑完自动卸载（平时绝不 JIT 加载）；step/log/result 实时状态供按钮轮询，全部 ✓ 才报成功 |
 | `/__rana/trajectory` | 🔍 过程页：按 run 导出会话轨迹（events.jsonl，2137KB→212KB 按分组瘦身） | 导出走 CLI 子进程落状态目录；协议字典见 `rana-web/docs/observability.md` |
 | `/__rana/cloud-snapshot`、`/cloud-sync` | 迁移同步桥（2026-10-25 批1）：云端把状态目录**数据部分**（会话库/人格/记忆/凭据，不含插件缓存）tar.gz 流式打包供家里拉取；记忆页「☁️云端同步」卡显示上次拉取/家里发起拉取 | 快照下载走 X-Home-Token 独立鉴权；家里留最近 14 份——「云端是上班的她，家里是她的家」的每日回家车 |
@@ -525,7 +526,7 @@ RP 会话只保留人格与最小工具集，一个自装技能都不装——�
 
 ### 进程拓扑：谁常驻、谁即起即灭
 
-- **常驻四件**：网关（含全部 cron、渠道连接、记忆索引）、Vite dev/preview（二十二组中间件即后端）、embedding 看门狗与 SSE 修复代理（由 `start-gateway.cmd` 按条件/无条件顺带拉起，端口锁防多开）；
+- **常驻四件**：网关（含全部 cron、渠道连接、记忆索引）、Vite dev/preview（二十三组中间件即后端）、embedding 看门狗与 SSE 修复代理（由 `start-gateway.cmd` 按条件/无条件顺带拉起，端口锁防多开）；
 - **即起即灭**：边车脚本（cron 到点拉起，跑完退出）、专用会话桥（页面动作拉起）、`agent-info` 的 CLI 子进程；
 - **改动的生效方式**：`openclaw.json` 保存即热重载；`bindings` 渠道绑定要重启网关；前端代码 Vite 热更；`SOUL/AGENTS/MEMORY` 等人格记忆文件开新会话生效。
 
@@ -705,7 +706,7 @@ GBK 输出解码、PowerShell 显式 UTF8、Node `--tls-max-v1.2` 绕 TLS 1.3 �
 | [OPTIMIZATION-ROADMAP.md](OPTIMIZATION-ROADMAP.md) | 09-14 优化施工图（历史留档，大部分已落地） |
 | [OPEN-SOURCE-ROADMAP.md](OPEN-SOURCE-ROADMAP.md) | 开源任务书：五阶段路线（可移植/英文门面/框架化） |
 | [AGENTS.md](AGENTS.md) | code agent 入场须知+速览（公开版） |
-| `rana-web/tests/` + `.github/workflows/ci.yml` | vitest 109 用例；push/PR 自动 build+test |
+| `rana-web/tests/` + `.github/workflows/ci.yml` | vitest 120 用例；push/PR 自动 build+test |
 | `setup.cmd` / `setup-templates/` | 开箱初始化与发行模板 |
 | `rana-web/server/` | 「后端」全部代码（plugins/ 各域中间件 + lib/ 公共工具），vite.config.ts 只剩装配，注释齐全 |
 | `rana-web/src/lib/gateway.ts` | 连接层，读懂它就读懂了半套前端 |

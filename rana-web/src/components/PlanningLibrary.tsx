@@ -9,7 +9,7 @@ import type { LifeGoal } from "./PlanningOverview";
 import Markdown from "./Markdown";
 import { useAppStore } from "../store/useAppStore";
 import { gateway } from "../lib/gateway";
-import { modelSuffix } from "../lib/types";
+import { modelRef, modelSuffix } from "../lib/types";
 
 interface LibraryEntry {
   id: string;
@@ -86,6 +86,19 @@ export default function PlanningLibrary() {
     // 会话已在：立即热切（侧栏同步显示）；还没建会话：下次她干活时生效
     if (id && lifeSession) void gateway.setModel(LIFE_SESSION_KEY, id).catch(() => {});
   };
+
+  // 旧存档是裸模型名（同名跨 provider 会落错接口）：目录回来后升级成 provider/id
+  useEffect(() => {
+    if (!pickModel || !models.length) return;
+    if (models.some((m) => modelRef(m) === pickModel)) return;
+    const hit = models.find((m) => modelSuffix(m.id) === modelSuffix(pickModel));
+    if (!hit) return;
+    const ref = modelRef(hit);
+    setPickModel(ref);
+    try {
+      localStorage.setItem(LIFE_MODEL_KEY, ref);
+    } catch { /* 存不进就算了 */ }
+  }, [models, pickModel]);
 
   // 投喂
   const [feedText, setFeedText] = useState("");
@@ -338,7 +351,7 @@ export default function PlanningLibrary() {
           {modelGroups.map(([provider, items]) => (
             <optgroup key={provider} label={provider}>
               {items.map((m) => (
-                <option key={m.id} value={m.id}>
+                <option key={modelRef(m)} value={modelRef(m)}>
                   {m.name || modelSuffix(m.id)}
                 </option>
               ))}

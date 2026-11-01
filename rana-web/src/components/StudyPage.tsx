@@ -210,8 +210,12 @@ export default function StudyPage({ embedded = false }: { embedded?: boolean } =
   const sessions = useAppStore((s) => s.sessions);
   const studySession = sessions.find((s) => s.key === STUDY_SESSION_KEY);
   // 排课/出题用的模型＝主会话当前模型（与会话页选择器同一数据源，双向同步，不再单独存偏好）
+  // 服务端把 provider 与裸模型名分开存，这里拼回完整引用，避免同名模型跨 provider 时落错接口
   const mainSession = sessions.find((s) => s.key === MAIN_SESSION_KEY);
-  const pickModel = mainSession?.model ?? "";
+  const pickModel =
+    mainSession?.modelProvider && mainSession?.model
+      ? `${mainSession.modelProvider}/${mainSession.model}`
+      : mainSession?.model ?? "";
   // 旧版 localStorage 排课模型偏好已废弃，进页面顺手清掉，避免残留误导
   useEffect(() => {
     try {

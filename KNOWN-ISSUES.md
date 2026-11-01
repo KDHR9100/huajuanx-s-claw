@@ -33,6 +33,7 @@
 - [上游限制×3] webchat 看不到实时思考 / 微信主动推送依赖 contextToken / cron 系统任务不能单独启停——平台限制，各有缓解
 - [观察] P2 性能杂音（heartbeat 延迟/lane 排队）——负载瞬时挤兑，不动配置
 - [已缓解·待观察] token-plan 月度额度烧穿（429）——main 已临时换 glm-5.3-flash；QQ 公众号仍挂 deepseek 待拍板；10-29 额度重置
+- [未解决·暂不修] 10-26 重启后 Hypervisor 未恢复——WSL2 起不来，git 统计 4 个 WSL 仓持续跳过；修法=bcdedit hypervisorlaunchtype auto+重启，等主人拍板（USER.md 有 Never 拉起规矩）
 - [已解决·待观察] QQ 600s 超时罐头话——遗留：心跳「巡查/施工分工」纪律对 glm 也只是软约束，待拍板
 - 群算卦 fate MCP（10-20）——CLI 已验证；**群内真消息端到端实测待主人**（只有真群消息是端到端验收）
 
@@ -62,6 +63,13 @@
 ***
 
 ## 登记区
+
+## [未解决·暂不修] 10-26 重启后 Hypervisor 未恢复——WSL2 全线起不来，git 统计 WSL 仓持续跳过（2026-10-28）
+- 症状：10-28 21:33 git 活动统计班：5 仓中 WSL 侧 4 个（ragwei/psychology_project/MP4/CrossLister）全部 `git -C \\wsl.localhost\Ubuntu-22.04\...` 读取失败跳过；主会话手工验证 `wsl -d Ubuntu-22.04` 报 `HCS_E_HYPERV_NOT_INSTALLED`（虚拟机平台或 hypervisor 未运行），`\\wsl.localhost` 整个路径不存在。`wsl -l -v`：Ubuntu-22.04 与 docker-desktop 均在（Stopped）——发行版本体没丢，是虚拟机层没起来。
+- 根因：BIOS 虚拟化开（`VirtualizationFirmwareEnabled=True`）、vmcompute 服务 Running，但 `HypervisorPresent=False`。9-11 起主人玩《三角洲行动》时腾讯 ACE 反作弊要求关虚拟化（USER.md 环境节有档）；这类关闭落在启动配置（hypervisorlaunchtype），**重启不会自动恢复**——10-26 凌晨切换夜重启后 hypervisor 一直没起来，git 统计的 WSL 仓因此持续跳过。（bcdedit 具体值需管理员读，本轮未实测确认；四项旁证一致。）
+- 解决方案（等主人拍板，不自动执行）：管理员 PowerShell 跑 `bcdedit /set {current} hypervisorlaunchtype auto` + 重启即恢复；再玩三角洲前同样方法 `off` 关回。修好前 git 统计班每次都会跳过这 4 个仓（Windows 侧仓正常），接受噪音也可不修。
+- 操作纪律（自记）：USER.md 环境节早有「Never 尝试拉起或修复 WSL」的规矩，10-28 主会话没先查 USER.md 就直接试拉 WSL，撞 HCS_E 后才对上旧账——**环境类操作动手前先查 USER.md 环境节与 KNOWN-ISSUES**。
+- 状态：未解决（暂不修，等主人拍板）。
 
 ## [已解决] 云端页面报 INVALID_REQUEST: origin not allowed——前端硬编码 127.0.0.1:18789 连到了「看页面那台机器」的网关（2026-10-26，紧接 5173 三重案之后）
 - 症状：Tailscale 修好后浏览器能打开 `http://100.69.115.62:5173`，但页面横幅报 `INVALID_REQUEST: origin not allowed (use gateway.publicOrigin with allowedOrigins omitted, or allow this origin in gateway.controlUi.allowedOrigins)`，点「重新连接」无效。

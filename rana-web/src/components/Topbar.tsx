@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "../store/useAppStore";
 import { gateway } from "../lib/gateway";
-import { modelSuffix } from "../lib/types";
+import { isSameModel, modelRef, modelSuffix } from "../lib/types";
+import type { ModelInfo } from "../lib/types";
 
 function shortName(id?: string) {
   if (!id) return "默认模型";
@@ -18,7 +19,9 @@ function ModelPicker() {
   const [tests, setTests] = useState<Record<string, { busy?: boolean; ok?: boolean; ms?: number; error?: string; note?: string }>>({});
   const ref = useRef<HTMLDivElement>(null);
 
-  const current = sessions.find((s) => s.key === currentKey)?.model;
+  const currentRow = sessions.find((s) => s.key === currentKey);
+  const current = currentRow?.model;
+  const currentProvider = currentRow?.modelProvider;
 
   useEffect(() => {
     if (!open) return;
@@ -29,11 +32,13 @@ function ModelPicker() {
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
 
-  const apply = async (modelId: string) => {
+  const apply = async (m: ModelInfo) => {
     if (!currentKey || busy) return;
     setBusy(true);
     try {
-      await gateway.setModel(currentKey, modelId);
+      // 服务端按 "provider/id" 解析 provider；只发裸名会落到 agent 默认 provider，
+      // 和左下角录入里选中的接口档案不是同一个（同名模型跨 provider 时尤其明显）。
+      await gateway.setModel(currentKey, modelRef(m));
       setOpen(false);
     } catch (e) {
       alert(`切换模型失败：${(e as Error).message}`);
@@ -43,10 +48,11 @@ function ModelPicker() {
   };
 
   /** 测一个模型能不能通：一条最小消息，key 只在服务端配置里读。gateway 目录的 id 是裸名，须带 providerId 帮服务端定位接口 */
-  const test = async (m: { id: string; provider?: string }) => {
+  const test = async (m: ModelInfo) => {
     const modelId = m.id;
-    if (tests[modelId]?.busy) return;
-    setTests((t) => ({ ...t, [modelId]: { busy: true } }));
+    const key = modelRef(m);
+    if (tests[key]?.busy) return;
+    setTests((t) => ({ ...t, [key]: { busy: true } }));
     try {
       const r = await fetch("/__rana/model-test", {
         method: "POST",
@@ -54,34 +60,35 @@ function ModelPicker() {
         body: JSON.stringify({ modelId, providerId: m.provider }),
       });
       const j = (await r.json()) as { ok?: boolean; ms?: number; error?: string; note?: string };
-      setTests((t) => ({ ...t, [modelId]: { ok: Boolean(j.ok), ms: j.ms, error: j.error, note: j.note } }));
+      setTests((t) => ({ ...t, [key]: { ok: Boolean(j.ok), ms: j.ms, error: j.error, note: j.note } }));
     } catch (e) {
-      setTests((t) => ({ ...t, [modelId]: { ok: false, error: (e as Error).message } }));
+      setTests((t) => ({ ...t, [key]: { ok: false, error: (e as Error).message } }));
     }
   };
 
-  const testBadge = (modelId: string) => {
-    const t = tests[modelId];
+  const testBadge = (key: string) => {
+    const t = tests[key];
     if (!t) return { text: "⚡", cls: "", title: "测试这个模型能不能连通" };
     if (t.busy) return { text: "…", cls: "", title: "测试中" };
     if (t.ok) return { text: `✓${t.ms ?? "?"}ms${t.note ? "💭" : ""}`, cls: "ok", title: `连通，延迟 ${t.ms}ms${t.note ? " · " + t.note : ""}` };
     return { text: "✗不通", cls: "bad", title: t.error ?? "不通" };
   };
 
-  const isActive = (modelId: string) => !!current && modelSuffix(current) === modelSuffix(modelId);
+  // 同名模型在不同 provider 下是不同条目：激活状态须同时比 provider，否则会一次亮好几行
+  const isActive = (m: ModelInfo) => isSameModel(current, currentProvider, m);
 
   // 按 provider 分组（aliyun-maas / lmstudio-local / 新增的档案…），组内保持原顺序
-  const groups: Array<{ provider: string; items: typeof models }> = [];
+  const groups: Array<{ provider: string; items: typeof models; at: number }> = [];
   for (const m of models) {
     const provider = m.provider ?? m.id.split("/")[0] ?? "";
     const last = groups[groups.length - 1];
     if (last && last.provider === provider) last.items.push(m);
-    else groups.push({ provider, items: [m] });
+    else groups.push({ provider, items: [m], at: groups.length });
   }
 
   return (
     <div className="model-picker" ref={ref}>
-      <button className="mp-trigger" onClick={() => setOpen((v) => !v)} title={current ?? "默认模型"}>
+      <button className="mp-trigger" onClick={() => setOpen((v) => !v)} title={currentProvider ? `${currentProvider}/${shortName(current)}` : current ?? "默认模型"}>
         ⚡ {shortName(current)}
         <span className="mp-caret">▼</span>
       </button>
@@ -89,13 +96,14 @@ function ModelPicker() {
         <div className="mp-menu">
           <div className="mp-label">全部模型（{models.length}）· 按接口分组 · ⚡测连通</div>
           {groups.map((g) => (
-            <div key={g.provider}>
+            <div key={`${g.provider}#${g.at}`}>
               <div className="mp-group">{g.provider}</div>
               {g.items.map((m) => {
-                const badge = testBadge(m.id);
+                const rowKey = modelRef(m);
+                const badge = testBadge(rowKey);
                 return (
-                  <div key={m.id} className="mp-row">
-                    <button className={`mp-item${isActive(m.id) ? " active" : ""}`} disabled={busy} onClick={() => void apply(m.id)}>
+                  <div key={rowKey} className="mp-row">
+                    <button className={`mp-item${isActive(m) ? " active" : ""}`} disabled={busy} onClick={() => void apply(m)}>
                       <span className="m-name">{m.name}</span>
                       <span className="m-sub">
                         {m.id}

@@ -5,7 +5,7 @@
 
 ## 这个项目是什么（30 秒）
 
-Rana · OpenClaw：开源 AI 助手框架 OpenClaw（npm 包 `openclaw`）+ 自研 Web 前端 rana-web，跑在一台 Windows 主机上的多智能体 AI 伙伴（main 干活 / rana-rp 微信陪伴 / rana-qq-public 群公共号，开箱默认单 agent）。前端**没有独立后端**——22 组 Vite 中间件（`rana-web/server/plugins/`，`/__rana/*`，仅本机回环）就是后端；自动化全是**边车脚本 + cron + 文件契约**（`rana-web/*.mjs`）。
+Rana · OpenClaw：开源 AI 助手框架 OpenClaw（npm 包 `openclaw`）+ 自研 Web 前端 rana-web，跑在一台 Windows 主机上的多智能体 AI 伙伴（main 干活 / rana-rp 微信陪伴 / rana-qq-public 群公共号，开箱默认单 agent）。前端**没有独立后端**——23 组 Vite 中间件（`rana-web/server/plugins/`，`/__rana/*`，仅本机回环）就是后端；自动化全是**边车脚本 + cron + 文件契约**（`rana-web/*.mjs`）。
 
 ## 铁律（违反=事故）
 
@@ -18,7 +18,7 @@ Rana · OpenClaw：开源 AI 助手框架 OpenClaw（npm 包 `openclaw`）+ 自�
 
 ## 速查
 
-- **结构速览**：`rana-web/` 自建 Web 前端（vite + WebSocket 网关协议 v4）+ 边车脚本；`server/plugins/` 22 组中间件即"后端"；`tools/` 两个常驻守护（embedding 看门狗、sse-fix-proxy :18801）+ rp-soul-test 人格回归；`skills/` 可公开技能母本；`rana-web/tests/` 109 个 vitest 用例；`.github/workflows/ci.yml` push/PR 自动 build+test。完整代码地图见 PROJECT-MAP §1。
+- **结构速览**：`rana-web/` 自建 Web 前端（vite + WebSocket 网关协议 v4）+ 边车脚本；`server/plugins/` 23 组中间件即"后端"；`tools/` 两个常驻守护（embedding 看门狗、sse-fix-proxy :18801）+ rp-soul-test 人格回归；`skills/` 可公开技能母本；`rana-web/tests/` 120 个 vitest 用例；`.github/workflows/ci.yml` push/PR 自动 build+test。完整代码地图见 PROJECT-MAP §1。
 - **网关重启** = taskkill node PID + 重跑 `rana-web/start-gateway.cmd`（无服务注册）；重启后 3-5 分钟插件装载期连不上属正常。排障日志：`rana-web/.gateway.log`、`%TEMP%\openclaw\`。
 - **测试**：`cd rana-web && npm test`（提交前端改动前必跑）；对齐项目现状以 [PROJECT-STATE-2026-10-17.md](PROJECT-STATE-2026-10-17.md) 为准（含实查配方，别信旧文档）。
 - **改页面四步链**：`src/components/` 建组件 → `App.tsx` 挂视图 → `src/lib/types.ts` 的 `NAV_TABS`（页签单一来源）→ 需要数据就去 `server/plugins/` 加中间件。
