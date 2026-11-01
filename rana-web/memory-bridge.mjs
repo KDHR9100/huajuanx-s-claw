@@ -21,17 +21,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { spawn } from 'node:child_process';
 import { STATE_HOME, resolveApiKey, resolveOpenclawMjs } from './lib/rana-config.mjs';
 import { makeParseEntries } from './memory-bridge-parse.mjs';
+import { chat, cloudChat, makeLog, modelStr, readNewEvents as coreReadNewEvents } from './lib/memory-bridge-core.mjs';
 
 // 状态目录与 SecretRef 解析统一走共享模块（env 优先，缺省回退仓库内布局）
 const HOME = STATE_HOME;
 const SHARED = HOME + '/shared-memory';
 const CFG = JSON.parse(fs.readFileSync(HOME + '/openclaw.json', 'utf8'));
-// model 字段可能是字符串或 {primary, fallbacks} 对象（2026-10 配置改版），统一规整成字符串
-function modelStr(m) {
-  if (typeof m === 'string') return m;
-  if (m && typeof m === 'object' && typeof m.primary === 'string') return m.primary;
-  return '';
-}
 // RP 侧提炼模型：只用 LM Studio 当前"已加载"的模型（14B 优先——7B 实测会主客颠倒/编造场景时间；7B 只兜底），绝不 JIT 拉起新模型挤显存。
 // 2026-10 RP 上云后 agent 配置已是云端模型名，不能再当本地模型名用——那正是 RP 腿断管的根因之一
 async function pickRpDistillModel() {
@@ -98,11 +93,7 @@ function groupAlias(sessionKey) {
   return QQ_LOCAL.groups[hash];
 }
 
-const log = (msg) => {
-  const line = `${new Date().toISOString()} ${msg}`;
-  try { fs.appendFileSync(SHARED + '/.bridge.log', line + '\n'); } catch {}
-  console.log(line);
-};
+const log = makeLog(SHARED + '/.bridge.log');
 
 const loadState = () => {
   try { return JSON.parse(fs.readFileSync(SHARED + '/.bridge-state.json', 'utf8')); } catch { return {}; }
@@ -111,54 +102,24 @@ const saveState = (s) => fs.writeFileSync(SHARED + '/.bridge-state.json', JSON.s
 
 /* ---------- 1. 读取各侧新增对话 ---------- */
 function readNewEvents(agentId, sinceMs, capChars, opts = {}) {
-  const db = new DatabaseSync(`${HOME}/agents/${agentId}/agent/openclaw-agent.sqlite`, { readOnly: true });
-  // session_id -> session_key（过滤 cron / 非本 agent 会话）
-  const keyOf = new Map();
-  for (const r of db.prepare('SELECT session_key, current_session_id FROM session_nodes').all())
-    keyOf.set(r.current_session_id, r.session_key);
-  const rows = db.prepare(
-    'SELECT session_id, event_json, created_at FROM transcript_events WHERE created_at > ? ORDER BY created_at ASC'
-  ).all(sinceMs);
-  db.close();
-
-  const out = [];
-  let chars = 0;
-  for (const r of rows) {
-    const key = keyOf.get(r.session_id) || '';
-    if (key.includes(':cron:') || key.includes(':eval-')) continue; // 系统会话与 RP 评估会话不进共享记忆
-    if (opts.sessionFilter && !opts.sessionFilter(key)) continue;
-    let j;
-    try { j = JSON.parse(r.event_json); } catch { continue; }
-    const msg = j && j.type === 'message' ? j : null; // 个别损坏/空事件行不炸整条腿
-    if (!msg) continue;
-    const role = msg.message?.role;
-    if (role !== 'user' && role !== 'assistant') continue;
-    const content = msg.message?.content;
-    let text = '';
-    if (typeof content === 'string') text = content;
-    else if (Array.isArray(content)) text = content.filter(c => c && c.type === 'text').map(c => c.text).join(' ');
-    text = text
-      .replace(/<think>[\s\S]*?<\/think>/g, '')
+  // 机制收拢在 lib/memory-bridge-core.mjs；腿语义（cron/评估会话过滤、清洗链、说话人）在此注入
+  return coreReadNewEvents({
+    home: HOME, agentId, sinceMs, capChars,
+    sessionFilter: (key) => !key.includes(':cron:') && !key.includes(':eval-'), // 系统会话与 RP 评估会话不进共享记忆
+    cleanText: (t) => t.replace(/<think>[\s\S]*?<\/think>/g, '')
       .replace(/```[\s\S]*?```/g, '') // RP 侧舞台指令块不是叙事内容
       .replace(/!\[[^\]]*\]\([^)]*\)/g, '[图]') // QQ 图片转占位
       .replace(/\[Chat history (begins|ends)\]/g, '')
-      .trim();
-    if (!text || text.startsWith('/')) continue; // 斜杠命令跳过
-    let speaker;
-    if (opts.qqSpeaker) {
-      speaker = opts.qqSpeaker(text);
-      text = text.replace(/^\[[^\]]*\]\s*/, '').trim(); // 去掉 [名字 (id)] 前缀行
-      if (!text) continue;
-    } else {
-      speaker = role === 'user' ? OWNER_NAME : 'Rana';
-    }
-    const gTag = opts.qqSpeaker ? ` [${groupAlias(key)}]` : '';
-    const line = `[${new Date(r.created_at).toTimeString().slice(0, 5)}]${gTag} ${speaker}: ${text.replace(/\s+/g, ' ').slice(0, 500)}`;
-    if (chars + line.length > capChars) break; // 本次装不下，state 停在上一条，下次接着来
-    chars += line.length;
-    out.push({ ts: r.created_at, line });
-  }
-  return out;
+      .trim(),
+    present: opts.qqSpeaker
+      ? (text, role, key) => {
+          const speaker = opts.qqSpeaker(text);
+          const stripped = text.replace(/^\[[^\]]*\]\s*/, '').trim(); // 去掉 [名字 (id)] 前缀行
+          if (!stripped) return null;
+          return { text: stripped, speaker, tag: ` [${groupAlias(key)}]` };
+        }
+      : (text, role) => ({ text, speaker: role === 'user' ? OWNER_NAME : 'Rana', tag: '' }),
+  });
 }
 
 /** QQ 群消息的发言者：从正文里的 [名字 (OPENID)] 抠；主人 openid → 群内化名（identity 文件） */
@@ -170,51 +131,7 @@ function qqSpeakerOf(text) {
 }
 
 /* ---------- 2. 提炼（各侧各自的模型） ---------- */
-async function chat(url, apiKey, model, sys, user, maxTokens, timeoutMs = 120000) {
-  const res = await fetch(url.replace(/\/$/, '') + '/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(apiKey ? { Authorization: 'Bearer ' + apiKey } : {}) },
-    // sys 并入首条 user：RP 调优的本地模型常忽略 system 角色
-    body: JSON.stringify({ model, messages: [{ role: 'user', content: sys + '\n\n' + user }], max_tokens: maxTokens, temperature: 0.2, stream: false }),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  if (!res.ok) throw new Error(`${res.status} ${await res.text().catch(() => '')}`.slice(0, 200));
-  const j = await res.json();
-  return (j.choices?.[0].message?.content || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-}
-
 const SYS = '任务：从对话片段提炼共享记忆纪要。禁止复述本任务，禁止扮演对话角色，直接输出纪要行。';
-
-/** 云端提炼（rp-nsfw 中转站）：中转站永远回 SSE（stream:false 也不听），需自行拼 delta；
- *  sse-fix-proxy 已在流尾补 finish_reason/[DONE] 所以正常收尾。 */
-async function cloudChat(url, apiKey, model, sys, user, timeoutMs = 120000) {
-  const res = await fetch(url.replace(/\/$/, '') + '/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
-    body: JSON.stringify({ model, messages: [{ role: 'user', content: sys + '\n\n' + user }], max_tokens: 500, temperature: 0.2, stream: false }),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  if (!res.ok) throw new Error(`${res.status} ${await res.text().catch(() => '')}`.slice(0, 200));
-  const text = await res.text();
-  if (!/^\s*data:/.test(text) && !text.includes('\ndata:')) {
-    const j = JSON.parse(text); // 万一哪天中转站老实回 JSON 了
-    return (j.choices?.[0]?.message?.content || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-  }
-  let out = '';
-  for (const line of text.split('\n')) {
-    const s = line.trim();
-    if (!s.startsWith('data:')) continue;
-    const p = s.slice(5).trim();
-    if (!p || p === '[DONE]') continue;
-    try {
-      const j = JSON.parse(p);
-      const ch = j.choices?.[0] ?? {};
-      if (ch.delta?.content) out += ch.delta.content;
-      if (ch.message?.content) out += ch.message.content;
-    } catch { /* 忽略无法解析的半行 */ }
-  }
-  return out.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-}
 
 function promptFor(side, tag, dialog) {
   // RP 侧私密内容一律不进共享记忆（云端可见）——由 private-memory-bridge 负责保管
