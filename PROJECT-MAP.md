@@ -3,7 +3,7 @@
 > **给谁看**：任何第一次进这个仓库的 code agent（ZCode / Claude Code / Codex / trae…）或新窗口。
 > 读完本文 ≈ 10 分钟建立全貌：这是什么项目、代码在哪、从哪入手、什么不能碰。
 > **配套**：规矩看 [AGENTS.md](AGENTS.md)（精简入口）；排障看 [KNOWN-ISSUES.md](KNOWN-ISSUES.md)（问题台账，顶部有索引）；
-> 对齐**当前真实状态**看 [PROJECT-STATE-2026-10-17.md](PROJECT-STATE-2026-10-17.md)（实查核验版——旧文档骗人是实锤过的，见其附录 A）。
+> 对齐**当前真实状态**看 [PROJECT-STATE-2026-11-03.md](PROJECT-STATE-2026-11-03.md)（实查核验版——旧文档骗人是实锤过的，见其附录 A）。
 > **更新纪律**：动结构（加目录/挪文件/加端点/换脚本）必须同步本文。最后核验：2026-10-24（目录、git、package.json 逐项实查）。
 
 ---
@@ -13,17 +13,17 @@
 个人项目「Rana · OpenClaw」：以开源 AI 助手框架 **OpenClaw**（npm 包 `openclaw`）为底座，在一台 Windows 主机上跑多个性格分工的 AI 智能体，再用全自研 Web 前端 **rana-web** 装进一个界面。人格原型是 MyGO!!!!! 的要乐奈（主色 #77DD77）。
 
 - 三个 agent（作者自用配置，开箱默认单 agent）：`main`（云端干活主力，QQ 私聊+网页）、`rana-rp`（RP 陪伴人格，微信，云端中转模型经本地小代理）、`rana-qq-public`（QQ 群公共号，物理隔离）。
-- **rana-web 没有独立后端进程**：23 组 Vite 中间件（`/__rana/*`，仅本机回环）就是"后端"。
-- 自动化全是**边车脚本 + cron + 文件契约**：脚本独立进程跑完退出，输出落本地 JSON，前端只读文件。
+- **rana-web 没有独立后端进程**：24 组 Vite 中间件（`/__rana/*`，仅本机回环）就是"后端"。
+- 自动化全是**边车脚本 + cron + 文件契约**：脚本独立进程跑完退出，输出落本地 JSON，前端只读文件；另有 QQ 陪伴边车 qq-sidecar（SnowLuma 个人号收发群消息）随网关常驻。
 - 隐私是一等公民：本仓库经 `push-public.cmd`（`git add -A` 全量）镜像到公开仓库，**任何入库文件默认视为公开**。
 
 ```
 渠道层   微信→rana-rp   QQ私聊→main   QQ群→rana-qq-public   浏览器:5173→rana-web
            └────────────┴──────┬──────┴────────────┘
 调度层   OpenClaw 网关 :18789（WebSocket 协议 v4，SQLite 存会话/cron，openclaw.json 热重载）
-           bindings 路由 · cron 班表 · 记忆桥 · 插件 8 个
+           bindings 路由 · cron 班表 · 记忆桥 · 插件按 entries/allow 配置装载
 干活层   main 自己干（搜索/浏览器/文件）；（DSH/acpx 派活 10-25 迁移批1 移除）
-模型层   云端：main/公共号 deepseek-v4.1-flash、RP nalang（经本地 sse-fix-proxy :18801）
+模型层   云端：main/公共号 glm-5.3-flash（11-01 转正）、RP nalang（经本地 sse-fix-proxy :18801）
          本地：LM Studio :1234（微调 14B 在库可切回）+ qwen3-embedding（CPU 常驻，看门狗锁单实例）
 ```
 
@@ -39,13 +39,13 @@
 | `AGENTS.md` | code agent 入场规矩+速览（AI 进场第一份） | ✅ |
 | `PROJECT-MAP.md` | 本文：面向 AI 的地图+入手路由+时间线 | ✅ |
 | `KNOWN-ISSUES.md` | 工程问题台账（95 条，症状/根因/方案/状态，顶部有索引） | ✅ |
-| `PROJECT-STATE-2026-10-17.md` | 实查状态快照（挂账/红线/实查配方，**对齐现状以此为准**） | ✅ |
+| `PROJECT-STATE-2026-11-03.md` | 实查状态快照（挂账/红线/实查配方，**对齐现状以此为准**） | ✅ |
 | `PROJECT-ANALYSIS.md` / `OPTIMIZATION-ROADMAP.md` / `SYSTEM-MAINTENANCE-PLAN.md` | 历史文档（09-14/09-17，已加过期横幅留档） | ✅ |
 | `OPEN-SOURCE-ROADMAP.md` | 开源五阶段任务书（阶段〇/二已完成，阶段一=测试/CI 已补） | ✅ |
 | `TASK-TRAE-2026-10-17.md` | 测试骨架四批次任务书（**已收官**，A/B/C/D 全合入） | ✅ |
 | `setup.cmd` / `setup.mjs` / `setup-templates/` | 开箱初始化 + 出厂模板（单 agent 骨架 + SOUL/USER/MEMORY 三件套） | ✅ |
 | `skills/` | **可公开的技能母本**（运行时技能在状态目录，改完拷过去生效；现只有 `daily-report/` 收日报） | ✅ |
-| `tools/` | 常驻守护脚本 + 人格回归测试（见 §1.5） | ✅（rp-soul-test 尚未提交） |
+| `tools/` | 常驻守护脚本 + 人格回归测试（见 §1.5） | ✅ |
 | `.github/workflows/ci.yml` | CI：push/PR → `rana-web` 下 `npm ci → build → test`（2026-10-17 首跑绿） | ✅ |
 | `backup-dbs.cmd` | 每日本地 DB 快照到另一块盘 | ✅ |
 | `rana-web/` | ★ 自建 Web 前端 + 边车脚本（见 §1.2–1.4） | ✅ |
@@ -73,7 +73,7 @@
 
 **加一个页面的四步链**：`src/components/` 建组件 → `App.tsx` 挂视图 → `types.ts` 的 `NAV_TABS` 加页签 → 需要本地数据就在 `server/plugins/` 加中间件并到 `server/index.ts` 装配。（历史上"四处注册漏一处"出过页签永不可达的 bug，见台账 09-14 条目。）
 
-### 1.3 rana-web/server/ — 没有后端的全栈（23 组中间件，`/__rana/*`）
+### 1.3 rana-web/server/ — 没有后端的全栈（24 组中间件，`/__rana/*`）
 
 `server/index.ts` 装配 `buildServerPlugins()`；`server/lib/` 四个公共工具（paths 状态目录/config 读 openclaw.json/exec/http 回环校验）。所有**写操作**端点双重来源校验：socket 本机回环 + Origin 匹配 localhost。
 
@@ -102,6 +102,7 @@
 | sessions-cleanup.ts | `/__rana/sessions-cleanup` | 系统会话清理手术（--dry-run 只盘点） |
 | trajectory.ts | `/__rana/trajectory` | 🔍 过程页：按 run 导出会话轨迹（events.jsonl，瘦身 2137KB→212KB） |
 | cloud-sync.ts | `/__rana/cloud-snapshot`、`/cloud-sync` | 迁移同步桥：云端 tar.gz 流式打包数据快照（X-Home-Token 鉴权）/ 家里拉取状态与触发（10-25 迁移批1，方案见 MIGRATION-PLAN） |
+| qq-sidecar.ts | `/__rana/qq-sidecar` | 🐧QQ 陪伴页数据源：读 sidecar 心跳/活动日志 + 日志尾巴 + 配置存在性（纯只读；启停走 sidecar 自己的控制端点，本插件不做配置写入） |
 
 ### 1.4 rana-web 根目录的边车脚本（cron 自动化，独立进程跑完退出）
 
@@ -119,7 +120,8 @@
 | study-agent.mjs / fate-agent.mjs / life-agent.mjs | 页面按需触发 | 专用会话桥三薄封装 → 会话 `agent:main:study-planner` / `fate-teller` / `life-planner`（180~285s 超时+互斥） |
 | lib/agent-bridge.mjs / lib/rana-config.mjs | （共享库） | 三桥共享实现 / 状态目录定位+SecretRef 解析 |
 | cron-session-cleanup.mjs | 手动（会话页入口） | 系统会话清理手术 |
-| start-rana.cmd / start-gateway.cmd | 双击 | 一键启动（网关+Vite+浏览器）/ 网关启动器（顺带拉起两个看门狗，端口锁防多开） |
+| start-rana.cmd / start-gateway.cmd | 双击 | 一键启动（网关+Vite+浏览器）/ 网关启动器（顺带拉起看门狗与 sse-fix-proxy，端口锁防多开；qq-sidecar/config.json 存在时顺带拉起 QQ 陪伴边车） |
+| rana-web/qq-sidecar/ | 随网关常驻 | QQ 个人号陪伴边车：SnowLuma（OneBot v11 个人号，WS 3001 收/HTTP 3000 发）收发 QQ + 人格参数包装（合成窗/潜水率/表情率/打字节奏）+ `rana-qq-public` CLI 单轮应答（46s/轮）；config.json/state/ gitignore（公开模板 config.example.json）；端口锁 47612 单实例 |
 | local-overrides.cmd（gitignore） | — | 本机个性化覆盖；模板见 `.example.cmd` |
 | docs/observability.md | — | 可观测性字典（chat 五态/事件面/导出格式） |
 | design-mockups/ | — | v2 界面五版设计稿（纯 HTML 原型） |
@@ -130,7 +132,7 @@
 | --- | --- |
 | `tools/embedding-watchdog.mjs` | 随网关常驻：锁死 embedding「恰好一份、ctx 2048、纯 CPU」，违例自动卸载重载 |
 | `tools/sse-fix-proxy.mjs` | 随网关常驻 :18801：RP 中转站 SSE 缺结束标记就补上 + content 块数组拍平（10-03 blocks-flatten 刀）；**密钥不落代理** |
-| `tools/rp-soul-test/` | RP 人格回归测试（10-23 新增，**尚未 git 提交**）：智谱 glm-5.3 / glm-5.3-flash 双档对比；`reports/` 已被自己的 .gitignore 挡住不入公开仓 |
+| `tools/rp-soul-test/` | RP 人格回归测试（10-23 新增，11-01 已提交 d55f145）：智谱 glm-5.3 / glm-5.3-flash 双档对比 + canon 过去线样本组（--profile canon）；`reports/` 已被自己的 .gitignore 挡住不入公开仓 |
 | `skills/` | 技能公开母本。运行中的技能在 `<状态目录>/workspace-<agent>/skills/`（隐私区）；关系=这里改完拷贝过去生效。现只有 `daily-report/`（QQ 邮箱收日报） |
 
 ### 1.6 运行时状态目录（`.openclaw/.openclaw/`，全 gitignore）
@@ -185,7 +187,7 @@ npm run preview   # 生产预览（中间件同样挂载，token 端点除外—
 | 你要干嘛 | 先读 | 再动 | 特别注意 |
 | --- | --- | --- | --- |
 | 排障 | KNOWN-ISSUES 顶部**索引**→按症状关键词搜 | 照方抓药；>10 分钟的坑解决后**回写台账** | 台账是"写给下一个 agent 的程序" |
-| 对齐项目现状 | PROJECT-STATE-2026-10-17 + 其附录 B 实查配方 | 以 cron 库/代码/git 实查为准，文档只做线索 | 旧状态骗人实锤过 |
+| 对齐项目现状 | PROJECT-STATE-2026-11-03 + 其附录 B 实查配方 | 以 cron 库/代码/git 实查为准，文档只做线索 | 旧状态骗人实锤过 |
 | 加页面/页签 | §1.2 四步链 | components→App.tsx→NAV_TABS→(可选)新中间件 | 页签清单单一来源在 types.ts |
 | 加后端端点 | 照 §1.3 任一插件抄 | `server/plugins/` 新文件 + `index.ts` 装配 | 回环+Origin 双校验必抄；写前 .bak |
 | 改连接层 | 台账"乐观/去重/闪回"相关条目 | gateway.ts | ⚠️ 禁触区：pendingCreates/deletingKeys/deleteChain/finalRunIds 等乐观更新状态机 |
@@ -218,8 +220,9 @@ npm run preview   # 生产预览（中间件同样挂载，token 端点除外—
 | AGENTS.md | AI 入场规矩+速览（每会话自动注入） | 活文档 |
 | PROJECT-MAP.md（本文） | AI 地图：结构/入手路由/时间线 | 活文档（动结构必须同步） |
 | KNOWN-ISSUES.md | 问题台账（排障先查；解决后回写；顶部索引） | 活文档，新条目永远加顶部 |
-| PROJECT-STATE-2026-10-17.md | 权威现状快照（挂账分层/红线/实查配方） | 基线 10-17；大施工后应出新版 |
-| README.md | 人看的长文档（架构/功能/协议/运维） | 10-17 对齐过 |
+| PROJECT-STATE-2026-11-03.md | 权威现状快照（挂账分层/红线/实查配方） | 基线 11-03；大施工后应出新版（10-17 旧版已归档） |
+| README.md | 人看的长文档（架构/功能/协议/运维） | 11-03 对齐 |
+| GLOSSARY.md | 术语表：图谱/圈层/浇水/档案库口径（改口径先改这里） | 11-01 新建 |
 | rana-web/docs/observability.md | 可观测性字典（chat 五态/事件面/导出） | 10-14 |
 | OPEN-SOURCE-ROADMAP.md | 开源五阶段任务书 | 活文档（阶段一测试/CI 已补，阶段三英文门面待做） |
 | PROJECT-ANALYSIS.md / OPTIMIZATION-ROADMAP.md / SYSTEM-MAINTENANCE-PLAN.md / TASK-TRAE-2026-10-17.md | 历史留档（均带状态横幅） | 已完结，别当现状 |
@@ -237,9 +240,13 @@ npm run preview   # 生产预览（中间件同样挂载，token 端点除外—
 - **10-06 ~ 10-11**：记忆桥 RP 腿云端优先 + 晚报安全摘要；vite.config 拆出 server/ 目录（5000→35 行）；三 agent 桥合并。
 - **10-14 ~ 10-17**：可观测性落地（🔍过程页轨迹回放）；**测试与 CI 从零到一**（vitest 109 用例四批次 + GitHub Actions + 断线重连加固，任务书收官）；PROJECT-STATE 实查快照诞生（三家 AI 照抄旧文档集体翻车后）。
 - **10-20**：群算卦断链三段案收口——自建 fate MCP 八工具（不开 exec）；exec 空 allowlist 空转修复；skills/ 公开母本（daily-report）。
-- **10-23 ~ 10-24**：tools/rp-soul-test 人格回归工具（智谱双档对比，未提交）。
+- **10-23 ~ 10-24**：tools/rp-soul-test 人格回归工具（智谱双档对比+canon 样本组，11-01 提交 d55f145）。
 - **10-24**：面向 AI 文档体系落地（本地图谱/AGENTS 入口/台账索引）；真名脱敏手术——公开仓历史重写强推（**10-02 起 hash 全部换代，旧 hash 引用仅作时间线索**）；私有仓越权手术当日全部还原（详见台账 10-24 条目）。
 - **10-25**：腾讯云香港迁移批1 开工（方案=MIGRATION-PLAN-2026-10.md）：DSH/acpx 派活体系整体移除、LM Studio 服务性生态退役（面板保留给本地玩）、状态页拆「服务器/本机」两页、门禁放宽到 Tailscale、embedding 云端化、cron 全量 Linux 化、记忆正本留家+每日云→家同步。
+- **10-28**：腾讯云迁移**全量回滚**（误停 gjzx 网站 nginx 事故），云端只留 gjzx 网站，服务器别再动（召回以 KNOWN-ISSUES 与记忆为准）。
+- **10-31 ~ 11-03**：Rana 原作 canon 锚工程：字幕提取+台词考据 → canon-rag 插件（1068 块）→ bdon.moe 第三事实源 → 证据版事实清单（11-03 主人人工审核定稿 43E+4G+5N）→ SOUL 删无实据句、危机协议沉底。
+- **11-01**：人物图谱 v1+v2（记忆页🕸页签，graph.md 三表即数据源，ADR-0001 + GLOSSARY 落地）；网关启动提速（砍 github+acpx 插件，冷启动 310s→45s）；记忆桥机制收拢 lib/memory-bridge-core.mjs（13 用例单测）；main/QQ 公众号转正 glm-5.3-flash（deepseek/token-plan 全线退役）。
+- **11-02**：qq-sidecar QQ 个人号陪伴链路落地（SnowLuma OneBot v11 → 自研边车 → rana-qq-public CLI 单轮 46s/轮）+ 🐧QQ 陪伴页；备份仓 push 积压 7 提交案（migration-sync 快照超 100MB 硬限 + exec 会话池收割 + HTTPS 代理上传死锁 → SSH 443 定案）。
 
 ---
 

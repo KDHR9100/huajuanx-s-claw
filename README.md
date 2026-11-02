@@ -15,17 +15,17 @@
 | 维度 | 选型 |
 | --- | --- |
 | 运行时底座 | OpenClaw gateway（Node，WebSocket `127.0.0.1:18789`，协议 v4，SQLite 存会话/定时任务，`openclaw.json` 改完即热重载） |
-| 智能体 | **开箱默认单 agent**：`main`（云端模型，网页控制台直接聊）。作者自用为三 agent：`main`（云端 deepseek-v4.1-flash）+ `rana-rp`（RP 专精模型接微信——云端中转为主力、本地微调 14B 保留可切回）+ `rana-qq-public`（QQ 群公共号，物理隔离），`ownership=explicit` 显式路由，前端按实际存在的 agent 自动显隐 |
-| 前端 | React 18 + TypeScript + Vite 6 + zustand，无 UI 框架、全手写 CSS（约 14,800 行源码） |
+| 智能体 | **开箱默认单 agent**：`main`（云端模型，网页控制台直接聊）。作者自用为三 agent：`main`（云端 glm-5.3-flash）+ `rana-rp`（RP 专精模型接微信——云端中转为主力、本地微调 14B 保留可切回）+ `rana-qq-public`（QQ 群公共号，物理隔离），`ownership=explicit` 显式路由，前端按实际存在的 agent 自动显隐 |
+| 前端 | React 18 + TypeScript + Vite 6 + zustand，无 UI 框架、全手写 CSS（约 16,200 行源码） |
 | 连接方式 | 浏览器 WebCrypto 生成 **Ed25519 设备身份**，挑战-签名握手 + token 鉴权；直连失败自动回退同源 `/gateway` 代理 |
-| 「后端」 | **没有独立后端进程**——Vite dev/preview 插件挂了二十三组 loopback-only 中间件（`/__rana/*`）充当本地后端 |
+| 「后端」 | **没有独立后端进程**——Vite dev/preview 插件挂了二十四组 loopback-only 中间件（`/__rana/*`）充当本地后端 |
 | 编码外包 | ~~acpx→DSH 派活~~（2026-10-25 迁移批1 随 WSL 生产链路一并移除） |
-| 边车自动化 | 独立 Node 脚本：记忆桥（每小时，三腿）、私密记忆桥（每小时）、系统巡检（30 分钟，异常主动 QQ 汇报）、早报（每天 8:00 + 页面按需）、备份健康自检（每晚两段式）、Git 活动统计（日/周/月报直跑+QQ 推送）、学习睡前小结/周报（cron 驱动）；学习排课与问卜解卦走「专用会话桥」（页面按需触发）；embedding 看门狗与 SSE 修复代理随网关常驻 |
+| 边车自动化 | 独立 Node 脚本：记忆桥（每小时，三腿）、私密记忆桥（每小时）、系统巡检（30 分钟，异常主动 QQ 汇报）、早报（每天 8:00 + 页面按需）、备份健康自检（每晚两段式）、Git 活动统计（日/周/月报直跑+QQ 推送）；学习排课与问卜解卦走「专用会话桥」（页面按需触发）；QQ 陪伴边车 `qq-sidecar/`（随网关常驻，SnowLuma 个人号收发群消息）、embedding 看门狗与 SSE 修复代理随网关常驻 |
 | 本地算力 | LM Studio `:1234` 保留（RP 本地路：微调模型在库、可切回）；qwen3-embedding-0.6b 纯 CPU 常驻供记忆检索（看门狗锁单实例）；`tools/sse-fix-proxy.mjs` 本地小代理给 RP 中转站补流式结束标记 |
 | 硬件约束 | RTX 4070 Ti 12GB + 48GB 内存——14B 本地常驻时代的显存决策史见「模型运维」一章（RP 上云后显存压力已解除） |
-| 工程方法 | `KNOWN-ISSUES.md` 问题台账（症状/根因/方案/状态，顶部有索引）、两层 AGENTS.md（人机共读规范）、`PROJECT-MAP.md` 面向 AI 的项目地图、`PROJECT-STATE-2026-10-17.md` 实查状态快照、vitest 120 用例 + GitHub Actions CI（build+test）、公开镜像的 gitignore 隐私纪律 |
+| 工程方法 | `KNOWN-ISSUES.md` 问题台账（症状/根因/方案/状态，顶部有索引）、两层 AGENTS.md（人机共读规范）、`PROJECT-MAP.md` 面向 AI 的项目地图、`PROJECT-STATE-2026-11-03.md` 实查状态快照、vitest 138 用例 + GitHub Actions CI（build+test）、公开镜像的 gitignore 隐私纪律 |
 
-代码量：前端 + 边车脚本合计约 22,600 行。下面从零讲起。
+代码量：前端 + 边车脚本合计约 22,400 行。下面从零讲起。
 
 ---
 
@@ -61,7 +61,7 @@
 └──────────────────────────────────┬─────────────────────────────────────────┘
                                    ▼
 ┌─────────────────────────── 模型层：云端主力 + 本地辅助 ────────────────────┐
-│   云端  main/公共号：deepseek-v4.1-flash（阿里 token-plan）                │
+│   云端  main/公共号：glm-5.3-flash（11-01 起转正，deepseek/token-plan 已退役）│
 │         心跳/画像/日报推送/群画像均钉 glm-5.3-flash（10-17 起换）      │
 │         RP：nalang 系列（RP 专精中转，经本地 sse-fix-proxy :18801 转发）   │
 │         —— key 全在密钥库，配置文件里只有引用                              │
@@ -69,7 +69,7 @@
 │         qwen3-embedding-0.6B（CPU 常驻，记忆检索用，看门狗锁单实例）        │
 └────────────────────────────────────────────────────────────────────────────┘
 
- rana-web 本地后端 (server/ 下二十三组 Vite 中间件，/__rana/*)：学习计划文件读写、
+ rana-web 本地后端 (server/ 下二十四组 Vite 中间件，/__rana/*)：学习计划文件读写、
  GPU/网络/服务端口状态、模型连通测试、群画像数据 —— 同源无跨域，零部署
 ```
 
@@ -160,8 +160,8 @@ cd rana-web && npm run dev
 | 渠道 | 值守的 agent | 说明 |
 | --- | --- | --- |
 | 微信 | `rana-rp` | RP 专精模型陪聊——云端为主力、本地微调 14B 可切回（流式协议经本地小代理修正） |
-| QQ 私聊 | `main` | 云端干活主力，全套记忆与工具 |
-| QQ 群 | `rana-qq-public` | 公共号，只有公开版记忆，物理隔离 |
+| QQ 私聊 | `main` | 云端干活主力，全套记忆与工具（官方 bot 插件承载） |
+| QQ 群 | `rana-qq-public` | 公共号，只有公开版记忆，物理隔离。群消息由自研边车 **qq-sidecar** 经 **SnowLuma**（OneBot v11 个人号）收进、转 `rana-qq-public` 应答后回群（11-02 起群/私聊通道分工拍板，两通道并存） |
 
 > 历史注脚：早期做过「微信在 main / rana-rp 之间热切换」的批处理（`wechat-mode-*.cmd`），09-12 起已作废——三渠道三 agent 固定分工后不需要切了，本地残留文件仅作纪念。
 
@@ -175,7 +175,9 @@ K:\OpenClaw
 ├── AGENTS.md              ← 给 code agent 的入场规矩+速览（AI 进场第一份）
 ├── PROJECT-MAP.md         ← ★ 面向 AI 的项目地图：代码地图/按任务入手/红线/演进时间线（新窗口先读）
 ├── KNOWN-ISSUES.md        ← 工程问题台账：每个坑的症状/根因/解法/状态（顶部有索引），本项目最值钱的文件之一
-├── PROJECT-STATE-2026-10-17.md ← 实查核验的状态快照（对齐现状以此为准；含实查配方）
+├── PROJECT-STATE-2026-11-03.md ← 实查核验的状态快照（对齐现状以此为准；含实查配方；10-17 旧版已归档）
+├── GLOSSARY.md            ← 术语表：人物图谱/圈层/浇水/求测人档案等口径（改口径先改这里）
+├── docs/adr/0001-person-graph-as-markdown-tables.md ← 架构决策记录：图谱为何是 markdown 表格而非图数据库
 ├── PROJECT-ANALYSIS.md    ← 09-14 历史分析（已加过期横幅，留档）
 ├── OPTIMIZATION-ROADMAP.md ← 09-14 优化施工图（历史留档，大部分已落地）
 ├── OPEN-SOURCE-ROADMAP.md ← 开源任务书：五阶段路线（可移植/英文门面/框架化）
@@ -198,13 +200,13 @@ K:\OpenClaw
 │   └── rp-soul-test/          ← RP 人格回归测试（智谱 glm-5.3 / glm-5.3-flash 双档对比；reports/ 已 gitignore）
 └── rana-web/              ← ★ 自建 Web 前端 + 边车脚本
     ├── index.html / vite.config.ts / tsconfig.json
-    ├── vitest.config.ts / tests/unit/ ← 单测 120 用例（reasoning/fateCore/git-activity-lib/memory-bridge-parse/reconnect-backoff/person-graph-parse/person-graph-def）
-    ├── server/               ← ★ 本地后端：2026-10 把原挤在 vite.config.ts 的二十三组中间件按域拆分
+    ├── vitest.config.ts / tests/unit/ ← 单测 138 用例（reasoning/fateCore/git-activity-lib/memory-bridge-parse/memory-bridge-core/reconnect-backoff/person-graph-parse/person-graph-def）
+    ├── server/               ← ★ 本地后端：2026-10 把原挤在 vite.config.ts 的二十四组中间件按域拆分
     │   ├── index.ts          装配 buildServerPlugins()（vite.config.ts 只剩约 40 行）
     │   ├── lib/              公共工具：paths(状态目录 / 可移植根 RANA_WEB) · config(读 openclaw.json) · exec · http(json/readBody/isLoopback)
     │   └── plugins/          每域一个文件：provider-config/sys-status/avatar/news/study/events/bangumi/life/fate/
     │                         model-params/model-test/agent-info/qq-profile/dev-config/agents/
-    │                         sessions-cleanup/context/approvals/memory/person-graph/bridge-sync/trajectory
+    │                         sessions-cleanup/context/approvals/memory/person-graph/bridge-sync/trajectory/qq-sidecar
     ├── src/
     │   ├── App.tsx            根组件：全部页面视图的装配（每页套 ErrorBoundary 兜底，坏一块不白全站）
     │   ├── styles.css         全部样式（2,000+ 行，房间场景/主题变量都在这）
@@ -226,12 +228,12 @@ K:\OpenClaw
     │       ├── 会话三件套：Sidebar / ChatStream / Composer（+ Topbar、TopNav、Room 她的房间）
     │       ├── 页面：SysPage(状态) / CronPage / ApprovalsPage(审批) / NewsPage /
     │       │        PlanningPage(🗺规划四合一：PlanningOverview 总览 / StudyPage+StudyQuiz+StudyGoalsPage 课表与待办 / PlanningLibrary 内容库) /
-    │       │        CalendarPage(全局日历) / BangumiPage(追番) / MemoryPage(🧠记忆) / AppsPage(程序：万年历/八字紫微/摇卦，apps/ 下子组件) / GroupsPage(群画像) / TracePage(🔍过程·轨迹回放)
+    │       │        CalendarPage(全局日历) / BangumiPage(追番) / MemoryPage(🧠记忆) / AppsPage(程序：万年历/八字紫微/摇卦，apps/ 下子组件) / GroupsPage(群画像) / QqSidecarPage(🐧QQ陪伴) / TracePage(🔍过程·轨迹回放)
     │       └── 面板与弹窗：UsagePanel(用量/超参调参/快捷命令/技能与MCP卡) / SettingsModal /
     │                LmStudioModal / CloudConfigModal / SystemCleanupModal(系统会话清理) / ModelTuningCard / AgentKitCard / ErrorBoundary
     ├── vite.config.ts        装配层（约 40 行）：react + buildServerPlugins() + /gateway、/lmstudio 代理；实现见 server/
     ├── start-rana.cmd        一键启动（网关+vite+浏览器；路径全相对解析，换机器不用改）
-    ├── start-gateway.cmd     网关启动器（状态目录相对推导 + node/openclaw.mjs 自动探测 + 配置含 LM Studio 时拉起 embedding 看门狗）
+    ├── start-gateway.cmd     网关启动器（状态目录相对推导 + node/openclaw.mjs 自动探测 + 配置含 LM Studio 时拉起 embedding 看门狗；qq-sidecar/config.json 存在时顺带拉起 QQ 陪伴边车）
     ├── local-overrides.example.cmd ← 本机个性化覆盖模板（node 路径/状态目录；真实文件 gitignore）
     ├── memory-bridge.mjs     三腿共享记忆桥（cron 每小时；真名/化名映射在 gitignore 的 identity 文件里）
     ├── memory-bridge-parse.mjs 桥纪要解析纯函数（10-17 批次B 抽取，22 用例）
@@ -244,9 +246,11 @@ K:\OpenClaw
     ├── cron-session-cleanup.mjs 系统会话清理手术（停网关→备份→清 placement 残留→重启→删 cron 父会话；会话页左下角入口，--dry-run 只盘点）
     ├── lib/rana-config.mjs   边车共享小工具：状态目录定位 + SecretRef apiKey 解析（含 rana-config.d.mts 类型声明）
     ├── lib/agent-bridge.mjs  学习 / 问卜 / 人生规划三桥的共享实现（上面三个 *-agent.mjs 只是薄封装，2026-10 合并去重）
+    ├── lib/memory-bridge-core.mjs 记忆桥两腿共享实现（读会话库/调模型/日志；11-01 收拢，13 用例单测）
     ├── git-activity.mjs      Git 活动统计（日报/周报/月报口径）
     ├── git-activity-cron.mjs cron 直跑包装：统计+报告落盘（--out），配独立任务读文件分段推送 QQ
     ├── git-activity-lib.mjs 统计口径纯函数（10-17 批次B 抽取，17 用例）
+    ├── qq-sidecar/           QQ 个人号陪伴边车（SnowLuma OneBot v11 收发 + 人格参数包装 + CLI 单轮应答；config.json/state/ gitignore；随网关常驻，端口锁 47612 单实例）
     └── design-mockups/       v2 界面的五版设计稿（纯 HTML 静态原型，从 a 到 e 迭代到「她的房间」）
 ```
 
@@ -254,7 +258,7 @@ K:\OpenClaw
 
 ## 🖥️ 界面功能总览
 
-十二个页签曾是历史峰值；现为十一个页签 + 三层弹窗，全部功能都长在界面上，**命令行只做兜底**（这是本项目的铁律，详见「技术亮点」第 6 条）。页签可以按住左右拖动换位置，顺序记在本地。
+十二个页签 + 三层弹窗，全部功能都长在界面上，**命令行只做兜底**（这是本项目的铁律，详见「技术亮点」第 6 条）。页签可以按住左右拖动换位置，顺序记在本地。
 
 ### 💬 会话（主页）
 - 流式输出气泡，带「准备工作区…启动模型…」的**状态行**（run 生命周期可视化）；
@@ -312,8 +316,14 @@ K:\OpenClaw
 ### 👥 群画像
 QQ 公共号**自己养出来的**群画像：群档案、群友档案、每周群报——她每晚 4:30 用 group-analyst 技能自己增量更新，这个页面**纯只读展示**（经只读端点，零写入入口），外加一个「总结模型」选择器，改的是两个画像 cron 任务的模型（默认跟随她的主力模型）。
 
+### 🐧 QQ 陪伴
+「她的房间」之外的另一扇窗：**SnowLuma**（OneBot v11 个人号 QQ 客户端）在 3001/3000 端口收发 QQ，自研边车 qq-sidecar 把白名单群的消息按合成窗口攒批、按人格参数（潜水率/表情率/打字节奏）包装后，转 `rana-qq-public` **CLI 单轮应答**（约 46 秒/轮，无流式——复用网关既有鉴权，零设备配对；WS 直连网关会撞 operator scope 与 Origin 校验，见台账 11-02 条目）再回群。本页**只读+启停**：sidecar 是否在跑、登录账号、WS 连接、群友感参数、最近收到的消息与回复、日志尾巴一眼清，配启动/停止/重启按钮；**不做任何配置写入**——配置在本地 gitignore 的 config.json（公开模板见 config.example.json）。单实例端口锁 47612 防重复回消息。
+
 ### 🧠 记忆
-直接翻看和编辑 Rana 的记忆与人设文件，分三组：**工作体（main）/ RP 体 / 私密层**。**白名单制**安全模型：前端只传条目 key，key→路径的映射全在服务端，不接受传路径；机器维护文件（MEMORY.md、共享纪要、巡检状态等）服务端标 `editable=false`，保存会被 400 拒绝——人写的内容才可编辑；私密组**进人和保存各有一次确认**，内容只在本地 UI 展示。
+直接翻看和编辑 Rana 的记忆与人设文件，分三组：**工作体（main）/ RP 体 / 私密层**，页内另有「🕸 人物图谱」页签：把 `personal/graph.md` 的三张表（人物/事件/连线）渲染成星型关系图，点击节点弹卡看原文、✏️ 编辑原文（服务端回环校验 + .bak 备份 + 2MB 上限）；连线两端必须与节点名精确一致，对不上的边自动跳过。口径与边界见根目录 GLOSSARY.md 与 docs/adr/0001（图谱为何是 markdown 表格而非图数据库）。**白名单制**安全模型：前端只传条目 key，key→路径的映射全在服务端，不接受传路径；机器维护文件（MEMORY.md、共享纪要、巡检状态等）服务端标 `editable=false`，保存会被 400 拒绝——人写的内容才可编辑；私密组**进人和保存各有一次确认**，内容只在本地 UI 展示。
+
+### 🔍 过程
+会话的「行车记录仪」：按 run 导出会话轨迹（`/__rana/trajectory` 导出 events.jsonl，导出走 CLI 子进程落状态目录，瘦身 2137KB→212KB），页内按 run 分组回放**每个工具调用与结果原文**——「她到底收到了什么、干了什么」不再靠猜；也可从聊天会话右键直达对应 run。协议层的直播（session.tool 事件、chat 五态）见 rana-web/docs/observability.md 字典。
 
 ### 弹窗层
 - 🎨 **外观设置**：主题色（乐奈绿默认，8 个 MyGO 应援色预设 + 自定义色历史）、背景图（面板自动半透明透出）、昼夜模式、自定义头像上传（≤4MB，存本地 `.avatars/`）。全部即时生效、localStorage 记忆；
@@ -361,7 +371,7 @@ QQ 公共号**自己养出来的**群画像：群档案、群友档案、每周�
 
 ## 🧩 深入：没有后端的全栈——Vite 中间件当后端
 
-「网页要读电脑状态、要改配置文件，后端呢？」——**没有独立后端进程**。二十三组 Vite 插件（2026-10 起按域拆分在 `rana-web/server/`，`vite.config.ts` 只剩约 40 行装配）直接把接口挂到开发服务器上；`configurePreviewServer` 把同样的中间件挂到生产预览服务上，所以 `npm run dev` 和 `npm run preview` 行为一致，始终是单进程。
+「网页要读电脑状态、要改配置文件，后端呢？」——**没有独立后端进程**。二十四组 Vite 插件（2026-10 起按域拆分在 `rana-web/server/`，`vite.config.ts` 只剩约 40 行装配）直接把接口挂到开发服务器上；`configurePreviewServer` 把同样的中间件挂到生产预览服务上，所以 `npm run dev` 和 `npm run preview` 行为一致，始终是单进程。
 
 > 给新手的一句话：Vite 的开发服务器本质是个 Node 程序，允许你往它身上挂自己的接口。请求不进打包产物，只在本地服务器这一层就被拦下处理了。这对「纯本地自用」的工具来说是零成本的架构简化。
 
@@ -413,7 +423,7 @@ QQ 公共号**自己养出来的**群画像：群档案、群友档案、每周�
 
 **晚报安全版摘要（2026-10-06 起）**：桥顺手把当天 [RP] 行交给 RP 模型软化成 80 字内的中性散文，写到 `workspace-main/memory/evening-digest.md`——文件名刻意不含 shared-rana 字样，绕开 private-memory-gate 的路径闸（10-01 云端审查案后装的硬闸门曾把云端晚报任务拦到陪伴侧长期「暂缺」）。当天内容没变不重做（省额度）；软化结果还要过一道隐私词网，不过关整段降级成计数行。云端 22:00 晚报任务直接读这份摘要，「🌙 陪伴侧动态」从此不再缺席。
 
-另有一个**私密记忆桥**（`private-memory-bridge.mjs`，全链路本地、含行为账本「模型识别、代码计数」的设计），因属私人基础设施未入公开仓库，此处不展开。
+另有一个**私密记忆桥**（`private-memory-bridge.mjs`，含行为账本「模型识别、代码计数」的设计；纪要提炼 2026-11-01 起走 RP 聊天同款云端中转通道——原文出本地这件事早已发生，提炼不新增暴露面，主人拍板），因属私人基础设施未入公开仓库，此处不展开。
 
 ### news-report.mjs — 早报生成器
 
@@ -436,6 +446,10 @@ QQ 公共号**自己养出来的**群画像：群档案、群友档案、每周�
 ### tools/sse-fix-proxy.mjs — RP 中转站流式修复代理（随网关常驻）
 
 RP 换用云端中转模型后踩到的坑：中转站的 SSE 流从不发 `finish_reason` 块和 `[DONE]` 结束标记（内容本身完整），OpenClaw 严格按协议收流，等不到结束标记就把整条回复判失败丢弃——微信侧表现为「她不回话了」。此代理夹在网关与中转站之间（RP provider 指向 `127.0.0.1:18801`）：请求原样转发（**密钥仍由网关持有，代理不存密钥**），响应为 SSE 且缺结束标记时在流尾补上，非 SSE 原样透传。端口锁防多开，由 `start-gateway.cmd` 随网关拉起，日志 `%TEMP%\openclaw\sse-fix-proxy.log`。
+
+### rana-web/qq-sidecar/ — QQ 个人号陪伴边车（随网关常驻）
+
+「她的房间」之外，Rana 还有一扇 QQ 窗：**SnowLuma**（OneBot v11 的个人号 QQ 协议端，WS 3001 收 / HTTP 3000 发）负责 QQ 收发，自研边车 qq-sidecar 夹在中间：白名单群的消息按合成窗口（3.5 秒）攒批、按人格参数（潜水率/表情率/打字节奏模拟）包装，转 `rana-qq-public` **CLI 单轮应答**（约 46 秒/轮，无流式——复用网关既有鉴权、零设备配对；WS 直连网关会撞 operator scope 与 Origin 校验，见台账 11-02 条目）再回群。单实例端口锁 47612 防重复回消息；config.json 与 state/ 全 gitignore（公开模板 config.example.json 无任何真实账号），由 start-gateway.cmd 在 config.json 存在时顺带拉起；前端「🐧 QQ 陪伴」页可看状态/启停（只读+按钮，不写配置）。群/私聊分工：群消息归这条链路，官方 bot 插件承载 main 私聊（11-02 拍板，两通道并存）。
 
 ### rana-web/backup-check.mjs — 备份健康自检（每晚两段式）
 
@@ -477,17 +491,23 @@ OpenClaw 的 **skill（技能）** 是给 agent 的专项能力包：一个目�
 | owner-analyst | 主人画像自学习：翻对话增量自己更新画像与周报，稳定结论沉淀进 USER/MEMORY | cron【画像·每日增量 4:30】【画像·周报 周日 21:00】 |
 | calendar-event | 日历管家：面试/约会/活动写进全局日历；查询今天/本周安排 | 聊天触发词（「帮我记下」「这周有什么安排」） |
 | job-match | JD×简历匹配分析 + 模拟面试 | 聊天触发词（发 JD、说「面我」） |
-| lesson-slide-deck | 每日课件 PPT（python-pptx 深底风格）并逐字校验材料口径 | 聊天/开课流程 |
+| bazi | 八字排盘与断语草稿（浏览器本地算好盘才问她） | 程序页玄学专区（fate-agent 专用会话） |
+| yaogua | 三枚铜钱摇卦与卦辞对照 | 程序页玄学专区（fate-agent 专用会话） |
 | pc-power | 关机/定时关机/取消/睡眠 | 聊天触发词 |
 | skill-scout | 觅食：发现新技能/插件/MCP 并向主人提案（**装东西必须主人明确批准**） | 每月 1 号 cron 月度觅食 + 心跳/聊天发现能力缺口时 |
 | teach | OpenClaw 官方样例技能（教学流程），本项目未依赖 | 官方自带 |
 
-### rana-qq-public 的自装技能（2 个）
+### rana-qq-public 的自装技能（9 个）
 
 | 技能 | 干什么 | 谁叫醒 |
 | --- | --- | --- |
 | group-analyst | 群画像自学习：翻群聊增量更新群档案、群友画像、周报（群画像页只读展示的就是它的产出） | cron【群画像·每日增量 4:30】【群画像·周报 周日 21:00】 |
 | moegirl-lookup | 聊到动漫角色/作品没把握时先查萌娘百科再回答，查完记本地档案 | 群聊语义触发（防幻觉条款） |
+| bazi / yaogua / ziwei | 群聊算卦三件：八字、摇卦、紫微（术语自动括号解释） | 群聊指令/语义触发 |
+| fate-archive | 求测人档案一人一档（四节固定结构），算卦后自动建档、追问时查档 | 群聊算卦链路 |
+| mail-send | HTML 卦报私密送达邮箱 | 算卦报告有邮箱时 |
+| msg-recall | 管理员撤回 bot 消息（transcript 取 msgId，超 2 分钟仍可撤） | 算卦输出后按需 |
+| suan-help | /helps 与 /指北 速览（dist 补丁读 short.md） | 群聊指令 |
 
 ### rana-rp：不挂自装技能
 
@@ -499,34 +519,34 @@ RP 会话只保留人格与最小工具集，一个自装技能都不装——�
 
 ### 全系统班表（cron 全景，排障先对这张表）
 
-> 以下是作者自用配置的实际班表（2026-10-07 复核，时区 Asia/Shanghai）。开箱用户没有这些任务，按需自建；code agent 排障时以 `openclaw cron list` 的实时输出为准。
+> 以下是作者自用配置的实际班表（2026-11-03 复核，时区 Asia/Shanghai；11-03 实查时个别班次停用/误差班的状态见 PROJECT-STATE-2026-11-03.md，班表只描述设计班次）。开箱用户没有这些任务，按借自建；code agent 排障时以 `openclaw cron list` 的实时输出为准。
 
 | 任务 | 时刻 | 干什么 | 模型 |
 | --- | --- | --- | --- |
 | 心跳 `heartbeat:main` | 每 3 小时 | 系统自检+轻问候（**隔离会话禁 exec**；模型钉在 `agents.defaults.heartbeat.model`） | glm/glm-5.3-flash |
 | 巡检（零成本） | 每 30 分钟 | `health-patrol.mjs` 四项体检，异常白天聚合发 QQ | 不用模型 |
 | 记忆桥 | 每小时 ：00 | 三腿纪要提炼（RP 腿云端优先、本地兜底）+ 顺手产出晚报安全摘要 | 腿各自 |
-| 私密记忆桥 | 每小时 :17 | 私密纪要 + 行为账本（全本地） | 本地 |
+| 私密记忆桥 | 每小时 :17 | 私密纪要（提炼走云端中转，11-01 起）+ 行为账本（本地计数） | 云端 0826 |
 | 早晚问候 | 10:00 / 21:00 | 定时问候推送（`channel="qqbot"` 必须带上） | glm |
 | 主人画像·每日增量 | 4:30 | owner-analyst 翻对话增量 | glm |
-| 群画像·每日增量 | 4:30 | group-analyst 翻群聊增量（qq-public 值守） | qwenanliang/deepseek-v4-pro（免费额度 403 退避中，待拍板换模型或充值） |
+| 群画像·每日增量 | 4:30 | group-analyst 翻群聊增量（qq-public 值守） | glm/glm-5.3-flash（10-17 切换；11-03 实查此班停用中） |
 | 主人画像·周报 | 周日 21:00 | owner-analyst 周度汇总 | glm |
-| 群画像·周报 | 周日 21:00 | group-analyst 周度汇总 | qwen |
-| 学习周报 | 周日 21:00 | 课表周汇总推送 | main 主力 |
+| 群画像·周报 | 周日 21:00 | group-analyst 周度汇总 | glm/glm-5.3-flash（10-17 切换） |
+| 学习周报 | 周日 21:00 | 课表周汇总推送（已停用，11-03 实查） | main 主力 |
 | Git 活动·日/周/月报（直跑） | 21:30 / 周一 09:00 / 每月 1 号 09:00 | `git-activity-cron.mjs` 直跑统计并落盘报告（trusted automation 零审批，实测 <1s） | 不用模型 |
 | Git 报告·QQ 推送 | 日 21:32 / 周一 09:02 / 1 号 09:02 | 读报告文件分段推送 QQ | glm |
 | 早报生成 | 每天 08:00 | `news-report.mjs` 直跑落盘（页面打开当天没有时也会现生成兜底） | 不用模型（总结用 flash） |
 | QQ 晚报 | 22:00 | 汇总当天日程/学习/待办 + 陪伴侧安全摘要（evening-digest.md）写日报推送 QQ（带状态红线：没办成的不准写成办成） | glm |
 | 备份自检（两段式） | 23:00 / 23:05 | `backup-check.mjs` fail-closed 判定备份健康（运行标记/远端同步/DB 快照新鲜度），异常才告警 | 不用模型 |
 | skill-scout 月度觅食 | 每月 1 号 09:10 | 能力缺口自查，发现新技能/插件/MCP 向主人提案 | main 主力 |
-| 学习睡前小结 | 22:30 | 今日课表小结推送 | glm |
+| 学习睡前小结 | 22:30 | 今日课表小结推送（已停用，11-03 实查） | glm |
 | Daily Private Backup | 17:30 | 私有备份链路 | 不用模型 |
 | Memory Dreaming（⚙ 系统） | 3:00 | 记忆做梦固化 | 系统 |
 | skill-collection-review（⚙ 系统） | 每 7 天 | 技能收集回顾 | 系统 |
 
 ### 进程拓扑：谁常驻、谁即起即灭
 
-- **常驻四件**：网关（含全部 cron、渠道连接、记忆索引）、Vite dev/preview（二十三组中间件即后端）、embedding 看门狗与 SSE 修复代理（由 `start-gateway.cmd` 按条件/无条件顺带拉起，端口锁防多开）；
+- **常驻五件**：网关（含全部 cron、渠道连接、记忆索引）、Vite dev/preview（二十四组中间件即后端）、embedding 看门狗与 SSE 修复代理、QQ 陪伴边车 qq-sidecar——后三样由 `start-gateway.cmd` 按条件（qq-sidecar 看 config.json 是否存在）/无条件顺带拉起，端口锁防多开；
 - **即起即灭**：边车脚本（cron 到点拉起，跑完退出）、专用会话桥（页面动作拉起）、`agent-info` 的 CLI 子进程；
 - **改动的生效方式**：`openclaw.json` 保存即热重载；`bindings` 渠道绑定要重启网关；前端代码 Vite 热更；`SOUL/AGENTS/MEMORY` 等人格记忆文件开新会话生效。
 
@@ -552,7 +572,7 @@ RP 会话只保留人格与最小工具集，一个自装技能都不装——�
 | | main | rana-rp | rana-qq-public |
 | --- | --- | --- | --- |
 | 定位 | 干活力：写代码、查资料、跑任务 | 陪伴力：人格化对话 | 群里营业：面向群友的公共号 |
-| 大脑 | 云端 deepseek-v4.1-flash | 云端 RP 专精 nalang（经本地代理）／本地微调 14B（可切回） | 云端 deepseek-v4.1-flash（同款） |
+| 大脑 | 云端 glm-5.3-flash | 云端 RP 专精 nalang（经本地代理）／本地微调 14B（可切回） | 云端 glm-5.3-flash（同款） |
 | 渠道 | QQ 私聊 + 网页控制台 | 微信 | QQ 群 |
 | 记忆 | 全套（含群聊见闻，单向喂入） | 本地记忆 + 共享桥 | **只有公开版记忆**（群聊见闻），无任何私人档案 |
 | 人格文件 | 无私密注入 | 经 persona-gate 钩子注入，**fail-closed**（钩子异常就拒绝服务，绝不裸奔） | 公开版人设 |
@@ -576,7 +596,7 @@ RP 会话只保留人格与最小工具集，一个自装技能都不装——�
 └─ 私密记忆（独立目录：不在任何 workspace、不被记忆索引扫描、不被共享桥读取）
 ```
 
-设计原则一句话：**数据往哪个层级流，取决于它最私密的时候在哪**。共享桥的纪要仍在本地提炼（RP 腿固定走本地 LM Studio 端点）、群纪要一律化名；RP 聊天本体 10 月起默认经 RP 中转站（模型上云是主人拍板的取舍；本地微调 14B 保留可切回，私密层文件仍只在本地）。
+设计原则一句话：**数据往哪个层级流，取决于它最私密的时候在哪**。共享桥纪要按腿各自通道提炼（RP 腿云端优先、绝不 JIT 拉起本地模型挤显存），群纪要一律化名；RP 聊天本体 10 月起默认经 RP 中转站（模型上云是主人拍板的取舍；本地微调 14B 保留可切回，私密层文件仍只在本地）。
 
 ### 公开镜像的隐私纪律
 
@@ -702,11 +722,11 @@ GBK 输出解码、PowerShell 显式 UTF8、Node `--tls-max-v1.2` 绕 TLS 1.3 �
 | --- | --- |
 | [PROJECT-MAP.md](PROJECT-MAP.md) | ★ 面向 AI 的项目地图：代码地图/按任务入手/红线/演进时间线（新窗口新 agent 先读） |
 | [KNOWN-ISSUES.md](KNOWN-ISSUES.md) | 排障先查这里（顶部有索引）；新坑解决后回写 |
-| [PROJECT-STATE-2026-10-17.md](PROJECT-STATE-2026-10-17.md) | 实查状态快照：真实挂账/红线/实查配方（对齐现状以此为准） |
+| [PROJECT-STATE-2026-11-03.md](PROJECT-STATE-2026-11-03.md) | 实查状态快照：真实挂账/红线/实查配方（对齐现状以此为准） |
 | [OPTIMIZATION-ROADMAP.md](OPTIMIZATION-ROADMAP.md) | 09-14 优化施工图（历史留档，大部分已落地） |
 | [OPEN-SOURCE-ROADMAP.md](OPEN-SOURCE-ROADMAP.md) | 开源任务书：五阶段路线（可移植/英文门面/框架化） |
 | [AGENTS.md](AGENTS.md) | code agent 入场须知+速览（公开版） |
-| `rana-web/tests/` + `.github/workflows/ci.yml` | vitest 120 用例；push/PR 自动 build+test |
+| `rana-web/tests/` + `.github/workflows/ci.yml` | vitest 138 用例；push/PR 自动 build+test |
 | `setup.cmd` / `setup-templates/` | 开箱初始化与发行模板 |
 | `rana-web/server/` | 「后端」全部代码（plugins/ 各域中间件 + lib/ 公共工具），vite.config.ts 只剩装配，注释齐全 |
 | `rana-web/src/lib/gateway.ts` | 连接层，读懂它就读懂了半套前端 |
