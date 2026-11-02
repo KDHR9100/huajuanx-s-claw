@@ -42,4 +42,10 @@ rem See KNOWN-ISSUES.md entry 2026-09-25.
 findstr /C:"127.0.0.1:18801" "%OPENCLAW_STATE_DIR%\openclaw.json" >nul 2>nul
 if not errorlevel 1 start "" /B "%RANA_NODE%" "%~dp0..\tools\sse-fix-proxy.mjs"
 
+rem QQ companion sidecar: only when a local config.json exists (it is
+rem gitignored). Single-instance lock lives inside index.mjs, so calling
+rem start-gateway twice will not produce duplicate QQ replies.
+rem Logs: rana-web\qq-sidecar\state\sidecar.log
+if exist "%~dp0qq-sidecar\config.json" start "" /B "%RANA_NODE%" "%~dp0qq-sidecar\index.mjs"
+
 "%RANA_NODE%" --tls-max-v1.2 "%OPENCLAW_MJS%" gateway

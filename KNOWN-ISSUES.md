@@ -42,12 +42,12 @@
 | 症状域 | 搜索关键词 |
 | --- | --- |
 | 网关起不来/秒拒/空转/卡死 | `秒拒`、`空转`、`degraded`、`\\?\`、`DataCloneError`、`Async work scope`、`卡死病` |
-| QQ/微信不通/行为怪 | `user:c2c`、`ask_user`、`channelAccounts`、`静默装死`、`收图`、`分块流式` |
+| QQ/微信不通/行为怪 | `user:c2c`、`ask_user`、`channelAccounts`、`静默装死`、`收图`、`分块流式`、`missing scope`、`OneBot 401`、`qq-sidecar`、`cmd 碎片` |
 | 模型 400/403/超时/审查 | `Free quota`、`data_inspection`、`输出审查`、`content 块数组`、`maxTokens`、`SSE` |
 | LM Studio/显存 | `双实例`、`:2`、`JIT`、`ctx 2048`、`显存`、`embedding` |
 | 前端白屏/闪回/显示错 | `白屏`、`闪回`、`气泡弹两遍`、`页签不可达`、`闰`、`复读` |
 | cron 不跑/静默停摆 | `store 孤儿`、`静默降级`、`水位`、`罐头话`、`timed out`、`did not finish stopping` |
-| 备份/git 推送挂死 | `100MB`、`winnat`、`TLS connect`、`ECONNRESET`、`静默失败` |
+| 备份/git 推送挂死 | `100MB`、`migration-sync`、`会话池`、`filter-branch`、`WMI`、`winnat`、`TLS connect`、`ECONNRESET`、`静默失败` |
 | Tailscale/内网穿透不通 | `rx 0`、`DERP`、`3478`、`home DERP`、`lax`、`LastHandshake` |
 | WebUI 报来源被拒/连错网关 | `origin not allowed`、`allowedOrigins`、`publicOrigin`、`rewriteWsOrigin`、`18789`、`webchat connected` |
 | Windows 环境怪癖 | `GBK`、`heredoc`、`反斜杠`、`DPI`、`IAB` |
@@ -63,6 +63,20 @@
 ***
 
 ## 登记区
+
+## [已解决] QQ 公号接入网关三坑——token 直连无 operator scope / WS 缺 Origin 被拒 / .cmd 中英混排被 cmd 拆碎（2026-11-02）
+- 症状：自研 qq-sidecar 想直连本机网关 WS 代替 CLI 时，握手与 connect 都成功（protocol=4、server=2026.9.7），但 `sessions.list` 返回 `FORBIDDEN: missing scope: operator.read`；用纯 WS 探针连 `ws://127.0.0.1:18789` 时若不带 Origin 头，直接被拒 `origin not allowed`；把启动脚本写成 LF+中文注释的 `.cmd` 后双击，cmd 把一行拆成多截报 `'cal' 不是内部或外部命令`、`'NODE_EXE' 不是...`、`'t'`、`'o'` 等碎片错误。
+- 根因：①网关的 token 只证明「能进门」，operator 设备 scope 要靠配对授权，纯 token 握手拿到的 `auth.scopes=[]`，读写 RPC 全被 scope 门挡下；②网关有 allowedOrigins/origin 校验，WebSocket 客户端默认不发 Origin，服务端按浏览器客户端口径判定为来源非法；③cmd.exe 按系统代码页（zh-CN=GBK）逐字节解析批处理，UTF-8 中文注释 + LF 换行会被拆成非法片段。
+- 解决方案：①生产链路改走 CLI：`node <npm全局>/openclaw/openclaw.mjs agent --agent rana-qq-public --session-key qq:group:<群号> --message "<text>" --json --timeout 300`，复用网关既有鉴权、零设备配对（代价是每轮起一个进程、无流式）；②探针/自研 WS 客户端必须显式带 `Origin: http://127.0.0.1:18789`（或配置里的 allowedOrigins 之一）；③所有 `.cmd` 保持 **ASCII-only + CRLF**，写完用 PowerShell `[IO.File]::WriteAllText(path, text, [Text.Encoding]::ASCII)` 落地并校验 `nonAscii=0`。
+- 顺带两坑：SnowLuma 会给每个登录过的账号留一份 `onebot_<QQ>.json`，换号后旧文件 token 仍在但 401——必须逐个 `get_login_info` 探测「当前真正登录」的账号，不能按文件名顺序取；sidecar 重复实例会把同一条群消息回两遍，已在 `index.mjs` 加端口锁（47612）单实例化。
+- 状态：已解决（2026-11-02 实测群消息→agent→回群端到端成功，单轮约 46 秒；启动脚本与会话 key 规则已固化，前端「🐧 QQ 陪伴」页可看/启停）。
+
+## [已解决] 备份仓 push 反复挂死积压 7 提交——migration-sync 快照超 100MB 硬限+exec 会话池收割长传输+HTTPS 代理上传死锁（2026-11-02）
+- 症状：他班告警「备份仓 main 落后远端 7 提交、push 失败」。HTTPS 直连/挂代理/postBuffer 调大全部卡死无输出；换 SSH 443 后每班 push 在压缩段被强行收走（日志一律断在 Compressing 98% 同款位置），系统里留 9 个半死 git/ssh 僵尸进程（三套完整 push 流水线互踩）。WMI 脱管班次首次冲进传包阶段，暴露真相：卡在 312/788 对象、字节数涨到 1.4GiB 不见头。
+- 根因（三层）：①**必然失败的大对象**——待推历史含 5 个 `rana-web/.migration-sync/` 迁移快照（668.8MB×1、504.3MB×3、142.3MB×1），超 GitHub 单文件 100MB 硬限，push 到最后必被远端拒收，全程白烧；②**exec 会话池收割**——模型回合边界收走 exec 会话时，杀的是会话对象不是进程树，git pack-objects 变孤儿继续挂着（CPU 4.5% 爬行），下一班又在旧尸体没清的情况下重推，多套流水线互踩；③HTTPS+Clash 类代理对 git 分块上传死锁（下载 ls-remote/fetch 通、上传挂死），postBuffer 调大无效，SSH 443 直连不经代理即绕开。
+- 解决方案：①`Get-CimInstance Win32_Process` 按命令行匹配清光僵尸流水线（别只杀会话）；②`git branch backup-pre-rewrite main` 留保底分支 → `filter-branch --index-filter 'git rm -r --cached --ignore-unmatch -q "rana-web/.migration-sync"' origin/main..main` 从 7 个待推提交摘除该目录（只动 git 历史，磁盘文件不动）→ `.gitignore` 加 `rana-web/.migration-sync/` 防复发（54bef50）；③WMI 脱管 `Invoke-CimMethod Win32_Process Create` 发 push（输出重定向落盘日志），SSH 443：`git -c core.sshCommand="C:/Windows/System32/OpenSSH/ssh.exe -o BatchMode=yes -o ServerAliveInterval=15" push ssh://git@ssh.github.com:443/<私有备份仓>.git main`（git 自带 ssh 有 Host key 校验坑，必须指定系统 OpenSSH；仓址按铁律不入公开仓，本机 push-public.cmd 之外另有私有脚本持有）。验收：远端指针 d256cda→54bef50 与本地一致，积压清零；company 分支零积压。
+- 可复用经验：①**长传输任务（push/fetch/rsync/大下载）一律 WMI 脱管+日志落盘**，exec 会话被收走任务还能活，`Get-Content` 盯日志文件即可；②**SSH 替代 HTTPS** 是这台机器推 GitHub 的可靠姿势（凭据/token/网络全排除了才确认是代理上传死锁）；③**push 卡住先算待推体积**——`cat-file --batch-check="%(objectname) %(objecttype) %(objectsize) %(rest)` 一次拿全 sha+大小+路径，我这次的 PowerShell 管道喂 git stdin、手写 sha→path 映射两种写法全翻车；④多班 push 互踩会伪装成网络卡死，动手前先 `Get-CimInstance` 清场；⑤以前「卡在 Compressing 98%」其实是孤儿进程被割裂的假象+必然失败的传输，别当稳定性玄学；⑥**URL 式 push（`push ssh://... main`）不更新 `refs/remotes/origin/main`**——推完 `status -sb` 照样假报落后，补一发 `git fetch origin` 或手动 `update-ref` 对齐（11-02 晚实战：陈旧指针 d256cda 差点误诊成积压 7 笔）。
+- 状态：已解决（2026-11-02 00:35 验收，d256cda..54bef50 落地；backup-pre-rewrite 保底分支留存旧历史，磁盘快照原样未动）。
 
 ## [已解决] canon-rag 检索钩子被信任机制拦截——allowConversationAccess 缺失，RAG 注入静默不生效（2026-11-01）
 - 症状：canon-rag 在 plugins.allow 白名单且 CLI 显示 enabled，但启动日志报 `[plugins] typed hook "before_prompt_build" blocked ... must set plugins.entries.canon-rag.hooks.allowConversationAccess=true`，RAG 检索注入（prependContext）静默不工作；插件本体照常出现在激活列表（"5 plugins"），极难察觉。

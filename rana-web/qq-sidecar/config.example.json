@@ -1,0 +1,37 @@
+{
+  "onebot": {
+    "wsUrl": "ws://127.0.0.1:3001",
+    "httpUrl": "http://127.0.0.1:3000",
+    "accessToken": "",
+    "homeDir": ""
+  },
+  "openclaw": {
+    "agent": "rana-qq-public",
+    "mjsPath": "",
+    "stateDir": "K:/OpenClaw/.openclaw/.openclaw",
+    "timeoutSeconds": 300
+  },
+  "allow": {
+    "groups": [123456789],
+    "private": []
+  },
+  "reply": {
+    "maxChars": 500,
+    "prefixNickname": true
+  },
+  "persona": {
+    "mergeWindowMs": 3500,
+    "minReplyIntervalMs": 8000,
+    "atTrigger": true,
+    "keywordTrigger": ["rana", "乐奈", "rana酱", "小rana", "拉娜"],
+    "lurkRate": 0.3,
+    "emojiRate": 0.35,
+    "typingBaseMs": 500,
+    "typingPerCharMs": 18,
+    "typingMaxMs": 3000
+  },
+  "log": {
+    "file": "state/sidecar.log",
+    "activity": "state/activity.jsonl"
+  }
+}

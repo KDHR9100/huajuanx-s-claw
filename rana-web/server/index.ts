@@ -12,6 +12,7 @@ import { ranaModelParamsMiddleware } from "./plugins/model-params";
 import { ranaModelTestMiddleware } from "./plugins/model-test";
 import { ranaAgentInfoMiddleware } from "./plugins/agent-info";
 import { ranaQqProfileMiddleware } from "./plugins/qq-profile";
+import { ranaQqSidecarMiddleware } from "./plugins/qq-sidecar";
 import { ranaDevConfig } from "./plugins/dev-config";
 import { ranaAgentsMiddleware } from "./plugins/agents";
 import { ranaSessionsCleanupMiddleware } from "./plugins/sessions-cleanup";
@@ -39,6 +40,7 @@ export function buildServerPlugins(): Plugin[] {
     ranaFateMiddleware(),
     ranaAgentInfoMiddleware(),
     ranaQqProfileMiddleware(),
+    ranaQqSidecarMiddleware(),
     ranaModelTestMiddleware(),
     ranaModelParamsMiddleware(),
     ranaSessionsCleanupMiddleware(),
