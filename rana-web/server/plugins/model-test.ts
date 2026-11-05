@@ -1,6 +1,6 @@
 import { resolveApiKey } from "../../lib/rana-config.mjs";
 import { readFullConfig } from "../lib/config";
-import { json } from "../lib/http";
+import { json, isLoopback } from "../lib/http";
 import type { Plugin } from "vite";
 
 /**
@@ -85,9 +85,7 @@ export function ranaModelTestMiddleware(): Plugin {
       json(res, 405, { error: "method not allowed" });
       return;
     }
-    const ra = req.socket?.remoteAddress ?? "";
-    const origin = String(req.headers?.origin ?? "");
-    if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(ra) || (origin && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin))) {
+    if (!isLoopback(req)) {
       json(res, 403, { error: "仅本机可操作" });
       return;
     }

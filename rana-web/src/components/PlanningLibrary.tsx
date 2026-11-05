@@ -6,6 +6,7 @@
 // 数据：rana-web/.life/library.json，走 /__rana/life/library*；拆解人生目标时她会引用这里的条目。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { LifeGoal } from "./PlanningOverview";
+import { fmtDateYMD as fmtDate } from "../lib/fmt";
 import Markdown from "./Markdown";
 import { useAppStore } from "../store/useAppStore";
 import { gateway } from "../lib/gateway";
@@ -34,10 +35,6 @@ type Draft = Omit<LibraryEntry, "id" | "addedBy" | "goalId" | "createdAt">;
 /** 搜集候选（比 Draft 多一个"库里已有"标记：网址记忆，重复出处默认不勾） */
 type Candidate = Draft & { alreadyIn?: boolean };
 
-const fmtDate = (ts: number) => {
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
-};
 /** 规划页自己的模型偏好（""=跟随专用会话当前模型），搜集/投喂/讲义/拆解共用 */
 const LIFE_MODEL_KEY = "life.model.v1";
 const LIFE_SESSION_KEY = "agent:main:life-planner";

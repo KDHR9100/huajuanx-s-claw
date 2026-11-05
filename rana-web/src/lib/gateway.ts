@@ -5,6 +5,7 @@
 import { buildDeviceAuthPayloadV3 } from "@openclaw/gateway-client/browser";
 import { loadBrowserIdentity } from "./identity";
 import { reconnectBackoffMs } from "./reconnectBackoff";
+import { extractThinking } from "./reasoning";
 import { useAppStore } from "../store/useAppStore";
 import type { ChatAttachment, ChatMessage, ModelInfo, OutgoingAttachment, SessionRow } from "./types";
 
@@ -454,7 +455,13 @@ class GatewayConnection {
       this.rememberFinalRun(p.runId);
       const msgId = ensureAssistant();
       const finalText = extractText(p.message) || useAppStore.getState().runs[key]?.text || "";
-      useAppStore.getState().patchMessage(key, msgId, { text: finalText, streaming: false, status: undefined });
+      const finalThinking = extractThinking((p.message as Record<string, unknown> | undefined)?.content);
+      useAppStore.getState().patchMessage(key, msgId, {
+        text: finalText,
+        streaming: false,
+        status: undefined,
+        ...(finalThinking ? { reasoning: finalThinking } : {}),
+      });
       useAppStore.getState().setRun(key, undefined);
       void this.refreshSessions();
       return;
@@ -504,6 +511,7 @@ class GatewayConnection {
     // 该回复已由 chat 流式事件渲染（run 进行中，或 final 已落）→ 跳过
     if (role === "assistant" && (s.runs[key] || (p.runId !== undefined && this.finalRunIds.has(p.runId)))) return;
     const text = extractText(msg);
+    const thinking = extractThinking(msg.content);
     const atts = mapServerAttachments(msg);
     if (!text && !atts) return;
     const list = s.messages[key] ?? [];
@@ -517,6 +525,7 @@ class GatewayConnection {
       ts: (msg.timestamp as number) ?? (msg.ts as number) ?? Date.now(),
       model: msg.model ? String(msg.model) : undefined,
       ...(atts ? { attachments: atts } : {}),
+      ...(thinking ? { reasoning: thinking } : {}),
     });
   }
 
@@ -632,6 +641,7 @@ class GatewayConnection {
         const role = String(m.role ?? "");
         if (role !== "user" && role !== "assistant") continue;
         const text = extractText(m);
+        const thinking = extractThinking(m.content);
         const atts = mapServerAttachments(m);
         if (!text && !atts) continue;
         mapped.push({
@@ -641,6 +651,7 @@ class GatewayConnection {
           ts: (m.timestamp as number) ?? (m.ts as number) ?? 0,
           model: m.model ? String(m.model) : undefined,
           ...(atts ? { attachments: atts } : {}),
+          ...(thinking ? { reasoning: thinking } : {}),
         });
       }
       store().setMessages(sessionKey, mapped);

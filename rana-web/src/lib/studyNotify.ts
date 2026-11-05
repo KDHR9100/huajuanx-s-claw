@@ -4,6 +4,8 @@
 // 到点后 15 分钟内仍补发；已完成的不提醒；没设时段的（纯日期型）不弹、由页面展示。
 // 没设时段的课算"今天该学"，由页面常驻卡负责展示，不弹窗。
 
+import { pad2, todayStr } from "./fmt";
+
 export interface NotifyCourse {
   id: string;
   title: string;
@@ -67,11 +69,6 @@ export function notifyPermission(): string {
   return typeof Notification === "undefined" ? "unsupported" : Notification.permission;
 }
 
-const pad2 = (n: number) => String(n).padStart(2, "0");
-const todayStr = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-};
 const nowHM = () => {
   const d = new Date();
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;

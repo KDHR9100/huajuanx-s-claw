@@ -5,6 +5,7 @@ import { generateKeyPairSync, sign as cryptoSign, createHash, randomUUID } from 
 import WebSocket from "ws";
 import { buildDeviceAuthPayloadV3 } from "@openclaw/gateway-client/browser";
 import { readGatewayToken, OPENCLAW_CONFIG, STATE_HOME } from "../lib/paths";
+import { isLoopback } from "../lib/http";
 import type { Plugin } from "vite";
 
 /**
@@ -25,8 +26,7 @@ export function ranaContextMiddleware(): Plugin {
       res.end(JSON.stringify({ error: "method not allowed" }));
       return;
     }
-    const ra = req.socket?.remoteAddress ?? "";
-    if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(ra)) {
+    if (!isLoopback(req)) {
       res.statusCode = 403;
       res.end(JSON.stringify({ error: "仅本机可查询" }));
       return;

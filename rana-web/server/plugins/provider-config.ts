@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileP } from "../lib/exec";
+import { writeJsonAtomic } from "../lib/fs-json";
 import { STATE_HOME, OPENCLAW_CONFIG, OPENCLAW_MJS } from "../lib/paths";
 import { readFullConfig, maskKey, isLocalProvider, providerReferences, type ProviderEntry } from "../lib/config";
 import type { Plugin } from "vite";
@@ -81,7 +82,7 @@ export function ranaProviderConfigMiddleware(): Plugin {
       cfg.agents.defaults.model = { ...cfg.agents.defaults.model, primary: firstModel };
     }
     cfg.models = { ...(cfg.models ?? {}), providers };
-    fs.writeFileSync(OPENCLAW_CONFIG, JSON.stringify(cfg, null, 2), "utf8");
+    writeJsonAtomic(OPENCLAW_CONFIG, cfg);
     return { ok: true as const, saved: id };
   };
 
@@ -96,7 +97,7 @@ export function ranaProviderConfigMiddleware(): Plugin {
     fs.copyFileSync(OPENCLAW_CONFIG, OPENCLAW_CONFIG + ".bak-cloud");
     delete providers[id];
     cfg.models = { ...(cfg.models ?? {}), providers };
-    fs.writeFileSync(OPENCLAW_CONFIG, JSON.stringify(cfg, null, 2), "utf8");
+    writeJsonAtomic(OPENCLAW_CONFIG, cfg);
     return { ok: true as const, deleted: id };
   };
 

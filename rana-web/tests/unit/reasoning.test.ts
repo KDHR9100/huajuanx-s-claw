@@ -2,7 +2,7 @@
 // 背景：本地微调 RP 模型与云端思考模型的输出经常带脏结构（伪思维链、封套回显、档案模仿），
 // 这条清洗管线是聊天页显示前的最后一道闸。用例形态取自 README「技术亮点4」记载的真实脏输出。
 import { describe, it, expect } from "vitest";
-import { splitReasoning, stripOpenclawEnvelope } from "../../src/lib/reasoning";
+import { splitReasoning, stripOpenclawEnvelope, extractThinking } from "../../src/lib/reasoning";
 
 describe("splitReasoning", () => {
   it("空输入 → 全空", () => {
@@ -195,5 +195,31 @@ describe("stripOpenclawEnvelope", () => {
 
   it("剥完只剩空白 → echo=true", () => {
     expect(stripOpenclawEnvelope("   \n  ")).toEqual({ echo: true, text: "" });
+  });
+});
+
+// 原生思考块提取：会话库 content 块数组里的 thinking/reasoning 块（此前前端一直丢弃不显示）
+describe("extractThinking", () => {
+  it("收集 thinking/reasoning 块文本，双换行拼接", () => {
+    const content = [
+      { type: "thinking", thinking: "第一段思考" },
+      { type: "text", text: "回复正文" },
+      { type: "reasoning", text: "第二段思考" },
+    ];
+    expect(extractThinking(content)).toBe("第一段思考\n\n第二段思考");
+  });
+
+  it("redacted_thinking（密文块）跳过", () => {
+    const content = [
+      { type: "redacted_thinking", data: "cipher" },
+      { type: "thinking", thinking: "可见思考" },
+    ];
+    expect(extractThinking(content)).toBe("可见思考");
+  });
+
+  it("无思考块或非数组 → 空串", () => {
+    expect(extractThinking([{ type: "text", text: "只有正文" }])).toBe("");
+    expect(extractThinking(undefined)).toBe("");
+    expect(extractThinking("正文字符串")).toBe("");
   });
 });

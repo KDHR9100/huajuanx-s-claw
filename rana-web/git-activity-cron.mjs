@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
  * git-activity-cron.mjs — git 统计直跑任务的 cron 包装：跑统计 → 落盘 → 推送 QQ 私聊
+import { resolveOpenclawMjs } from "./lib/rana-config.mjs";
  *
  * 用法：node git-activity-cron.mjs --period=today|week|month --out=<报告文件> [--notify=qqbot:c2c:<openid>]
  *
@@ -16,7 +17,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-const OPENCLAW_MJS = "C:/Users/Administrator/AppData/Roaming/npm/node_modules/openclaw/openclaw.mjs";
+const OPENCLAW_MJS = resolveOpenclawMjs();
 const CHUNK_LIMIT = 350;
 const here = path.dirname(fileURLToPath(import.meta.url));
 

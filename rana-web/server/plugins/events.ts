@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { RANA_WEB } from "../lib/paths";
 import { json, readBody, isLoopback } from "../lib/http";
+import { writeJsonBak } from "../lib/fs-json";
 import type { Plugin } from "vite";
 
 /**
@@ -55,14 +56,8 @@ export function ranaEventsMiddleware(): Plugin {
     }
   };
   const writeEvents = (f: EventsFile) => {
-    fs.mkdirSync(lifeDir, { recursive: true });
-    try {
-      fs.copyFileSync(eventsFile, eventsFile + ".bak");
-    } catch {
-      // 首次写入没有旧文件
-    }
     f.updatedAt = Date.now();
-    fs.writeFileSync(eventsFile, JSON.stringify(f, null, 2), "utf8");
+    writeJsonBak(eventsFile, f);
   };
   const sortedEvents = (f: EventsFile): EventsFile => ({
     ...f,

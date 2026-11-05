@@ -18,7 +18,7 @@
 | 智能体 | **开箱默认单 agent**：`main`（云端模型，网页控制台直接聊）。作者自用为三 agent：`main`（云端 glm-5.3-flash）+ `rana-rp`（RP 专精模型接微信——云端中转为主力、本地微调 14B 保留可切回）+ `rana-qq-public`（QQ 群公共号，物理隔离），`ownership=explicit` 显式路由，前端按实际存在的 agent 自动显隐 |
 | 前端 | React 18 + TypeScript + Vite 6 + zustand，无 UI 框架、全手写 CSS（约 16,200 行源码） |
 | 连接方式 | 浏览器 WebCrypto 生成 **Ed25519 设备身份**，挑战-签名握手 + token 鉴权；直连失败自动回退同源 `/gateway` 代理 |
-| 「后端」 | **没有独立后端进程**——Vite dev/preview 插件挂了二十四组 loopback-only 中间件（`/__rana/*`）充当本地后端 |
+| 「后端」 | **没有独立后端进程**——Vite dev/preview 插件挂了二十五组 loopback-only 中间件（`/__rana/*`）充当本地后端 |
 | 编码外包 | ~~acpx→DSH 派活~~（2026-10-25 迁移批1 随 WSL 生产链路一并移除） |
 | 边车自动化 | 独立 Node 脚本：记忆桥（每小时，三腿）、私密记忆桥（每小时）、系统巡检（30 分钟，异常主动 QQ 汇报）、早报（每天 8:00 + 页面按需）、备份健康自检（每晚两段式）、Git 活动统计（日/周/月报直跑+QQ 推送）；学习排课与问卜解卦走「专用会话桥」（页面按需触发）；QQ 陪伴边车 `qq-sidecar/`（随网关常驻，SnowLuma 个人号收发群消息）、embedding 看门狗与 SSE 修复代理随网关常驻 |
 | 本地算力 | LM Studio `:1234` 保留（RP 本地路：微调模型在库、可切回）；qwen3-embedding-0.6b 纯 CPU 常驻供记忆检索（看门狗锁单实例）；`tools/sse-fix-proxy.mjs` 本地小代理给 RP 中转站补流式结束标记 |
@@ -69,7 +69,7 @@
 │         qwen3-embedding-0.6B（CPU 常驻，记忆检索用，看门狗锁单实例）        │
 └────────────────────────────────────────────────────────────────────────────┘
 
- rana-web 本地后端 (server/ 下二十四组 Vite 中间件，/__rana/*)：学习计划文件读写、
+ rana-web 本地后端 (server/ 下二十五组 Vite 中间件，/__rana/*)：学习计划文件读写、
  GPU/网络/服务端口状态、模型连通测试、群画像数据 —— 同源无跨域，零部署
 ```
 
@@ -201,12 +201,12 @@ K:\OpenClaw
 └── rana-web/              ← ★ 自建 Web 前端 + 边车脚本
     ├── index.html / vite.config.ts / tsconfig.json
     ├── vitest.config.ts / tests/unit/ ← 单测 138 用例（reasoning/fateCore/git-activity-lib/memory-bridge-parse/memory-bridge-core/reconnect-backoff/person-graph-parse/person-graph-def）
-    ├── server/               ← ★ 本地后端：2026-10 把原挤在 vite.config.ts 的二十四组中间件按域拆分
+    ├── server/               ← ★ 本地后端：2026-10 把原挤在 vite.config.ts 的二十五组中间件按域拆分
     │   ├── index.ts          装配 buildServerPlugins()（vite.config.ts 只剩约 40 行）
     │   ├── lib/              公共工具：paths(状态目录 / 可移植根 RANA_WEB) · config(读 openclaw.json) · exec · http(json/readBody/isLoopback)
     │   └── plugins/          每域一个文件：provider-config/sys-status/avatar/news/study/events/bangumi/life/fate/
     │                         model-params/model-test/agent-info/qq-profile/dev-config/agents/
-    │                         sessions-cleanup/context/approvals/memory/person-graph/bridge-sync/trajectory/qq-sidecar
+    │                         sessions-cleanup/context/approvals/memory/person-graph/bridge-sync/trajectory/session-edit/qq-sidecar
     ├── src/
     │   ├── App.tsx            根组件：全部页面视图的装配（每页套 ErrorBoundary 兜底，坏一块不白全站）
     │   ├── styles.css         全部样式（2,000+ 行，房间场景/主题变量都在这）
@@ -262,7 +262,8 @@ K:\OpenClaw
 
 ### 💬 会话（主页）
 - 流式输出气泡，带「准备工作区…启动模型…」的**状态行**（run 生命周期可视化）；
-- **思考过程折叠**：模型输出的 `<think>` 块、微调模型写在 `<details><summary>` 里的伪思维链，都会被解析折叠成可展开的小块，顶栏一键开关（注：模型**原生**思考流网关广播层暂不转发——网页上的思考块来自回复文本里的标签，上游限制详见台账）；
+- **思考过程折叠**：模型输出的 `<think>` 块、微调模型写在 `<details><summary>` 里的伪思维链，都会被解析折叠成小块，顶栏一键开关；会话库里的**原生思考块**（thinking/reasoning 块）历史加载/落库时也提取显示，**默认展开**、单块可手动收起（注：流式期间的**原生**思考流网关广播层暂不转发，网页思考块来自历史块与回复文本内联标签，上游限制详见台账）；
+- **历史消息编辑（改真身）**：悬停气泡下方 ✏️ 进入编辑——思考与正文分块编辑，保存前 confirm 提醒「写进会话库（Rana 之后看到的就是改后的版本），当日自动备份」；后端 `/__rana/session-edit` 服务端写死路径扫 agent 库，回环+三重锚定位+哈希兜并发+90 秒活跃守门+当日 VACUUM 快照备份，只 UPDATE 不 INSERT；流式中与系统回显气泡不可编辑；
 - 会话管理：新建（可选 agent）、置顶、重命名、删除、未读角标——全部是**乐观更新**（点完立刻生效，慢操作转后台，详见「网关协议」一节）；
 - 微信/QQ 等外部渠道的来话/回话实时出现在对应会话里（订阅推送），不在电脑前也能用手机续上同一段对话；
 - 顶栏**模型选择器**按 provider 分组展示全部模型（含上下文窗口大小），点选即切换当前会话模型（热生效），每行一个 ⚡ 按钮做**连通测试**（一条最小消息实测，服务端拿 key，不进前端不进日志）；
@@ -371,7 +372,7 @@ QQ 公共号**自己养出来的**群画像：群档案、群友档案、每周�
 
 ## 🧩 深入：没有后端的全栈——Vite 中间件当后端
 
-「网页要读电脑状态、要改配置文件，后端呢？」——**没有独立后端进程**。二十四组 Vite 插件（2026-10 起按域拆分在 `rana-web/server/`，`vite.config.ts` 只剩约 40 行装配）直接把接口挂到开发服务器上；`configurePreviewServer` 把同样的中间件挂到生产预览服务上，所以 `npm run dev` 和 `npm run preview` 行为一致，始终是单进程。
+「网页要读电脑状态、要改配置文件，后端呢？」——**没有独立后端进程**。二十五组 Vite 插件（2026-10 起按域拆分在 `rana-web/server/`，`vite.config.ts` 只剩约 40 行装配）直接把接口挂到开发服务器上；`configurePreviewServer` 把同样的中间件挂到生产预览服务上，所以 `npm run dev` 和 `npm run preview` 行为一致，始终是单进程。
 
 > 给新手的一句话：Vite 的开发服务器本质是个 Node 程序，允许你往它身上挂自己的接口。请求不进打包产物，只在本地服务器这一层就被拦下处理了。这对「纯本地自用」的工具来说是零成本的架构简化。
 
@@ -401,6 +402,7 @@ QQ 公共号**自己养出来的**群画像：群档案、群友档案、每周�
 | `/__rana/person-graph` | 🕸 人物图谱页签数据：graph.md 三张表（人物/事件/连线）→ 结构化节点 + 最后核对日期；另有 `/source` 出原文、`POST /save` 保存编辑 | 路径在服务端写死，**只放行 graph.md 一个文件**（personal/ 其余文件零暴露）；表格即数据源（ADR-0001），节点间连线两端须精确对上节点名；✏️ 编辑保存走回环+.bak+2MB 上限，图由前端 mermaid 按需渲染 |
 | `/__rana/bridge-sync` | 🔗 记忆同步按钮后端：GET 轮询进度 / POST 启动一轮双桥 | 仅本机回环；上一轮没跑完拒绝重复启动；必要时 `lms` 拉起本地模型跑完自动卸载（平时绝不 JIT 加载）；step/log/result 实时状态供按钮轮询，全部 ✓ 才报成功 |
 | `/__rana/trajectory` | 🔍 过程页：按 run 导出会话轨迹（events.jsonl，2137KB→212KB 按分组瘦身） | 导出走 CLI 子进程落状态目录；协议字典见 `rana-web/docs/observability.md` |
+| `/__rana/session-edit` | ✏️ 聊天历史消息编辑（改真身）：GET 取真身块+哈希、POST 校验后写回会话库 | **仅本机回环**；路径服务端写死扫描 agent 库；写前当日 VACUUM 快照备份；定位三重锚（事件 UUID 精确锚 > role+前缀+ts 邻近）+ 哈希比对兜并发，对不上 409 拒写；90 秒活跃守门避开运行时写路径；只 UPDATE 不 INSERT；思考块改后剥签名；核心逻辑在 `server/lib/session-edit-core.ts`（纯函数直测，160 例之一部分） |
 | `/__rana/cloud-snapshot`、`/cloud-sync` | 迁移同步桥（2026-10-25 批1）：云端把状态目录**数据部分**（会话库/人格/记忆/凭据，不含插件缓存）tar.gz 流式打包供家里拉取；记忆页「☁️云端同步」卡显示上次拉取/家里发起拉取 | 快照下载走 X-Home-Token 独立鉴权；家里留最近 14 份——「云端是上班的她，家里是她的家」的每日回家车 |
 
 所有**写操作**端点都做双重来源校验：socket 必须是本机回环地址 + Origin 头必须匹配 localhost。这套东西不面向公网，但也没有裸奔。
@@ -546,7 +548,7 @@ RP 会话只保留人格与最小工具集，一个自装技能都不装——�
 
 ### 进程拓扑：谁常驻、谁即起即灭
 
-- **常驻五件**：网关（含全部 cron、渠道连接、记忆索引）、Vite dev/preview（二十四组中间件即后端）、embedding 看门狗与 SSE 修复代理、QQ 陪伴边车 qq-sidecar——后三样由 `start-gateway.cmd` 按条件（qq-sidecar 看 config.json 是否存在）/无条件顺带拉起，端口锁防多开；
+- **常驻五件**：网关（含全部 cron、渠道连接、记忆索引）、Vite dev/preview（二十五组中间件即后端）、embedding 看门狗与 SSE 修复代理、QQ 陪伴边车 qq-sidecar——后三样由 `start-gateway.cmd` 按条件（qq-sidecar 看 config.json 是否存在）/无条件顺带拉起，端口锁防多开；
 - **即起即灭**：边车脚本（cron 到点拉起，跑完退出）、专用会话桥（页面动作拉起）、`agent-info` 的 CLI 子进程；
 - **改动的生效方式**：`openclaw.json` 保存即热重载；`bindings` 渠道绑定要重启网关；前端代码 Vite 热更；`SOUL/AGENTS/MEMORY` 等人格记忆文件开新会话生效。
 

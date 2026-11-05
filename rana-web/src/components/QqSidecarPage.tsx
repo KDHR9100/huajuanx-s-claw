@@ -2,6 +2,7 @@
 // 最近收到的消息与回复、日志尾巴，以及启动/停止/重启。
 // 数据来自 /__rana/qq-sidecar（读 sidecar 自己写的心跳与活动日志），本页不做任何配置写入。
 import { useCallback, useEffect, useState } from "react";
+import { fmtDayTimeOr as fmtTime } from "../lib/fmt";
 
 interface SidecarStatus {
   pid: number;
@@ -51,12 +52,6 @@ interface SidecarResp {
   now: number;
   entryExists: boolean;
 }
-
-const fmtTime = (ms?: number) => {
-  if (!ms) return "—";
-  const d = new Date(ms);
-  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-};
 
 const fmtUptime = (startedAt?: number) => {
   if (!startedAt) return "—";

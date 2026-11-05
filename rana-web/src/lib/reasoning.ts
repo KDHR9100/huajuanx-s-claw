@@ -133,3 +133,20 @@ export function stripOpenclawEnvelope(raw: string): StripEnvelope {
   const text = out.replace(/<!--\s*\/?\s*openclaw:attempt[^>]*-->/gi, "").replace(/^\s+|\s+$/g, "");
   return { echo: !text, text };
 }
+
+// 原生思考块提取：会话库 assistant 消息的 content 数组里，思考以独立块
+// {type:"thinking"|"reasoning", thinking|text} 与 text 块并列存储，chat.history /
+// session.message 的行里就带着它，前端此前一直丢弃不显示。这里按运行时 isThinkingBlock
+// 同口径收集（redacted_thinking 是密文，跳过）。
+export function extractThinking(content: unknown): string {
+  if (!Array.isArray(content)) return "";
+  const out: string[] = [];
+  for (const b of content) {
+    if (!b || typeof b !== "object") continue;
+    const row = b as Record<string, unknown>;
+    if (row.type !== "thinking" && row.type !== "reasoning") continue;
+    const s = typeof row.thinking === "string" ? row.thinking : typeof row.text === "string" ? row.text : "";
+    if (s) out.push(s);
+  }
+  return out.join("\n\n");
+}

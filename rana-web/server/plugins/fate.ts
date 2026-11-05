@@ -3,6 +3,7 @@ import path from "node:path";
 import { execFileP } from "../lib/exec";
 import { RANA_WEB } from "../lib/paths";
 import { json, readBody, isLoopback } from "../lib/http";
+import { writeJsonBak } from "../lib/fs-json";
 import type { Plugin } from "vite";
 
 /**
@@ -39,13 +40,7 @@ export function ranaFateMiddleware(): Plugin {
   const newId = () => `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
   const writeStore = (store: FateStore) => {
-    fs.mkdirSync(fateDir, { recursive: true });
-    try {
-      fs.copyFileSync(profilesFile, profilesFile + ".bak");
-    } catch {
-      // 首次没有旧文件
-    }
-    fs.writeFileSync(profilesFile, JSON.stringify(store, null, 2), "utf8");
+    writeJsonBak(profilesFile, store);
   };
 
   /** 读多档案库；没有 profiles.json 但有旧单档案 profile.json 时自动迁移（老文件保留不动） */

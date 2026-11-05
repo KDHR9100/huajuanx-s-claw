@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { gateway } from "../lib/gateway";
 import { useAppStore } from "../store/useAppStore";
 import { modelSuffix } from "../lib/types";
+import { fmtDayTime as fmtTime } from "../lib/fmt";
 
 interface MdFile {
   key: string;
@@ -38,11 +39,6 @@ interface ProviderLite {
 }
 
 const PROFILE_JOBS = ["群画像每日增量", "群画像周报"];
-const fmtTime = (ms: number) => {
-  const d = new Date(ms);
-  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-};
-
 export default function GroupsPage() {
   const models = useAppStore((s) => s.models);
   const [data, setData] = useState<ProfileData | null>(null);

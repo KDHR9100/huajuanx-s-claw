@@ -3,6 +3,7 @@ import path from "node:path";
 import { execFileP } from "../lib/exec";
 import { RANA_WEB } from "../lib/paths";
 import { json, readBody, isLoopback } from "../lib/http";
+import { writeJsonBak } from "../lib/fs-json";
 import type { Plugin } from "vite";
 
 /**
@@ -185,14 +186,8 @@ export function ranaStudyMiddleware(): Plugin {
   };
 
   const writeGoals = (g: StudyGoalsFile) => {
-    fs.mkdirSync(studyDir, { recursive: true });
-    try {
-      fs.copyFileSync(goalsFile, goalsFile + ".bak");
-    } catch {
-      // 首次写入没有旧文件
-    }
     g.updatedAt = Date.now();
-    fs.writeFileSync(goalsFile, JSON.stringify(g, null, 2), "utf8");
+    writeJsonBak(goalsFile, g);
   };
 
   /** 连续打卡：按 doneAt 的本地日期，从最近一天（今天或昨天）往前数连续有完成的天数 */
@@ -231,15 +226,9 @@ export function ranaStudyMiddleware(): Plugin {
         throw new Error(`资料文件名非法，拒绝写入：${m.file}`);
       }
     }
-    fs.mkdirSync(studyDir, { recursive: true });
-    try {
-      fs.copyFileSync(scheduleFile, scheduleFile + ".bak");
-    } catch {
-      // 首次写入没有旧文件
-    }
     computeStreak(s);
     s.updatedAt = Date.now();
-    fs.writeFileSync(scheduleFile, JSON.stringify(s, null, 2), "utf8");
+    writeJsonBak(scheduleFile, s);
   };
 
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

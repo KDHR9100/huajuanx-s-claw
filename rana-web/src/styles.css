@@ -2474,3 +2474,49 @@ label.lib-cand { cursor: pointer; }
 .pg-clickable g.node {
   cursor: pointer;
 }
+
+/* 历史消息编辑（改真身）：气泡 meta 行的 ✏️ 悬停浮现，编辑面板仿 think-block 风格 */
+.msg-edit-btn {
+  opacity: 0;
+  transition: opacity 0.15s;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  color: var(--text-dim);
+}
+.msg:hover .msg-edit-btn { opacity: 0.75; }
+.msg-edit-btn:hover { opacity: 1; background: color-mix(in srgb, var(--text) 10%, transparent); }
+
+.msg-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.msg-edit-hint, .msg-edit-err { font-size: 12.5px; color: var(--text-dim); }
+.msg-edit-err { color: var(--danger); }
+.msg-edit-block { display: flex; flex-direction: column; gap: 3px; }
+.msg-edit-label { font-size: 11.5px; color: var(--text-dim); }
+.msg-edit-area {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 60px;
+  resize: vertical;
+  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  padding: 7px 9px;
+  font-size: 13px;
+  line-height: 1.55;
+  font-family: inherit;
+}
+.msg-edit-area:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.msg-edit-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.msg-edit-actions .btn { font-size: 12.5px; padding: 4px 14px; }

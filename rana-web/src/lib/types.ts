@@ -35,6 +35,8 @@ export interface ChatMessage {
   /** 运行阶段（chat 事件 state=status 的 phase），仅流式期间有意义 */
   status?: string;
   attachments?: ChatAttachment[];
+  /** 原生思考块（会话库 content 里的 thinking/reasoning 块，历史加载/落库事件时提取；内联 <think> 仍由 splitReasoning 现场拆） */
+  reasoning?: string;
 }
 
 export interface SessionRow {

@@ -4,6 +4,7 @@
 // 机器维护文件（MEMORY.md/共享纪要/巡检状态等）服务端标记 editable=false，保存会被 400 拒绝。
 // 2026-10-25 迁移批1 加「☁️ 云端同步」卡：家里(win32)=拉取按钮+上次拉取；云端(linux)=家里最后拉取时间。
 import { useCallback, useEffect, useState } from "react";
+import { fmtAgo } from "../lib/fmt";
 import { HOST_IS_WINDOWS } from "../lib/platform";
 import PersonGraph from "./PersonGraph";
 
@@ -25,12 +26,7 @@ interface MemGroup {
 
 const fmtSize = (n: number) => (n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`);
 const fmtMB = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
-const fmtAgo = (ts: number) => {
-  const min = Math.max(1, Math.round((Date.now() - ts) / 60000));
-  if (min < 60) return `${min} 分钟前`;
-  if (min < 60 * 24) return `${Math.round(min / 60)} 小时前`;
-  return `${Math.floor(min / 60 / 24)} 天前`;
-};
+
 
 interface SyncState {
   platform?: string;

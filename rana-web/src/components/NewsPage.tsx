@@ -1,6 +1,7 @@
 // 早报页：独立大页展示每日资讯（新闻联播条目 + 分类搜索结果 + 右侧乐奈总结）。
 // 省额度：只有今天打开了这个页面才会触发生成（POST /__rana/news），cron 不自动跑。
 import { useCallback, useEffect, useState } from "react";
+import { todayStr, fmtHm as fmtTime } from "../lib/fmt";
 
 interface NewsItem {
   title: string;
@@ -24,16 +25,6 @@ interface Report {
   summary?: string;
   summaryError?: string;
   queries?: number;
-}
-
-const todayStr = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
-
-function fmtTime(ts: number) {
-  const d = new Date(ts);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 function ItemCard({ item }: { item: NewsItem }) {

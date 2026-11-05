@@ -490,10 +490,7 @@ export function ranaSysStatusMiddleware(): Plugin {
       json(res, 400, { error: "虚拟化切换只在家里 Windows 上有" });
       return;
     }
-    const ra = req.socket?.remoteAddress ?? "";
-    const loopback = ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(ra);
-    const origin = String(req.headers?.origin ?? "");
-    if (!loopback || (origin && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin))) {
+    if (!isLoopback(req)) {
       json(res, 403, { error: "仅本机可操作" });
       return;
     }

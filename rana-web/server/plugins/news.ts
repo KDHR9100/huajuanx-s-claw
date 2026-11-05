@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileP } from "../lib/exec";
+import { isLoopback } from "../lib/http";
 import { RANA_WEB } from "../lib/paths";
 import type { Plugin } from "vite";
 
@@ -27,11 +28,7 @@ export function ranaNewsMiddleware(): Plugin {
     }
     // POST /__rana/news/generate：打开早报页且今天还没生成过时，前端触发生成（省额度：不开页面不查询）
     if (req.method === "POST") {
-      const ra = req.socket?.remoteAddress ?? "";
-      const loopback = ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(ra);
-      const origin = String(req.headers?.origin ?? "");
-      const originOk = !origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
-      if (!loopback || !originOk) {
+      if (!isLoopback(req)) {
         res.statusCode = 403;
         res.end(JSON.stringify({ error: "仅本机可操作" }));
         return;

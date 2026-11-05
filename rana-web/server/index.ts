@@ -21,6 +21,7 @@ import { ranaApprovalsMiddleware } from "./plugins/approvals";
 import { ranaMemoryMiddleware } from "./plugins/memory";
 import { ranaPersonGraphMiddleware } from "./plugins/person-graph";
 import { ranaTrajectoryMiddleware } from "./plugins/trajectory";
+import { ranaSessionEditMiddleware } from "./plugins/session-edit";
 import { bridgeSyncMiddleware } from "./plugins/bridge-sync";
 import { cloudSyncMiddleware } from "./plugins/cloud-sync";
 
@@ -49,6 +50,7 @@ export function buildServerPlugins(): Plugin[] {
     ranaMemoryMiddleware(),
     ranaPersonGraphMiddleware(),
     ranaTrajectoryMiddleware(),
+    ranaSessionEditMiddleware(),
     bridgeSyncMiddleware(),
     cloudSyncMiddleware(),
   ];

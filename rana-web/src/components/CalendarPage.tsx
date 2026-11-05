@@ -4,6 +4,7 @@
 // 到点提醒走 studyNotify 引擎（App 根部挂着，事件按 remindMin 提前量弹通知）。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchJsonRetry } from "../lib/fetchRetry";
+import { dateStr, todayStr, addDays } from "../lib/fmt";
 import { useAppStore } from "../store/useAppStore";
 
 export type EventType = "interview" | "appointment" | "activity" | "game" | "deadline";
@@ -65,13 +66,6 @@ interface DayItem {
   raw?: CalEvent;
 }
 
-const pad2 = (n: number) => String(n).padStart(2, "0");
-const dateStr = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-const todayStr = () => dateStr(new Date());
-const addDays = (ds: string, n: number) => {
-  const [y, m, d] = ds.split("-").map(Number);
-  return dateStr(new Date(y, m - 1, d + n));
-};
 const hmToMin = (hm: string) => {
   const [h, m] = hm.split(":").map(Number);
   return h * 60 + m;

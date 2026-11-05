@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { STATE_HOME } from "../lib/paths";
 import { json, isLoopback } from "../lib/http";
+import { backupThenWrite } from "../lib/fs-json";
 import type { Plugin } from "vite";
 
 /**
@@ -180,12 +181,7 @@ export function ranaMemoryMiddleware(): Plugin {
             json(res, 400, { error: "该文件由系统维护（只读），手改会被覆盖" });
             return;
           }
-          try {
-            fs.copyFileSync(hit.abs, hit.abs + ".bak");
-          } catch {
-            // 首次保存无旧文件，没有 .bak 也继续
-          }
-          fs.writeFileSync(hit.abs, content, "utf8");
+          backupThenWrite(hit.abs, content);
           json(res, 200, { ok: true, bak: true });
         } catch (e) {
           json(res, 400, { error: (e as Error).message });

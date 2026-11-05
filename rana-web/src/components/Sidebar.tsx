@@ -2,15 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "../store/useAppStore";
 import { gateway } from "../lib/gateway";
 import { HOST_IS_WINDOWS } from "../lib/platform";
-
-function fmtTime(ts?: number) {
-  if (!ts) return "";
-  const d = new Date(ts);
-  const today = new Date();
-  const sameDay = d.toDateString() === today.toDateString();
-  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  return sameDay ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
-}
+import { fmtSmartTime as fmtTime } from "../lib/fmt";
 
 function fmtTokens(n?: number) {
   if (!n || n <= 0) return "";

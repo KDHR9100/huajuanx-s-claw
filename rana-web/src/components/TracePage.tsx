@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "../store/useAppStore";
+import { fmtIsoTime as fmtTime } from "../lib/fmt";
 
 /**
  * 🔍 过程页——轨迹回放（「她每步想了什么、调了什么、结果如何」的事后时间线）。
@@ -73,12 +74,6 @@ const fmtTok = (n?: number) => {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(n);
-};
-const fmtTime = (ts?: string) => {
-  if (!ts) return "";
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return "";
-  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 const fmtSize = (b?: number) => {
   if (!b) return "";

@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { gateway } from "../lib/gateway";
 import { useAppStore } from "../store/useAppStore";
+import { fmtDayTime as fmtTime, fmtAgo } from "../lib/fmt";
 
 interface ApprovalRow {
   id: string;
@@ -49,19 +50,6 @@ function terminalLabel(r: ApprovalRow) {
   if (r.decision === "allow" || r.decision === "allow-once") return "已批准";
   if (r.decision === "deny") return "已拒绝";
   return TERMINAL_LABELS[r.terminalReason ?? ""] ?? r.terminalReason ?? r.status;
-}
-
-function fmtTime(ts: number) {
-  const d = new Date(ts);
-  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
-function fmtAgo(ts?: number) {
-  if (!ts) return "没用过";
-  const min = Math.round((Date.now() - ts) / 60000);
-  if (min < 60) return `${Math.max(1, min)} 分钟前`;
-  if (min < 60 * 24) return `${Math.round(min / 60)} 小时前`;
-  return `${Math.round(min / 60 / 24)} 天前`;
 }
 
 /** 挂起卡剩余寿命（分钟级够用，轮询 10s 刷新） */
@@ -225,7 +213,7 @@ export default function ApprovalsPage() {
                   <div className="t-name">
                     <code style={{ fontSize: 12 }}>{w.pattern}</code>
                   </div>
-                  <div className="t-desc">路径级放行 · 上次使用 {fmtAgo(w.lastUsedAtMs)}</div>
+                  <div className="t-desc">路径级放行 · 上次使用 {fmtAgo(w.lastUsedAtMs, "没用过")}</div>
                 </div>
               </div>
             ))}

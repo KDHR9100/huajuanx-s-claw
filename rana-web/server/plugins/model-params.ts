@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import { OPENCLAW_CONFIG } from "../lib/paths";
 import { readFullConfig } from "../lib/config";
-import { json } from "../lib/http";
+import { json, isLoopback } from "../lib/http";
+import { writeJsonAtomic } from "../lib/fs-json";
 import type { Plugin } from "vite";
 
 /**
@@ -20,10 +21,7 @@ export function ranaModelParamsMiddleware(): Plugin {
       json(res, 405, { error: "method not allowed" });
       return;
     }
-    const ra = req.socket?.remoteAddress ?? "";
-    const loopback = ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(ra);
-    const origin = String(req.headers?.origin ?? "");
-    if (!loopback || (origin && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin))) {
+    if (!isLoopback(req)) {
       json(res, 403, { error: "仅本机可操作" });
       return;
     }
@@ -49,7 +47,7 @@ export function ranaModelParamsMiddleware(): Plugin {
         if (!model) throw new Error(`模型不存在：${providerId}/${modelId}`);
         fs.copyFileSync(OPENCLAW_CONFIG, OPENCLAW_CONFIG + ".bak-params");
         model.params = { ...(model.params ?? {}), ...clean };
-        fs.writeFileSync(OPENCLAW_CONFIG, JSON.stringify(cfg, null, 2), "utf8");
+        writeJsonAtomic(OPENCLAW_CONFIG, cfg);
         json(res, 200, { ok: true, providerId, modelId, params: model.params });
       } catch (e) {
         json(res, 400, { error: (e as Error).message });

@@ -4,6 +4,7 @@ import net from "node:net";
 import { execFileP } from "../lib/exec";
 import { RANA_WEB } from "../lib/paths";
 import { json, readBody, isLoopback } from "../lib/http";
+import { writeJsonBak } from "../lib/fs-json";
 import type { Plugin } from "vite";
 
 /**
@@ -109,15 +110,6 @@ export function ranaLifeMiddleware(): Plugin {
     }
   };
 
-  const writeJsonBak = (file: string, data: unknown) => {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    try {
-      fs.copyFileSync(file, file + ".bak");
-    } catch {
-      // 首次写入没有旧文件
-    }
-    fs.writeFileSync(file, JSON.stringify(data, null, 2), "utf8");
-  };
 
   const readLife = (): LifeFile => {
     const raw = readJsonAny(lifeFile) as LifeFile | null;

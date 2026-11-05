@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAppStore } from "../store/useAppStore";
 import { EVENT_META, type CalEvent } from "./CalendarPage";
+import { todayStr, addDays as addDaysStr } from "../lib/fmt";
 
 export interface LifeMilestone {
   id: string;
@@ -52,9 +53,6 @@ interface GoalLite {
   lifeGoalId?: string;
 }
 
-const pad2 = (n: number) => String(n).padStart(2, "0");
-const dateStr = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-const todayStr = () => dateStr(new Date());
 const curMonth = () => todayStr().slice(0, 7);
 const monthLabel = (m: string) => `${m.slice(0, 4)}年${Number(m.slice(5, 7))}月`;
 const fmtTs = (ts: number) => {
@@ -73,10 +71,6 @@ const countdownLabel = (date: string, time?: string): string => {
   const hh = Math.floor(diffMin / 60);
   const mm = diffMin % 60;
   return mm ? `还有 ${hh} 时 ${mm} 分` : `还有 ${hh} 小时`;
-};
-const addDaysStr = (ds: string, n: number) => {
-  const [y, m, d] = ds.split("-").map(Number);
-  return dateStr(new Date(y, m - 1, d + n));
 };
 /** 距某天还有几个整天（1=明天） */
 const daysUntil = (ds: string) =>

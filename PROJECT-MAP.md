@@ -13,7 +13,7 @@
 个人项目「Rana · OpenClaw」：以开源 AI 助手框架 **OpenClaw**（npm 包 `openclaw`）为底座，在一台 Windows 主机上跑多个性格分工的 AI 智能体，再用全自研 Web 前端 **rana-web** 装进一个界面。人格原型是 MyGO!!!!! 的要乐奈（主色 #77DD77）。
 
 - 三个 agent（作者自用配置，开箱默认单 agent）：`main`（云端干活主力，QQ 私聊+网页）、`rana-rp`（RP 陪伴人格，微信，云端中转模型经本地小代理）、`rana-qq-public`（QQ 群公共号，物理隔离）。
-- **rana-web 没有独立后端进程**：24 组 Vite 中间件（`/__rana/*`，仅本机回环）就是"后端"。
+- **rana-web 没有独立后端进程**：25 组 Vite 中间件（`/__rana/*`，仅本机回环）就是"后端"。
 - 自动化全是**边车脚本 + cron + 文件契约**：脚本独立进程跑完退出，输出落本地 JSON，前端只读文件；另有 QQ 陪伴边车 qq-sidecar（SnowLuma 个人号收发群消息）随网关常驻。
 - 隐私是一等公民：本仓库经 `push-public.cmd`（`git add -A` 全量）镜像到公开仓库，**任何入库文件默认视为公开**。
 
@@ -73,7 +73,7 @@
 
 **加一个页面的四步链**：`src/components/` 建组件 → `App.tsx` 挂视图 → `types.ts` 的 `NAV_TABS` 加页签 → 需要本地数据就在 `server/plugins/` 加中间件并到 `server/index.ts` 装配。（历史上"四处注册漏一处"出过页签永不可达的 bug，见台账 09-14 条目。）
 
-### 1.3 rana-web/server/ — 没有后端的全栈（24 组中间件，`/__rana/*`）
+### 1.3 rana-web/server/ — 没有后端的全栈（25 组中间件，`/__rana/*`）
 
 `server/index.ts` 装配 `buildServerPlugins()`；`server/lib/` 四个公共工具（paths 状态目录/config 读 openclaw.json/exec/http 回环校验）。所有**写操作**端点双重来源校验：socket 本机回环 + Origin 匹配 localhost。
 
@@ -101,6 +101,7 @@
 | bridge-sync.ts | `/__rana/bridge-sync` | 🔗 记忆同步按钮：启动/轮询双桥一轮 |
 | sessions-cleanup.ts | `/__rana/sessions-cleanup` | 系统会话清理手术（--dry-run 只盘点） |
 | trajectory.ts | `/__rana/trajectory` | 🔍 过程页：按 run 导出会话轨迹（events.jsonl，瘦身 2137KB→212KB） |
+| session-edit.ts | `GET/POST /__rana/session-edit` | ✏️ 聊天历史消息编辑（改真身）：定位（事件 UUID 精确锚 > role+前缀+ts 三重锚）+哈希兜并发 → 事务内原地 UPDATE transcript_events（只改块内容，思考块剥签名）→ bump transcript_updated_at；回环+当日 VACUUM 快照备份+90 秒活跃守门；核心逻辑在 `server/lib/session-edit-core.ts`（纯函数直测） |
 | cloud-sync.ts | `/__rana/cloud-snapshot`、`/cloud-sync` | 迁移同步桥：云端 tar.gz 流式打包数据快照（X-Home-Token 鉴权）/ 家里拉取状态与触发（10-25 迁移批1，方案见 MIGRATION-PLAN） |
 | qq-sidecar.ts | `/__rana/qq-sidecar` | 🐧QQ 陪伴页数据源：读 sidecar 心跳/活动日志 + 日志尾巴 + 配置存在性（纯只读；启停走 sidecar 自己的控制端点，本插件不做配置写入） |
 

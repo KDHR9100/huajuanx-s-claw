@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import StudyQuiz, { type QuizMode } from "./StudyQuiz";
 import { getNotifyPref, setNotifyPref, requestNotifyPermission, notifyPermission } from "../lib/studyNotify";
 import { fetchJsonRetry } from "../lib/fetchRetry";
+import { pad2, dateStr, todayStr, addDays } from "../lib/fmt";
 import { gateway } from "../lib/gateway";
 import { useAppStore } from "../store/useAppStore";
 import { modelSuffix } from "../lib/types";
@@ -104,16 +105,9 @@ interface Schedule {
 }
 
 const DEFAULT_PLAN = "p-default";
-const pad2 = (n: number) => String(n).padStart(2, "0");
-const dateStr = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-const todayStr = () => dateStr(new Date());
 const nowHM = () => {
   const d = new Date();
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-};
-const addDays = (ds: string, n: number) => {
-  const [y, m, d] = ds.split("-").map(Number);
-  return dateStr(new Date(y, m - 1, d + n));
 };
 const byDateTime = (a: StudyCourse, b: StudyCourse) =>
   a.date.localeCompare(b.date) || (a.timeStart ?? "").localeCompare(b.timeStart ?? "") || a.id.localeCompare(b.id);

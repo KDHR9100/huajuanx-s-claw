@@ -7,6 +7,7 @@ import { STATE_HOME } from "../lib/paths";
 import { json, isLoopback } from "../lib/http";
 import type { Plugin } from "vite";
 import { parsePersonGraph } from "../lib/person-graph-parse";
+import { backupThenWrite } from "../lib/fs-json";
 
 export function ranaPersonGraphMiddleware(): Plugin {
   const GRAPH_MD = path.join(STATE_HOME, "workspace-main", "personal", "graph.md");
@@ -62,12 +63,7 @@ export function ranaPersonGraphMiddleware(): Plugin {
             json(res, 413, { error: "内容超过 2MB 上限" });
             return;
           }
-          try {
-            fs.copyFileSync(GRAPH_MD, GRAPH_MD + ".bak");
-          } catch {
-            // 首次保存无旧文件，没有 .bak 也继续
-          }
-          fs.writeFileSync(GRAPH_MD, content, "utf8");
+          backupThenWrite(GRAPH_MD, content);
           json(res, 200, { ok: true, bak: true });
         } catch (e) {
           json(res, 400, { error: (e as Error).message });
