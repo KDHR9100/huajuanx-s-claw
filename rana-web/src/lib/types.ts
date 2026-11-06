@@ -46,6 +46,8 @@ export interface SessionRow {
   model?: string;
   /** 会话当前模型所属 provider（服务端 modelProvider 字段，model 本身是裸名） */
   modelProvider?: string;
+  /** 会话当前思考档位（服务端 reasoningLevel 有效值：off/low/medium/high/stream…），拉条显示与切档用 */
+  reasoningLevel?: string;
   totalTokens?: number;
   inputTokens?: number;
   outputTokens?: number;
@@ -66,6 +68,9 @@ export interface ModelInfo {
   contextWindow?: number;
   alias?: string;
   provider?: string;
+  /** 思考型模型标记 + 服务端目录给的思考档位选项（随模型自动适配） */
+  reasoning?: boolean;
+  thinkingLevels?: Array<{ id: string; label: string }>;
 }
 
 export type ConnState = "connecting" | "connected" | "error" | "closed";

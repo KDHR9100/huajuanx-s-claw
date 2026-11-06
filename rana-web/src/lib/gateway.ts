@@ -574,6 +574,7 @@ class GatewayConnection {
         updatedAt: (r.updatedAt as number) ?? (r.lastActivityAt as number),
         model: r.model ? String(r.model) : undefined,
         modelProvider: r.modelProvider ? String(r.modelProvider) : undefined,
+        reasoningLevel: r.reasoningLevel ? String(r.reasoningLevel) : undefined,
         inputTokens: r.inputTokens as number | undefined,
         outputTokens: r.outputTokens as number | undefined,
         totalTokens: r.totalTokens as number | undefined,
@@ -603,12 +604,17 @@ class GatewayConnection {
       const rows = (res.models ?? res.items ?? []) as Array<Record<string, unknown>>;
       const mapped: ModelInfo[] = rows.map((r) => {
         const id = String(r.id ?? r.modelId ?? r.model ?? "");
+        const rawLevels = Array.isArray(r.thinkingLevels) ? (r.thinkingLevels as Array<Record<string, unknown>>) : [];
         return {
           id,
           name: (r.name as string) ?? (r.label as string) ?? id,
           contextWindow: (r.contextWindow as number) ?? (r.maxContextTokens as number),
           alias: r.alias as string | undefined,
           provider: (r.provider as string) ?? id.split("/")[0],
+          reasoning: r.reasoning === true,
+          thinkingLevels: rawLevels
+            .filter((lv) => lv && typeof lv.id === "string")
+            .map((lv) => ({ id: String(lv.id), label: String(lv.label ?? lv.id) })),
         };
       });
       store().setModels(mapped);
@@ -734,6 +740,29 @@ class GatewayConnection {
       console.warn("[gateway] sessions.patch 失败:", e);
       throw e;
     }
+  }
+
+  /** 切会话思考档位（sessions.patch thinkingLevel）：档位 id 来自模型目录 thinkingLevels（随模型自动适配） */
+  async setThinkingLevel(sessionKey: string, level: string) {
+    try {
+      await this.request("sessions.patch", { key: sessionKey, thinkingLevel: level });
+      store().mergeSession({ key: sessionKey, reasoningLevel: level });
+    } catch (e) {
+      console.warn("[gateway] 切思考档位失败:", e);
+      throw e;
+    }
+  }
+
+  /** 官方回退（sessions.rewind）：把 entryId（user 消息事件 UUID）及其后的对话从活跃路径收起；
+   *  返回被裁那条消息的原文与附件（供前端预填编辑）；不触发新回复，重发由调用方 chat.send。 */
+  async rewindSession(sessionKey: string, entryId: string): Promise<{
+    editorText?: string;
+    editorAttachments?: Array<{ mimeType: string; data: string }>;
+  }> {
+    return this.request("sessions.rewind", { sessionKey, entryId }, 60_000) as Promise<{
+      editorText?: string;
+      editorAttachments?: Array<{ mimeType: string; data: string }>;
+    }>;
   }
 
   async createSession(agentId?: string): Promise<string> {

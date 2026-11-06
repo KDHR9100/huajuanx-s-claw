@@ -177,6 +177,7 @@ async function handleGet(agentsDir: string, req: ReqT, res: ResT): Promise<void>
         ok: true,
         role: hit.role,
         seq: hit.seq,
+        eventId: hit.eventId,
         tsMs: hit.tsMs ?? null,
         hash: hashBlocks(hit.blocks),
         blocks: hit.blocks,

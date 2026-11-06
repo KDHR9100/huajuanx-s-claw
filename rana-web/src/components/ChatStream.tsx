@@ -4,6 +4,7 @@ import { gateway } from "../lib/gateway";
 import Markdown from "./Markdown";
 import { fmtHmOr as fmtTime } from "../lib/fmt";
 import { splitReasoning, stripOpenclawEnvelope } from "../lib/reasoning";
+import { findRewindAnchor, keepBefore } from "../lib/rewind";
 import { Bell, Paw, RanaAvatar } from "./RanaArt";
 import type { ChatAttachment } from "../lib/types";
 
@@ -71,7 +72,7 @@ function PawDots() {
   );
 }
 
-const Bubble = memo(function Bubble({ role, text, reasoning, streaming, error, model, ts, status, attachments, msgId }: {
+const Bubble = memo(function Bubble({ role, text, reasoning, streaming, error, model, ts, status, attachments, msgId, anchorId, anchorText, anchorTs }: {
   role: "user" | "assistant";
   text: string;
   /** 历史消息携带的原生思考块（chat.history / 落库事件提取；内联 <think> 另由 splitReasoning 现场拆） */
@@ -84,6 +85,12 @@ const Bubble = memo(function Bubble({ role, text, reasoning, streaming, error, m
   attachments?: ChatAttachment[];
   /** 消息 id：真身事件 UUID 可精确锚定编辑；local-/pending-/live- 前缀是乐观占位，禁编辑 */
   msgId?: string;
+  /** 回退锚点（user 消息事件 UUID）：她的回复锚到上面最近一条 user 消息；user 消息锚自己 */
+  anchorId?: string;
+  /** 锚点消息原文（确认弹窗展示 + 重发默认文字） */
+  anchorText?: string;
+  /** 锚点消息时间戳（服务端三锚定位用） */
+  anchorTs?: number;
 }) {
   const currentKey = useAppStore((s) => s.currentKey);
   // 先剥离 OpenClaw 运行时封套回显（压缩前冲刷回合模型偶尔把指令块吐进正文）
@@ -96,6 +103,63 @@ const Bubble = memo(function Bubble({ role, text, reasoning, streaming, error, m
   const sysEcho = (stripped?.echo ?? false) && !streaming;
   const statusLine = streaming && status ? PHASE_LABELS[status] ?? status : "";
   const [editing, setEditing] = useState(false);
+  // 🔁 回退重答状态（user 消息带内联编辑器；她的回复走确认弹窗直发）
+  const [rewindDraft, setRewindDraft] = useState<string | null>(null);
+  const [rewindBusy, setRewindBusy] = useState(false);
+  const [rewindErr, setRewindErr] = useState("");
+
+  /** 回退重答执行体：session-edit GET 按 role+前缀+ts 定位出服务端事件 UUID → rewind → 本地截断 → 重发 */
+  const doRewind = async (localId: string, anchorText: string, anchorTs: number, resendText: string) => {
+    if (!currentKey || rewindBusy) return;
+    setRewindBusy(true);
+    setRewindErr("");
+    try {
+      // chat.history 行不带事件 id（实锤 2026-11-06），先换服务端事件 UUID
+      const p = new URLSearchParams({ sessionKey: currentKey, role: "user", prefix: anchorText.slice(0, 60) });
+      if (anchorTs) p.set("tsMs", String(anchorTs));
+      const locRes = await fetch(`/__rana/session-edit?${p.toString()}`);
+      const loc = await locRes.json() as { ok?: boolean; eventId?: string; error?: string };
+      if (!loc.ok || !loc.eventId) throw new Error(loc.error ?? "定位锚点失败");
+      const res = await gateway.rewindSession(currentKey, loc.eventId);
+      const list = useAppStore.getState().messages[currentKey] ?? [];
+      const kept = keepBefore(list, localId);
+      if (kept) useAppStore.getState().setMessages(currentKey, kept);
+      const atts = res.editorAttachments?.map((a, i) => ({
+        fileName: `附件${i + 1}.${(a.mimeType.split("/")[1] ?? "bin").split(";")[0]}`,
+        mimeType: a.mimeType,
+        content: a.data,
+        type: (a.mimeType.startsWith("image/") ? "image" : "file") as "image" | "file",
+      }));
+      setRewindDraft(null);
+      setRewindBusy(false);
+      await gateway.sendChat(currentKey, resendText, atts?.length ? atts : undefined);
+    } catch (e) {
+      setRewindErr((e as Error).message);
+      setRewindBusy(false);
+    }
+  };
+
+  /** 确认弹窗文案：收起范围 + 主会话（QQ 共享）连带提醒 */
+  const rewindConfirmText = () => {
+    const shared = currentKey === useAppStore.getState().mainSessionKey
+      ? "\n\n⚠ 注意：这是与 QQ 私聊共享的主会话，收起对那边同样生效。"
+      : "";
+    return `🔁 回退重答\n\n从这条起，后面的对话会从当前会话收起——页面上和她的记忆里都会消失（库里留底但不再看），收起后立即重发。\n锚点：${(anchorText ?? "").slice(0, 24)}${(anchorText ?? "").length > 24 ? "…" : ""}${shared}\n\n确定？`;
+  };
+
+  /** user 气泡内联编辑器的「收起后续并重答」：先确认再执行 */
+  const confirmRewind = () => {
+    if (!currentKey || !anchorId) return;
+    if (!window.confirm(rewindConfirmText())) return;
+    void doRewind(anchorId, anchorText ?? "", anchorTs ?? 0, rewindDraft ?? "");
+  };
+
+  /** 她的回复：🔁 确认后锚到上面最近的 user 消息，原句原样重发 */
+  const confirmRewindForAssistant = () => {
+    if (!currentKey || !anchorId) return;
+    if (!window.confirm(rewindConfirmText())) return;
+    void doRewind(anchorId, anchorText ?? "", anchorTs ?? 0, anchorText ?? "");
+  };
   return (
     <div className={`msg ${role}`}>
       <div className="av-wrap">
@@ -128,6 +192,26 @@ const Bubble = memo(function Bubble({ role, text, reasoning, streaming, error, m
               onCancel={() => setEditing(false)}
             />
           </div>
+        ) : rewindDraft !== null && currentKey && anchorId ? (
+          <div className="bubble editing">
+            <div className="msg-edit">
+              <div className="msg-edit-label">🔁 收起这条及之后的对话，用下面这段重新发问</div>
+              <textarea
+                className="msg-edit-area"
+                autoFocus
+                value={rewindDraft}
+                rows={Math.min(14, Math.max(3, Math.ceil(rewindDraft.length / 60)))}
+                onChange={(e) => setRewindDraft(e.target.value)}
+              />
+              {rewindErr && <div className="msg-edit-err">⚠ {rewindErr}</div>}
+              <div className="msg-edit-actions">
+                <button className="btn ghost" onClick={() => setRewindDraft(null)}>取消</button>
+                <button className="btn" disabled={rewindBusy} onClick={() => void confirmRewind()}>
+                  {rewindBusy ? "处理中…" : "收起后续并重答"}
+                </button>
+              </div>
+            </div>
+          </div>
         ) : (
         <div className="bubble">
           {sysEcho ? (
@@ -149,6 +233,13 @@ const Bubble = memo(function Bubble({ role, text, reasoning, streaming, error, m
           {ts ? <span>{fmtTime(ts)}</span> : null}
           {!streaming && !sysEcho && currentKey && msgId && !/^(local|pending|live)-/.test(msgId) && (
             <button className="msg-edit-btn" title="编辑这条消息（写回会话库）" onClick={() => setEditing(true)}>✏️</button>
+          )}
+          {!streaming && !sysEcho && currentKey && anchorId && !rewindBusy && (
+            <button
+              className="msg-edit-btn"
+              title={role === "user" ? "改并重答（收起这条及之后，改完重发）" : "重答（收起你上一条之后全部，重新回答）"}
+              onClick={() => (role === "user" ? setRewindDraft(text) : confirmRewindForAssistant())}
+            >🔁</button>
           )}
         </div>
       </div>
@@ -309,9 +400,13 @@ export default function ChatStream() {
             <p>要聊天的话，叫我。</p>
           </div>
         )}
-        {messages.map((m) => (
-          <Bubble key={m.id} msgId={m.id} role={m.role} text={m.text} reasoning={m.reasoning} streaming={m.streaming} error={m.error} model={m.model} ts={m.ts} status={m.status} attachments={m.attachments} />
-        ))}
+                {messages.map((m, i) => {
+          // 回退锚点：user 消息锚自己；她的回复锚到上面最近一条 user 消息（本地 id 形态不限，服务端按前缀+ts 定位）
+          const anchor = m.role === "user" ? m : findRewindAnchor(messages, i - 1);
+          return (
+            <Bubble key={m.id} msgId={m.id} role={m.role} text={m.text} reasoning={m.reasoning} streaming={m.streaming} error={m.error} model={m.model} ts={m.ts} status={m.status} attachments={m.attachments} anchorId={anchor?.id} anchorText={anchor?.text} anchorTs={anchor?.ts ?? 0} />
+          );
+        })}
       </div>
     </div>
   );
