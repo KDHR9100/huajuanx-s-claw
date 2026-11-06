@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import net from "node:net";
-import { execFileP } from "../lib/exec";
 import { RANA_WEB } from "../lib/paths";
 import { json, readBody, isLoopback } from "../lib/http";
 import { writeJsonBak } from "../lib/fs-json";
+import { createAgentBridge } from "../lib/agent-session-bridge";
 import type { Plugin } from "vite";
 
 /**
@@ -31,7 +31,6 @@ export function ranaLifeMiddleware(): Plugin {
   const libraryFile = path.join(lifeDir, "library.json");
   const scheduleFile = path.join(here, ".study", "schedule.json");
   const studyGoalsFile = path.join(here, ".study", "goals.json");
-  let agentBusy = false;
 
   interface LifeMilestone {
     id: string;
@@ -124,31 +123,15 @@ export function ranaLifeMiddleware(): Plugin {
     return raw;
   };
 
-  /** 唤醒 Rana：子进程跑 life-agent.mjs；搜集场景联网搜索链长，waitMs 放宽（中间件超时 = waitMs+15s） */
-  const spawnLifeAgent = async (
-    message: string,
-    model?: string,
-    waitMs = 165000,
-  ): Promise<{ ok: boolean; reply?: string; data?: Record<string, unknown>; error?: string }> => {
-    const args = [path.join(here, "life-agent.mjs"), "--message", message, "--wait-ms", String(waitMs)];
-    if (model) args.push("--model", model);
-    const { stdout } = await execFileP(process.execPath, args, {
-      encoding: "utf8",
-      timeout: waitMs + 15000,
-      windowsHide: true,
-      maxBuffer: 8 * 1024 * 1024,
-    });
-    return JSON.parse(stdout.trim().split("\n").pop() ?? "{}");
-  };
 
-  const runLifeAgent = async (message: string, model?: string, waitMs?: number) => {
-    if (agentBusy) throw new Error("她正忙着上一个请求，等一下再试");
-    agentBusy = true;
-    try {
-      return await spawnLifeAgent(message, model, waitMs);
-    } finally {
-      agentBusy = false;
-    }
+  /** 唤醒 Rana：子进程跑 life-agent.mjs；搜集场景联网搜索链长，waitMs 放宽（中间件超时 = waitMs+15s） */
+  const bridge = createAgentBridge(path.join(here, "life-agent.mjs"));
+  const runLifeAgent = (message: string, model?: string, waitMs?: number) => {
+    const w = waitMs ?? 165000;
+    return bridge.run(
+      ["--message", message, "--wait-ms", String(w), ...(model ? ["--model", model] : [])],
+      w + 15000,
+    );
   };
 
   /** 现状摘要：课程表 + 待办（拆解人生目标、搜集资料时"结合他的情况"用） */

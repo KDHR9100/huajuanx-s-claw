@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFileP } from "../lib/exec";
 import { RANA_WEB } from "../lib/paths";
 import { json, readBody, isLoopback } from "../lib/http";
 import { writeJsonBak } from "../lib/fs-json";
+import { createAgentBridge } from "../lib/agent-session-bridge";
 import type { Plugin } from "vite";
 
 /**
@@ -30,7 +30,6 @@ export function ranaStudyMiddleware(): Plugin {
   const scheduleFile = path.join(studyDir, "schedule.json");
   const goalsFile = path.join(studyDir, "goals.json");
   const materialsDir = path.join(studyDir, "materials");
-  let agentBusy = false;
 
   interface StudyQuiz {
     status?: "none" | "pending" | "done";
@@ -323,42 +322,27 @@ export function ranaStudyMiddleware(): Plugin {
 
   /** 唤醒 Rana：子进程跑 study-agent.mjs，解析它 stdout 的最后一行 JSON；model 可选（页面选的模型）
    *  opts.sessionKey/ephemeral：一次性干净会话模式；opts.tail：先从常驻会话摘最近 N 轮对话当背景 */
-  const spawnAgent = async (
-    message: string,
-    model?: string,
-    opts?: { sessionKey?: string; ephemeral?: boolean; tail?: number },
-  ): Promise<{ ok: boolean; reply?: string; data?: Record<string, unknown>; error?: string }> => {
-    // 请求侧来的 model/sessionKey 要进子进程参数：白名单字符集，拒绝一切路径/注入形状
+  const buildArgs = (message: string, model?: string, opts?: { sessionKey?: string; ephemeral?: boolean; tail?: number }) => {
+    // 请求侧来的 model/sessionKey 白名单字符集，拒绝一切路径/注入形状
     if (model && !/^[A-Za-z0-9:./_-]+$/.test(model)) throw new Error(`model 含非法字符`);
     if (opts?.sessionKey && !/^[A-Za-z0-9:_-]+$/.test(opts.sessionKey)) throw new Error(`sessionKey 含非法字符`);
-    const args = [path.join(here, "study-agent.mjs"), "--message", message];
+
+    const args = ["--message", message];
     if (model) args.push("--model", model);
     if (opts?.sessionKey) args.push("--session-key", opts.sessionKey);
     if (opts?.ephemeral) args.push("--ephemeral");
     if (opts?.tail) args.push("--tail", String(opts.tail));
-    const { stdout } = await execFileP(process.execPath, args, {
-      encoding: "utf8",
-      timeout: 180000,
-      windowsHide: true,
-      maxBuffer: 8 * 1024 * 1024,
-    });
-    return JSON.parse(stdout.trim().split("\n").pop() ?? "{}");
+    return args;
   };
 
+
   /** 互斥执行也带上会话参数（她一次只干一件事） */
-  const runAgent = async (
+  const bridge = createAgentBridge(path.join(here, "study-agent.mjs"));
+  const runAgent = (
     message: string,
     model?: string,
     opts?: { sessionKey?: string; ephemeral?: boolean; tail?: number },
-  ) => {
-    if (agentBusy) throw new Error("她正忙着上一个请求，等一下再试");
-    agentBusy = true;
-    try {
-      return await spawnAgent(message, model, opts);
-    } finally {
-      agentBusy = false;
-    }
-  };
+  ) => bridge.run(buildArgs(message, model, opts));
 
   /** 学完一节正课 → 自动排复习课（+1/+7/+16 天，已存在的不重复排） */
   const insertReviews = (s: StudySchedule, course: StudyCourse) => {

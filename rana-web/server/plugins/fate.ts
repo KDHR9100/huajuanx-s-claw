@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFileP } from "../lib/exec";
 import { RANA_WEB } from "../lib/paths";
 import { json, readBody, isLoopback } from "../lib/http";
 import { writeJsonBak } from "../lib/fs-json";
+import { createAgentBridge } from "../lib/agent-session-bridge";
 import type { Plugin } from "vite";
 
 /**
@@ -20,7 +20,6 @@ export function ranaFateMiddleware(): Plugin {
   const fateDir = path.join(here, ".fate");
   const profilesFile = path.join(fateDir, "profiles.json");
   const legacyProfileFile = path.join(fateDir, "profile.json"); // 单档案时代的老文件，首次访问自动迁入
-  let agentBusy = false;
 
   interface FateProfile {
     id?: string;
@@ -111,25 +110,9 @@ export function ranaFateMiddleware(): Plugin {
     return store;
   };
 
-  const spawnAgent = async (message: string): Promise<{ ok: boolean; reply?: string; error?: string }> => {
-    const { stdout } = await execFileP(process.execPath, [path.join(here, "fate-agent.mjs"), "--message", message], {
-      encoding: "utf8",
-      timeout: 180000,
-      windowsHide: true,
-      maxBuffer: 8 * 1024 * 1024,
-    });
-    return JSON.parse(stdout.trim().split("\n").pop() ?? "{}");
-  };
 
-  const runAgent = async (message: string) => {
-    if (agentBusy) throw new Error("她正忙着上一个请求，等一下再试");
-    agentBusy = true;
-    try {
-      return await spawnAgent(message);
-    } finally {
-      agentBusy = false;
-    }
-  };
+  const bridge = createAgentBridge(path.join(here, "fate-agent.mjs"));
+  const runAgent = (message: string) => bridge.run(["--message", message]);
 
   /** 解卦提示词：档案（服务端补，可能没有）+ 前端按勾选带来的材料；没勾的整段省略 */
   const askMessage = (

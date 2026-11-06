@@ -4,6 +4,11 @@ export const json = (
   code: number,
   out: unknown,
 ) => {
+  // 服务端错误留痕（此前全库零服务端日志，后台异步错误无痕可查）；只记时间戳+状态码+错误短语，不打请求体与私密内容
+  if (code >= 500) {
+    const msg = typeof out === "object" && out !== null && "error" in (out as Record<string, unknown>) ? String((out as Record<string, unknown>).error).slice(0, 120) : "";
+    console.error(`[rana-web] ${new Date().toISOString()} HTTP ${code}${msg ? " " + msg : ""}`);
+  }
   res.setHeader("content-type", "application/json");
   res.statusCode = code;
   res.end(JSON.stringify(out));
