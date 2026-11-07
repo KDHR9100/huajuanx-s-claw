@@ -248,6 +248,7 @@ npm run preview   # 生产预览（中间件同样挂载，token 端点除外—
 - **10-31 ~ 11-03**：Rana 原作 canon 锚工程：字幕提取+台词考据 → canon-rag 插件（1068 块）→ bdon.moe 第三事实源 → 证据版事实清单（11-03 主人人工审核定稿 43E+4G+5N）→ SOUL 删无实据句、危机协议沉底。
 - **11-01**：人物图谱 v1+v2（记忆页🕸页签，graph.md 三表即数据源，ADR-0001 + GLOSSARY 落地）；网关启动提速（砍 github+acpx 插件，冷启动 310s→45s）；记忆桥机制收拢 lib/memory-bridge-core.mjs（13 用例单测）；main/QQ 公众号转正 glm-5.3-flash（deepseek/token-plan 全线退役）。
 - **11-02**：qq-sidecar QQ 个人号陪伴链路落地（SnowLuma OneBot v11 → 自研边车 → rana-qq-public CLI 单轮 46s/轮）+ 🐧QQ 陪伴页；备份仓 push 积压 7 提交案（migration-sync 快照超 100MB 硬限 + exec 会话池收割 + HTTPS 代理上传死锁 → SSH 443 定案）。
+- **11-08**：主人状态哨兵落地（`owner-status.mjs` cron 每分钟直跑：PowerShell 采前台窗口标题/进程清单/键鼠空闲 → 快照落 `.health/owner-status.json`；深夜 23:00–03:00 游戏连跑 ≥20 分钟 → CLI 拉起 main 用 message 工具 QQ 催睡，账本防唠叨 ≤2 次/间隔 30 分/空闲 40 分不空喊；main 新技能 `owner-status` 教她读快照「实时看主人」；早晚问候加记仇线读昨晚催睡账；规则引擎 19 用例，全量 202 绿）。
 
 ---
 

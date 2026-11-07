@@ -1,0 +1,14 @@
+{
+  "_说明": "主人状态哨兵配置（owner-status.mjs 读）。游戏识别=关键词对『进程名+前台窗口标题+全进程清单』做不区分大小写匹配；深夜窗口跨零点。改完即时生效（脚本每次运行都重新读），无需重启。",
+  "games": [
+    { "name": "三角洲行动", "keywords": ["三角洲", "Delta Force", "DeltaForce"] },
+    { "name": "影之刃零", "keywords": ["影之刃", "PhantomBlade", "Phantom Blade"] },
+    { "name": "街霸6", "keywords": ["街霸", "Street Fighter", "StreetFighter", "SF6"] }
+  ],
+  "nightStart": "23:00",
+  "nightEnd": "03:00",
+  "minRunMinutes": 20,
+  "idleExemptMinutes": 40,
+  "maxNags": 2,
+  "nagGapMinutes": 30
+}
