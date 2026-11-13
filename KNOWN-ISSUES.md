@@ -41,7 +41,7 @@
 
 | 症状域 | 搜索关键词 |
 | --- | --- |
-| 网关起不来/秒拒/空转/卡死 | `秒拒`、`空转`、`degraded`、`\\?\`、`DataCloneError`、`Async work scope`、`卡死病` |
+| 网关起不来/秒拒/空转/卡死/会话坏死 | `秒拒`、`空转`、`degraded`、`\\?\`、`DataCloneError`、`Async work scope`、`卡死病`、`draining`、`rollover`、`会话坏死` |
 | QQ/微信不通/行为怪 | `user:c2c`、`ask_user`、`channelAccounts`、`静默装死`、`收图`、`分块流式`、`missing scope`、`OneBot 401`、`qq-sidecar`、`cmd 碎片` |
 | 模型 400/403/超时/审查 | `Free quota`、`data_inspection`、`输出审查`、`content 块数组`、`maxTokens`、`SSE` |
 | LM Studio/显存 | `双实例`、`:2`、`JIT`、`ctx 2048`、`显存`、`embedding` |
@@ -63,6 +63,22 @@
 ***
 
 ## 登记区
+
+## [未解决·一行修法就绪] git-activity-cron.mjs import 误插注释块——被触发即 ReferenceError（2026-11-14 发现）
+- 症状：脚本一旦被 cron 触发即崩（L20 模块顶层调用 resolveOpenclawMjs()，而 L4 的 import 语句被 c07a9e5「11-06 路径三级兜底」提交误插在文件头 doc 注释块内，import 未生效）。
+- 根因：11-06 收拢改路径兜底时把 import 行插进了 JSDoc 注释块内，语法上 import 失效；生产走 glm 中继推送链，`--notify` 直推链「已备好待用」未排程，故至今未暴露。
+- 解决方案：把 L4 import 行挪出注释块（一行修法，施工代理已定位）；修后同款 grep 全仓「import 在注释块内」防姊妹病。
+- 状态：未解决（今晚施工范围外，等主人拍板；发现于 11-14 CLI 桥收拢施工，交接书 §8.2 有回执）。
+
+## [已解决·待复测] 网页聊天 draining/rollover 超时坏死病——瞬时失败被登记库盖 failed 章，之后每条消息滚存死等 15s 恶性循环；手术复位+dist 第 5 刀双保险（2026-11-14）
+- 症状：网页聊天页发消息报 `Error: timed out draining work before reply session rollover: agent:main:dashboard:<uuid>`，该会话此后每条消息必报，重启网关无效；11-09 一案（a8a0aa31）、11-14 一案（a2f91c11），换了新会话照样坏死=机制病。
+- 根因：窗口 status=failed 后，网关回复前先做 session rollover，rollover 排空在途工作死等 15s（dist get-reply 硬编码 `timeoutMs:15e3`）返回 false 即 throw，新窗口写回 failed——一次瞬时失败（网络抖动/模型超时）即进恶性循环。机制见 dist `get-reply-*.mjs`。
+- 解决方案（双保险，2026-11-14 02:34 落地）：
+  1. **登记手术**：agent 库 `session_windows` 把坏死会话当前窗口 `status: failed→done`（1 行，库先备份 `.bak-surgery-20261114`；node:sqlite 直改，网关停止态操作）——让下条消息免滚存直接续聊。
+  2. **dist 第 5 刀**：`apply-drain-rollover-patch-20261114.cjs`（state `tmp/`，升级后随全套重打）把滚存排空超时的 throw 改为 console.warn 后继续滚存（interrupt 已送达，best-effort）——瞬时失败只损失一条消息，不再毁会话。锚点唯一，已验证 throw 文本零残留。
+  3. 长期：证据包发上游（与 \?\路径案/DataCloneError/Async scope closed 同家族）。
+- 排障抓手：再遇 draining 报错，先 node:sqlite 查 `session_windows` status，别只查网络；手术后新消息 outcome=ok 即验收。
+- 状态：已解决·待复测（重启后网关 healthy、补丁在位、旧 error 均为重启前；等主人网页聊天发一条消息 outcome=ok 后改"已解决"）。
 
 ## [已解决] QQ 公号接入网关三坑——token 直连无 operator scope / WS 缺 Origin 被拒 / .cmd 中英混排被 cmd 拆碎（2026-11-02）
 - 症状：自研 qq-sidecar 想直连本机网关 WS 代替 CLI 时，握手与 connect 都成功（protocol=4、server=2026.9.7），但 `sessions.list` 返回 `FORBIDDEN: missing scope: operator.read`；用纯 WS 探针连 `ws://127.0.0.1:18789` 时若不带 Origin 头，直接被拒 `origin not allowed`；把启动脚本写成 LF+中文注释的 `.cmd` 后双击，cmd 把一行拆成多截报 `'cal' 不是内部或外部命令`、`'NODE_EXE' 不是...`、`'t'`、`'o'` 等碎片错误。
