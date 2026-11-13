@@ -16,16 +16,19 @@
 //   - 23:00–07:59 只记不发（深夜不扰）。--dry 只记不发。
 // 退出码恒为 0：异常状态本身记在 patrol.json 里，不污染 cron 收据。
 
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
+// [2026-11-14 收拢批2] 执行件/状态目录/解析口径收拢进 CLI 桥：
+//  - execFileP = promisify(execFile)，与原自建逐字同源（git log / channels status 两处共用）；
+//  - STATE_DIR 语义逐项对拍等价（env OPENCLAW_STATE_DIR 优先，缺省仓库根 .openclaw/.openclaw，装载时一次求值）；
+//  - OPENCLAW_MJS 的硬编码本机绝对路径兜底与桥版（npm root -g 探测→裸名 PATH 兜底）不等价，按宁缺勿歪保留本地。
+import { execFileP, STATE_HOME, PARSE } from "./lib/cli-bridge.mjs";
 
-const execFileP = promisify(execFile);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const STATE_DIR = process.env.OPENCLAW_STATE_DIR || path.resolve(HERE, "..", ".openclaw", ".openclaw");
+const STATE_DIR = STATE_HOME;
 const CONFIG_FILE = path.join(STATE_DIR, "openclaw.json");
 const HEALTH_FILE = path.join(HERE, ".health", "patrol.json");
 // 2026-10-25 迁移批1:备份仓/CLI 位置改 env 注入(云端 systemd/cron 配 Linux 值),缺省保留本机旧值
@@ -79,7 +82,7 @@ async function checkChannels() {
       windowsHide: true,
       env: { ...process.env, OPENCLAW_STATE_DIR: STATE_DIR },
     });
-    const j = JSON.parse(stdout.slice(stdout.indexOf("{")));
+    const j = PARSE.indexOfSliceJson(stdout); // [收拢批2] 同表达式：stdout.slice(stdout.indexOf("{")) 后 JSON.parse
     return { ok: true, json: j };
   } catch (e) {
     return { ok: false, error: (e instanceof Error ? e.message : String(e)).slice(0, 160) };

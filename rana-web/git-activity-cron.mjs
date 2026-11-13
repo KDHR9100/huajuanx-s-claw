@@ -16,6 +16,8 @@ import { resolveOpenclawMjs } from "./lib/rana-config.mjs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+// [2026-11-14 收拢批2] message send 推送子进程迁 CLI 桥（stdio inherit 直通 / 无超时 / close code 原样回传）
+import { runCli } from "./lib/cli-bridge.mjs";
 
 const OPENCLAW_MJS = resolveOpenclawMjs();
 const CHUNK_LIMIT = 350;
@@ -56,15 +58,18 @@ function chunkReport(text) {
 }
 
 function sendChunk(channel, target, message) {
-  return new Promise((resolve) => {
-    const send = spawn(
-      process.execPath,
-      [OPENCLAW_MJS, "message", "send", "--channel", channel, "--target", target, "--message", message],
-      { stdio: ["ignore", "inherit", "inherit"] }
-    );
-    send.on("close", (c) => resolve(c));
-    send.on("error", (e) => { console.error(`推送子进程启动失败: ${e.message}`); resolve(1); });
-  });
+  // [2026-11-14 收拢批2] spawn 骨架迁 cli-bridge.runCli；stdio inherit 直通、无超时、close code 原样回传；
+  // spawn 启动失败（error 事件）的话术与 resolve(1) 语义留在本函数（与原逐字一致）。
+  return runCli({
+    command: process.execPath,
+    args: [OPENCLAW_MJS, "message", "send", "--channel", channel, "--target", target, "--message", message],
+    stdio: ["ignore", "inherit", "inherit"],
+  })
+    .then((r) => r.code)
+    .catch((e) => {
+      console.error(`推送子进程启动失败: ${e.message}`);
+      return 1;
+    });
 }
 
 const child = spawn(

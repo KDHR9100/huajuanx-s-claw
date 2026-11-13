@@ -18,8 +18,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { spawn } from 'node:child_process';
 import { STATE_HOME, resolveApiKey, resolveOpenclawMjs } from './lib/rana-config.mjs';
+import { spawnCli } from './lib/cli-bridge.mjs';
 import { makeParseEntries } from './memory-bridge-parse.mjs';
 import { chat, cloudChat, makeLog, modelStr, readNewEvents as coreReadNewEvents } from './lib/memory-bridge-core.mjs';
 
@@ -399,10 +399,11 @@ if (mainEntries.length || rpEntries.length || qqEntries.length) {
 }
 
 // 触发双边记忆索引刷新（失败不影响主流程；索引也会按 mtime 自动重扫）
+// [2026-11-14 收拢批1] spawn 迁到 cli-bridge.spawnCli：detached + stdio ignore + unref + 无超时，原语义原样保留
 try {
-  const child = spawn(process.execPath, ['--tls-max-v1.2', resolveOpenclawMjs(), 'memory', 'index'], {
+  spawnCli({
+    args: ['--tls-max-v1.2', resolveOpenclawMjs(), 'memory', 'index'],
     env: { ...process.env, OPENCLAW_STATE_DIR: STATE_HOME },
-    detached: true, stdio: 'ignore',
+    detached: true, stdio: 'ignore', unref: true,
   });
-  child.unref();
 } catch {}

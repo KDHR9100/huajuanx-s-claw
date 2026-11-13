@@ -28,6 +28,9 @@ import { execFile, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { STATE_HOME } from "./lib/rana-config.mjs";
+// [2026-11-14 收拢批2] sessions delete 的执行件收拢进 CLI 桥（promisify(execFile) 逐字同源实现）；
+// 本地自建 execFileP（隐式 windowsHide:true + err.stderr 挂载）仍留给 netstat/taskkill 系统调用，不动。
+import { execFileP as cliExecFileP } from "./lib/cli-bridge.mjs";
 
 /** openclaw CLI 入口（与 vite.config.ts / start-gateway.cmd 同源的绝对路径） */
 const OPENCLAW_MJS = "C:\\Users\\Administrator\\AppData\\Roaming\\npm\\node_modules\\openclaw\\openclaw.mjs";
@@ -289,7 +292,9 @@ async function main() {
   for (const [i, p] of parents.entries()) {
     logStep("delete", `[${i + 1}/${parents.length}] 删除 ${p.key}`);
     try {
-      await execFileP(process.execPath, [OPENCLAW_MJS, "sessions", "delete", p.key, "--agent", p.agentId, "--yes"], {
+      // [2026-11-14 收拢批2] 执行件迁 cli-bridge.execFileP；windowsHide:true 原为自建版隐式默认，迁移后显式保留，其余参数原样
+      await cliExecFileP(process.execPath, [OPENCLAW_MJS, "sessions", "delete", p.key, "--agent", p.agentId, "--yes"], {
+        windowsHide: true,
         timeout: 90_000,
         env: { ...process.env, OPENCLAW_STATE_DIR: STATE_HOME },
       });
