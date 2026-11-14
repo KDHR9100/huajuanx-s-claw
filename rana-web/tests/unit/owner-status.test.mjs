@@ -73,12 +73,15 @@ describe("decideNightNag", () => {
     expect(d).toEqual({ fire: false, reason: "max-nags" });
   });
   it("间隔未到不重复催", () => {
-    const ledger = { nags: [{ at: "2026-11-07T15:00:00Z" }], lastNagAt: "2026-11-07T15:00:00Z" };
+    // [2026-11-14 修] 账本时间戳改本地时区构造（原写死 15:00:00Z，UTC 跑 CI 时与本地构造的 now 差 8 小时，gap 判定翻转——CI 红灯根因，11-08 备份仓时区案同家族）
+    const nagAt = new Date(2026, 10, 7, 23, 0).toISOString();
+    const ledger = { nags: [{ at: nagAt }], lastNagAt: nagAt };
     const d = decideNightNag({ ...base, now: new Date(2026, 10, 7, 23, 10), matchedGame: "三角洲行动", streakMinutes: 90, idleSec: 0, ledger, config: { nagGapMinutes: 30 } });
     expect(d).toEqual({ fire: false, reason: "gap-wait" });
   });
   it("间隔刚过：第 2 次，且提示词换狠一点的口吻", () => {
-    const ledger = { nags: [{ at: "2026-11-07T15:00:00Z" }], lastNagAt: "2026-11-07T15:00:00Z" };
+    const nagAt = new Date(2026, 10, 7, 23, 0).toISOString();
+    const ledger = { nags: [{ at: nagAt }], lastNagAt: nagAt };
     const d = decideNightNag({ ...base, now: new Date(2026, 10, 7, 23, 31), matchedGame: "三角洲行动", streakMinutes: 90, idleSec: 0, ledger, config: { nagGapMinutes: 30, maxNags: 2 } });
     expect(d).toEqual({ fire: true, reason: "night-nag", count: 2 });
     expect(buildNagPrompt({ count: 2, game: "三角洲行动", minutes: 90, title: "x", idleSec: 0, qqTarget: "t", channel: "qqbot" })).toContain("更不客气");

@@ -64,11 +64,11 @@
 
 ## 登记区
 
-## [未解决·一行修法就绪] git-activity-cron.mjs import 误插注释块——被触发即 ReferenceError（2026-11-14 发现）
+## [已解决] git-activity-cron.mjs import 误插注释块——被触发即 ReferenceError（2026-11-14 发现并修复）
 - 症状：脚本一旦被 cron 触发即崩（L20 模块顶层调用 resolveOpenclawMjs()，而 L4 的 import 语句被 c07a9e5「11-06 路径三级兜底」提交误插在文件头 doc 注释块内，import 未生效）。
 - 根因：11-06 收拢改路径兜底时把 import 行插进了 JSDoc 注释块内，语法上 import 失效；生产走 glm 中继推送链，`--notify` 直推链「已备好待用」未排程，故至今未暴露。
-- 解决方案：把 L4 import 行挪出注释块（一行修法，施工代理已定位）；修后同款 grep 全仓「import 在注释块内」防姊妹病。
-- 状态：未解决（今晚施工范围外，等主人拍板；发现于 11-14 CLI 桥收拢施工，交接书 §8.2 有回执）。
+- 解决方案：import 行挪回 import 区（3ae0403）；修后 node --check + 全量 350 用例绿；同款病全仓扫描（fate/life/study 三处为 /__rana/* 路径通配符误报，人工核对排除）。教训：**import 永远放 import 区，别插注释块**；`node --check` 查不出这种病（语法合法、运行时才炸）。
+- 状态：已解决（2026-11-14 修复，主人授权「你自己看要不要」；周一班次前落地）。
 
 ## [已解决·待复测] 网页聊天 draining/rollover 超时坏死病——瞬时失败被登记库盖 failed 章，之后每条消息滚存死等 15s 恶性循环；手术复位+dist 第 5 刀双保险（2026-11-14）
 - 症状：网页聊天页发消息报 `Error: timed out draining work before reply session rollover: agent:main:dashboard:<uuid>`，该会话此后每条消息必报，重启网关无效；11-09 一案（a8a0aa31）、11-14 一案（a2f91c11），换了新会话照样坏死=机制病。
