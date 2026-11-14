@@ -3,6 +3,7 @@
 // cron 事件到达自动刷新；新建/编辑/删除继续用命令行（本期不做）。
 import { useCallback, useEffect, useState } from "react";
 import { gateway } from "../lib/gateway";
+import { fmtDayTime } from "../lib/fmt";
 
 interface CronJob {
   id: string;
@@ -44,7 +45,7 @@ function fmtNext(ts?: number) {
     const min = Math.round((ts - now) / 60000);
     if (min < 60) return `${min} 分钟后`;
     if (min < 60 * 24) return `${Math.round(min / 60)} 小时后`;
-    return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    return fmtDayTime(ts); // [2026-11-14 收拢] 原为 fmtDayTime 的手抄展开（pad2 逐字等价），收拢回统一出口
   }
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }

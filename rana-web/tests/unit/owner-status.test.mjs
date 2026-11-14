@@ -68,7 +68,11 @@ describe("decideNightNag", () => {
     expect(d).toEqual({ fire: false, reason: "idle-exempt" });
   });
   it("催满上限不再催", () => {
-    const ledger = { nags: [{ at: "2026-11-07T15:00:00Z" }, { at: "2026-11-07T15:31:00Z" }], lastNagAt: "2026-11-07T15:31:00Z" };
+    // [2026-11-14 收拢批] 同款加固：max-nags 判定先于 gap 检查、此时间戳不参与判定（碰巧时区无关），
+    // 但不许留「写死 Z 串 + 本地构造 now」混框形状——f761bce 漏网的同族，repo-hygiene A2 守卫对象。
+    const nagAt0 = new Date(2026, 10, 7, 23, 0).toISOString();
+    const nagAt1 = new Date(2026, 10, 7, 23, 31).toISOString();
+    const ledger = { nags: [{ at: nagAt0 }, { at: nagAt1 }], lastNagAt: nagAt1 };
     const d = decideNightNag({ ...base, matchedGame: "三角洲行动", streakMinutes: 90, idleSec: 0, ledger, config: { maxNags: 2, nagGapMinutes: 30 } });
     expect(d).toEqual({ fire: false, reason: "max-nags" });
   });

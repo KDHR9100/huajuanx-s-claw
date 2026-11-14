@@ -1,6 +1,7 @@
 // 万年历：真实日期月历 + 当日黄历（农历/干支/宜忌/纳音）+ 十二时辰吉凶。全部本地计算。
 import { useMemo, useState } from "react";
 import { dayAlmanac, lunarCellLabel, monthCells } from "../../lib/fateCore";
+import { todayStr } from "../../lib/fmt";
 import Term from "./Term";
 
 const WEEK = ["一", "二", "三", "四", "五", "六", "日"];
@@ -12,7 +13,7 @@ export default function CalendarAlmanac() {
 
   const alm = useMemo(() => dayAlmanac(sel.y, sel.m, sel.d), [sel.y, sel.m, sel.d]);
   const cells = useMemo(() => monthCells(cursor.y, cursor.m), [cursor]);
-  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  // [2026-11-14 收拢] todayStr 原为本组件手抄常量（与 lib/fmt 的 todayStr 逐字等价），收拢回统一出口
 
   const shift = (delta: number) => {
     setCursor(({ y, m }) => {
@@ -63,7 +64,7 @@ export default function CalendarAlmanac() {
                 className={[
                   "al-cell",
                   c.inMonth ? "" : "other",
-                  ymd === todayStr ? "today" : "",
+                  ymd === todayStr() ? "today" : "",
                   ymd === alm.ymd ? "sel" : "",
                 ]
                   .filter(Boolean)
