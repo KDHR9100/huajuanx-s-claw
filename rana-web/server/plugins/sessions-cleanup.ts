@@ -1,8 +1,8 @@
-import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import { guardReadJson, CONTRACT_FIELDS } from "../lib/contract-guard";
 import { json, isLoopback } from "../lib/http";
 import type { Plugin } from "vite";
 
@@ -20,12 +20,16 @@ export function ranaSessionsCleanupMiddleware(): Plugin {
 
 
   const readStatus = (): Record<string, unknown> => {
-    try {
-      const raw = JSON.parse(fs.readFileSync(statusFile, "utf8")) as Record<string, unknown>;
-      if (raw && typeof raw === "object") return { exists: true, ...raw };
-    } catch {
-      // 没跑过或读失败：按不存在处理
-    }
+    // [2026-11-14 卡2] 契约守卫：坏 JSON/关键字段坏（running/updatedAt/step）→留痕+按"没跑过"降级
+    // {exists:false}（原逻辑 parse try/catch + typeof 检查静默吞）；守卫通过=原对象透传。
+    // 文件缺失静默不算违规。POST 的陈旧锁判定（running+updatedAt）依赖这两个必填字段，坏数据降级后允许重跑——与原"读失败按不存在"同口径。
+    const { value } = guardReadJson<Record<string, unknown> | null>({
+      contract: "cron/cleanup-status",
+      file: statusFile,
+      fields: CONTRACT_FIELDS["cron/cleanup-status"],
+      fallback: null,
+    });
+    if (value) return { exists: true, ...value };
     return { exists: false };
   };
 

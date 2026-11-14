@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { guardReadJson, CONTRACT_FIELDS } from "../lib/contract-guard";
 import { json } from "../lib/http";
 import { STATE_HOME } from "../lib/paths";
 import type { Plugin } from "vite";
@@ -19,11 +20,15 @@ export function ranaQqProfileMiddleware(): Plugin {
 
 
   const aliases = (): Record<string, string> => {
-    try {
-      return (JSON.parse(fs.readFileSync(aliasFile, "utf8")) as { groups?: Record<string, string> }).groups ?? {};
-    } catch {
-      return {};
-    }
+    // [2026-11-14 卡2] 契约守卫：坏 JSON/groups 坏型→留痕+空表降级（原逻辑 parse try/catch 静默吞）；
+    // 守卫通过=原值透传（groups 缺失仍 ?? {}，与现状一致）。文件缺失静默不算违规。
+    const { value } = guardReadJson<{ groups?: Record<string, string> } | null>({
+      contract: "qq/qq-bridge",
+      file: aliasFile,
+      fields: CONTRACT_FIELDS["qq/qq-bridge"],
+      fallback: null,
+    });
+    return value?.groups ?? {};
   };
 
   interface MdFile {

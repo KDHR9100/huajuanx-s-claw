@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileP } from "../lib/exec";
+import { guardReadJson, CONTRACT_FIELDS } from "../lib/contract-guard";
 import { RANA_WEB } from "../lib/paths";
 import { readFullConfig, isLocalProvider } from "../lib/config";
 import { json, isLoopback } from "../lib/http";
@@ -350,16 +351,19 @@ export function ranaSysStatusMiddleware(): Plugin {
 
   /** 巡检快照：health-patrol.mjs 每 30 分钟写的 .health/patrol.json（缺文件=巡检没跑过） */
   const readPatrol = () => {
-    try {
-      return JSON.parse(fs.readFileSync(path.join(here, ".health", "patrol.json"), "utf8")) as {
-        updatedAt: number;
-        checks?: Array<{ id: string; label: string; ok: boolean; detail: string }>;
-        anomalies?: Array<{ id: string; label: string; detail: string }>;
-        sendError?: string;
-      };
-    } catch {
-      return null;
-    }
+    // [2026-11-14 卡2] 契约守卫：坏 JSON/关键字段坏→留痕+按"巡检没跑过"降级 null（原逻辑 parse try/catch 静默吞）；
+    // 守卫通过=原对象透传。文件缺失静默不算违规。
+    return guardReadJson<{
+      updatedAt: number;
+      checks?: Array<{ id: string; label: string; ok: boolean; detail: string }>;
+      anomalies?: Array<{ id: string; label: string; detail: string }>;
+      sendError?: string;
+    } | null>({
+      contract: "health/patrol",
+      file: path.join(here, ".health", "patrol.json"),
+      fields: CONTRACT_FIELDS["health/patrol"],
+      fallback: null,
+    }).value;
   };
 
   const buildStatus = async () => {
@@ -557,11 +561,14 @@ export function ranaSysStatusMiddleware(): Plugin {
       return;
     }
     if (req.method === "GET") {
-      try {
-        json(res, 200, JSON.parse(fs.readFileSync(HOME_REPORT_PATH, "utf8")));
-      } catch {
-        json(res, 200, null);
-      }
+      // [2026-11-14 卡2] 契约守卫：坏 JSON/外壳字段坏→留痕+按"没有上报"降级 null（原逻辑 parse try/catch 静默吞）；
+      // 守卫通过=原对象透传。文件缺失静默不算违规。
+      json(res, 200, guardReadJson<unknown>({
+        contract: "sys/home-report",
+        file: HOME_REPORT_PATH,
+        fields: CONTRACT_FIELDS["sys/home-report"],
+        fallback: null,
+      }).value);
       return;
     }
     json(res, 405, { error: "method not allowed" });

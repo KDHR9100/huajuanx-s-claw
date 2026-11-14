@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { execFileP } from "../lib/exec";
+import { guardReadJson, CONTRACT_FIELDS } from "../lib/contract-guard";
 import { RANA_WEB, STATE_HOME } from "../lib/paths";
 import { json, isLoopback } from "../lib/http";
 import type { Plugin } from "vite";
@@ -88,13 +89,7 @@ export function cloudSyncMiddleware(): Plugin {
     return { name, files, bytes };
   };
 
-  const readJsonSafe = (p: string) => {
-    try {
-      return JSON.parse(fs.readFileSync(p, "utf8"));
-    } catch {
-      return null;
-    }
-  };
+  // [2026-11-14 卡2] 原 readJsonSafe 被 guardReadJson 取代（契约守卫：坏 JSON/关键字段坏→留痕+记台账+降级 null）
 
   /** 数据面：tar.gz 流式下载（云端跑）。bsdtar(Windows System32) 与 gnu tar(Linux) 都吃这套参数。 */
   const snapshotHandler = (
@@ -174,8 +169,9 @@ export function cloudSyncMiddleware(): Plugin {
         error: STATUS.error,
         log: STATUS.log.slice(-30),
         // 本地(家里):自己上次拉了什么;云端:家里上次什么时候来拉过
-        local: readJsonSafe(LOCAL_STATE_FILE),
-        cloud: readJsonSafe(CLOUD_STATE_FILE),
+        // [2026-11-14 卡2] 两份同步记账走契约守卫（坏数据留痕+降级 null；缺失静默 null 与原逻辑一致）
+        local: guardReadJson({ contract: "cloud-sync/home-state", file: LOCAL_STATE_FILE, fields: CONTRACT_FIELDS["cloud-sync/home-state"], fallback: null }).value,
+        cloud: guardReadJson({ contract: "cloud-sync/cloud-state", file: CLOUD_STATE_FILE, fields: CONTRACT_FIELDS["cloud-sync/cloud-state"], fallback: null }).value,
       });
       return;
     }
