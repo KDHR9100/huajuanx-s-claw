@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 /**
  * git-activity-cron.mjs — git 统计直跑任务的 cron 包装：跑统计 → 落盘 → 推送 QQ 私聊
-import { resolveOpenclawMjs } from "./lib/rana-config.mjs";
  *
  * 用法：node git-activity-cron.mjs --period=today|week|month --out=<报告文件> [--notify=qqbot:c2c:<openid>]
  *
@@ -18,6 +17,9 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 // [2026-11-14 收拢批2] message send 推送子进程迁 CLI 桥（stdio inherit 直通 / 无超时 / close code 原样回传）
 import { runCli } from "./lib/cli-bridge.mjs";
+// [2026-11-14 修] import 曾被 c07a9e5 误插进文件头 JSDoc 注释块内（import 被注释吞 → 顶层 resolveOpenclawMjs()
+// 必然 ReferenceError，触发即崩）；挪回 import 区，见台账 2026-11-14 条目。
+import { resolveOpenclawMjs } from "./lib/rana-config.mjs";
 
 const OPENCLAW_MJS = resolveOpenclawMjs();
 const CHUNK_LIMIT = 350;

@@ -78,7 +78,7 @@
   2. **dist 第 5 刀**：`apply-drain-rollover-patch-20261114.cjs`（state `tmp/`，升级后随全套重打）把滚存排空超时的 throw 改为 console.warn 后继续滚存（interrupt 已送达，best-effort）——瞬时失败只损失一条消息，不再毁会话。锚点唯一，已验证 throw 文本零残留。
   3. 长期：证据包发上游（与 \?\路径案/DataCloneError/Async scope closed 同家族）。
 - 排障抓手：再遇 draining 报错，先 node:sqlite 查 `session_windows` status，别只查网络；手术后新消息 outcome=ok 即验收。
-- 状态：已解决·待复测（重启后网关 healthy、补丁在位、旧 error 均为重启前；等主人网页聊天发一条消息 outcome=ok 后改"已解决"）。
+- 状态：已解决（2026-11-14 08:10 主人网页聊天真实流量验收：同一窗口 99b34c88 一轮 102 秒跑完 status=done，无滚存无 failed；登记手术+dist 第 5 刀双保险生效）。
 
 ## [已解决] QQ 公号接入网关三坑——token 直连无 operator scope / WS 缺 Origin 被拒 / .cmd 中英混排被 cmd 拆碎（2026-11-02）
 - 症状：自研 qq-sidecar 想直连本机网关 WS 代替 CLI 时，握手与 connect 都成功（protocol=4、server=2026.9.7），但 `sessions.list` 返回 `FORBIDDEN: missing scope: operator.read`；用纯 WS 探针连 `ws://127.0.0.1:18789` 时若不带 Origin 头，直接被拒 `origin not allowed`；把启动脚本写成 LF+中文注释的 `.cmd` 后双击，cmd 把一行拆成多截报 `'cal' 不是内部或外部命令`、`'NODE_EXE' 不是...`、`'t'`、`'o'` 等碎片错误。
