@@ -6,6 +6,16 @@ import { buildDeviceAuthPayloadV3 } from "@openclaw/gateway-client/browser";
 import { loadBrowserIdentity } from "./identity";
 import { reconnectBackoffMs } from "./reconnectBackoff";
 import { extractThinking } from "./reasoning";
+import { FinalRunCache, isDuplicateOfRecentMessage } from "./finalRunDedup";
+import { appendToDeleteChain } from "./deleteChain";
+import {
+  computeMigratedSessionFields,
+  isPendingCreateKey,
+  makePendingCreateKey,
+  mergeSessionListWithPending,
+  resolvePendingCreateKeyForDelete,
+  resolvePendingCreateKeyForSend,
+} from "./pendingCreateKeys";
 import { useAppStore } from "../store/useAppStore";
 import type { ChatAttachment, ChatMessage, ModelInfo, OutgoingAttachment, SessionRow } from "./types";
 
@@ -121,8 +131,8 @@ class GatewayConnection {
   private deleteChain: Promise<void> = Promise.resolve();
   /** 已订阅消息流的会话 key（微信等外部渠道的 chat/session.message 事件只投给订阅连接） */
   private msgSubKey: string | null = null;
-  /** 刚终态的 runId 缓存：chat final 已渲染的回复，忽略随后重复的落库事件 */
-  private finalRunIds = new Set<string>();
+  /** 刚终态的 runId 缓存：chat final 已渲染的回复，忽略随后重复的落库事件（提取至 finalRunDedup.ts） */
+  private finalRunCache = new FinalRunCache();
   /** sessions.changed 触发的列表刷新防抖 */
   private sessionRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -452,7 +462,7 @@ class GatewayConnection {
       return;
     }
     if (p.state === "final") {
-      this.rememberFinalRun(p.runId);
+      this.finalRunCache.remember(p.runId);
       const msgId = ensureAssistant();
       const finalText = extractText(p.message) || useAppStore.getState().runs[key]?.text || "";
       const finalThinking = extractThinking((p.message as Record<string, unknown> | undefined)?.content);
@@ -467,7 +477,7 @@ class GatewayConnection {
       return;
     }
     if (p.state === "error") {
-      this.rememberFinalRun(p.runId);
+      this.finalRunCache.remember(p.runId);
       const msgId = ensureAssistant();
       useAppStore.getState().patchMessage(key, msgId, { streaming: false, status: undefined, error: p.errorMessage ?? p.errorKind ?? "运行出错" });
       useAppStore.getState().setRun(key, undefined);
@@ -475,7 +485,7 @@ class GatewayConnection {
       return;
     }
     if (p.state === "aborted") {
-      this.rememberFinalRun(p.runId);
+      this.finalRunCache.remember(p.runId);
       const cur = useAppStore.getState();
       const r = cur.runs[key];
       if (r) {
@@ -509,7 +519,7 @@ class GatewayConnection {
     const role = String(msg.role ?? "");
     if (role !== "user" && role !== "assistant") return;
     // 该回复已由 chat 流式事件渲染（run 进行中，或 final 已落）→ 跳过
-    if (role === "assistant" && (s.runs[key] || (p.runId !== undefined && this.finalRunIds.has(p.runId)))) return;
+    if (role === "assistant" && (s.runs[key] || this.finalRunCache.hasFinal(p.runId))) return;
     const text = extractText(msg);
     const thinking = extractThinking(msg.content);
     const atts = mapServerAttachments(msg);
@@ -517,7 +527,7 @@ class GatewayConnection {
     const list = s.messages[key] ?? [];
     // 本地乐观追加/流式渲染过的消息会再收到一份落库事件，按内容去重。
     // compaction 会让 user 落库事件晚于 assistant 回复到达，只比对最后一条会漏 → 扫最近几条
-    if (list.slice(-8).some((m) => m.role === role && m.text === text && (m.attachments?.length ?? 0) === (atts?.length ?? 0))) return;
+    if (isDuplicateOfRecentMessage(list, role, text, atts)) return;
     s.appendMessage(key, {
       id: String(p.messageId ?? `sm-${p.messageSeq ?? Date.now()}`),
       role: role as "user" | "assistant",
@@ -531,7 +541,7 @@ class GatewayConnection {
 
   /** 换绑当前会话的消息订阅：微信等外部渠道的事件只投给订阅连接 */
   async syncMessageSubscription(key?: string) {
-    if (!key || key === this.msgSubKey || key.startsWith("pending-create:")) return;
+    if (!key || key === this.msgSubKey || isPendingCreateKey(key)) return;
     const prev = this.msgSubKey;
     this.msgSubKey = key;
     if (prev) void this.request("sessions.messages.unsubscribe", { key: prev }).catch(() => {});
@@ -540,15 +550,6 @@ class GatewayConnection {
     } catch (e) {
       console.warn("[gateway] sessions.messages.subscribe 失败:", e);
       this.msgSubKey = null;
-    }
-  }
-
-  private rememberFinalRun(runId: string) {
-    if (!runId) return;
-    this.finalRunIds.add(runId);
-    if (this.finalRunIds.size > 50) {
-      const oldest = this.finalRunIds.values().next().value;
-      if (oldest !== undefined) this.finalRunIds.delete(oldest);
     }
   }
 
@@ -587,11 +588,8 @@ class GatewayConnection {
       }));
       // 后台删除中的会话先过滤掉，避免陈旧列表让刚删的会话闪回
       const kept = mapped.filter((r) => !this.deletingKeys.has(r.key));
-      // 乐观创建中的占位会话：服务端列表还没有它，保留以免被刷新冲掉
-      const pendingRows = store().sessions.filter(
-        (x) => x.key.startsWith("pending-create:") && !kept.some((m) => m.key === x.key),
-      );
-      store().setSessions(pendingRows.length ? [...pendingRows, ...kept] : kept);
+      // 乐观创建中的占位会话：服务端列表还没有它，保留以免被刷新冲掉（合并逻辑提取至 pendingCreateKeys.ts）
+      store().setSessions(mergeSessionListWithPending(store().sessions, kept));
     } catch (e) {
       console.warn("[gateway] sessions.list 失败:", e);
     }
@@ -672,17 +670,9 @@ class GatewayConnection {
   async sendChat(sessionKey: string, text: string, attachments?: OutgoingAttachment[]) {
     const trimmed = text.trim();
     if (!trimmed && !attachments?.length) return;
-    // 会话处于乐观创建期：先等后台创建拿到真实 key 再发送
-    let key = sessionKey;
-    if (key.startsWith("pending-create:")) {
-      const p = this.pendingCreates.get(key);
-      if (!p) return; // 创建已失败并被清理
-      try {
-        key = await p;
-      } catch {
-        return;
-      }
-    }
+    // 会话处于乐观创建期：先等后台创建拿到真实 key 再发送（null=创建已失败/等待失败，静默放弃）
+    const key = await resolvePendingCreateKeyForSend(this.pendingCreates, sessionKey);
+    if (key === null) return;
     const idempotencyKey = crypto.randomUUID();
     const msgId = `local-${idempotencyKey}`;
     store().appendMessage(key, {
@@ -770,7 +760,7 @@ class GatewayConnection {
   async createSession(agentId?: string): Promise<string> {
     // 乐观创建：先插入本地占位会话并立即切换（服务端创建含 SQLite 写入较慢），
     // 完成后把消息/运行态迁移到真实 key；期间发消息会先等创建完成（见 sendChat）
-    const tempKey = `pending-create:${crypto.randomUUID()}`;
+    const tempKey = makePendingCreateKey(crypto.randomUUID());
     store().mergeSession({ key: tempKey, title: agentId === "rana-rp" ? "Rana·RP" : "新会话", updatedAt: Date.now() });
     store().setCurrentKey(tempKey);
     store().setMessages(tempKey, []);
@@ -803,11 +793,9 @@ class GatewayConnection {
     store().removeSession(tempKey);
     store().mergeSession({
       key,
-      title: (row.displayName as string) ?? (row.derivedTitle as string) ?? "新会话",
-      model: row.model as string | undefined,
+      // title/model/sessionId 映射提取至 computeMigratedSessionFields（含 create 响应自带 sessionId：立即可删）
+      ...computeMigratedSessionFields(row),
       updatedAt: Date.now(),
-      // create 响应自带 sessionId：立即可删，不必等下一次列表刷新
-      sessionId: row.sessionId ? String(row.sessionId) : undefined,
     });
     if (msgs?.length) store().setMessages(key, msgs);
     if (run) store().setRun(key, run);
@@ -817,7 +805,7 @@ class GatewayConnection {
 
   /** 重命名会话：乐观更新标题，服务端 sessions.patch label 为权威来源 */
   async renameSession(sessionKey: string, label: string) {
-    if (sessionKey.startsWith("pending-create:")) throw new Error("会话还在创建中，请稍后再试");
+    if (isPendingCreateKey(sessionKey)) throw new Error("会话还在创建中，请稍后再试");
     store().mergeSession({ key: sessionKey, title: label });
     try {
       await this.request("sessions.patch", { key: sessionKey, label });
@@ -829,15 +817,9 @@ class GatewayConnection {
   }
 
   async deleteSession(sessionKey: string) {
-    // 会话还在乐观创建期：先等真实 key（创建失败则已被清理，无需再删）
-    let key = sessionKey;
-    if (key.startsWith("pending-create:")) {
-      const p = this.pendingCreates.get(key);
-      if (!p) return;
-      const real = await p.catch(() => "");
-      if (!real) return;
-      key = real;
-    }
+    // 会话还在乐观创建期：先等真实 key（null=无 promise 或创建失败/空串，静默放弃无需再删）
+    const key = await resolvePendingCreateKeyForDelete(this.pendingCreates, sessionKey);
+    if (key === null) return;
     // webchat 只有 operator.write：归档属 lifecycle patch（需 sessionId 作乐观锁），
     // 之后以 archivedOnly 删除（同样只需 write 权限）
     let row = store().sessions.find((x) => x.key === key);
@@ -865,7 +847,7 @@ class GatewayConnection {
       await this.request("sessions.patch", { key, archived: true, expectedSessionId: row.sessionId }, DELETE_TIMEOUT_MS);
       await this.request("sessions.delete", { key, archivedOnly: true, deleteTranscript: true }, DELETE_TIMEOUT_MS);
     };
-    const task = this.deleteChain.then(async () => {
+    const { task, nextChain } = appendToDeleteChain(this.deleteChain, async () => {
       try {
         await attempt();
       } catch (e) {
@@ -885,10 +867,7 @@ class GatewayConnection {
       // 删除完成后仍短暂过滤，防止陈旧列表把会话闪回
       setTimeout(() => this.deletingKeys.delete(key), 15_000);
     });
-    this.deleteChain = task.then(
-      () => undefined,
-      () => undefined,
-    );
+    this.deleteChain = nextChain;
     return task;
   }
 
