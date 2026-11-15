@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { RANA_WEB } from "../lib/paths";
@@ -7,8 +8,8 @@ import type { Plugin } from "vite";
 
 /**
  * QQ 陪伴边车管理端点（本机只读状态 + 启停/重启 + 白名单/群友感改配置）：
- * - GET  /__rana/qq-sidecar             状态：进程存活、心跳、QQ 号、WS 状态、白名单、群友感参数、日志尾巴、最近活动
- * - POST /__rana/qq-sidecar/control     {action:"start"|"stop"|"restart"}，仅本机回环来源
+ * - GET  /__rana/qq-sidecar             状态：进程存活、心跳、QQ 号、WS 状态、白名单、群友感参数、日志尾巴、最近活动、SnowLuma 端口探测
+ * - POST /__rana/qq-sidecar/control     {action:"start"|"stop"|"restart"|"start-snowluma"}，仅本机回环来源
  * - POST /__rana/qq-sidecar/config      改 allow.groups/allow.private/persona/reply.maxChars，仅本机回环来源；
  *                                       只碰这几个字段，onebot token/homeDir 等原样保留；改完需重启 sidecar 生效
  *
@@ -141,6 +142,55 @@ export function ranaQqSidecarMiddleware(): Plugin {
     return { ok: true, pid: child.pid };
   };
 
+  /** 从 config.json 读 onebot.homeDir 与 wsUrl（读不到就用默认值，只影响显示与探测）。 */
+  const readOnebot = () => {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8").replace(/^\uFEFF/, "")) as {
+        onebot?: { homeDir?: string; wsUrl?: string };
+      };
+      return { homeDir: cfg.onebot?.homeDir ?? "", wsUrl: cfg.onebot?.wsUrl || "ws://127.0.0.1:3001" };
+    } catch {
+      return { homeDir: "", wsUrl: "ws://127.0.0.1:3001" };
+    }
+  };
+
+  /** TCP 探测 SnowLuma 的 WS 端口是否在听（能连上=在线，800 毫秒不答就当不在线）。800ms 是给本机进程的宽限。 */
+  const probeSnowLuma = (wsUrl: string) =>
+    new Promise<boolean>((resolve) => {
+      let u: URL;
+      try {
+        u = new URL(wsUrl);
+      } catch {
+        resolve(false);
+        return;
+      }
+      const socket = net.connect({ host: u.hostname, port: Number(u.port) || 3001 });
+      const done = (ok: boolean) => {
+        socket.destroy();
+        resolve(ok);
+      };
+      socket.setTimeout(800);
+      socket.once("connect", () => done(true));
+      socket.once("error", () => done(false));
+    });
+
+  /** 拉起 SnowLuma：跑它自带的 start-snowluma.cmd（和主人双击它效果一致，只是不弹黑框）。
+   *  它没有单实例锁（二次启动会另开端口并存），所以 5099 有应答时拒绝再启。 */
+  const startSnowLuma = async () => {
+    const snowAlreadyUp = await probeSnowLuma("ws://127.0.0.1:5099");
+    if (snowAlreadyUp) {
+      return { ok: false, error: "SnowLuma 已在运行（网页 5099 有应答）但 OneBot 端口还没开：先去它的网页确认挂接状态，别重复启动" };
+    }
+    const { homeDir } = readOnebot();
+    const launcher = path.join(homeDir, "start-snowluma.cmd");
+    if (!homeDir || !fs.existsSync(launcher)) {
+      return { ok: false, error: `读不到启动脚本 ${launcher || "（config.json 里没填 onebot.homeDir）"}，请手动双击 ${homeDir || "K:\\SnowLuma"}\\start-snowluma.cmd` };
+    }
+    const child = spawn("cmd.exe", ["/c", launcher], { cwd: homeDir, detached: true, windowsHide: true, stdio: "ignore" });
+    child.unref();
+    return { ok: true };
+  };
+
   const stop = async () => {
     const current = readStatus();
     const pid = Number(current?.pid ?? 0);
@@ -236,7 +286,14 @@ export function ranaQqSidecarMiddleware(): Plugin {
       json(res, 405, { error: "method not allowed" });
       return;
     }
-    json(res, 200, snapshot());
+    void (async () => {
+      const { homeDir, wsUrl } = readOnebot();
+      const running = await probeSnowLuma(wsUrl);
+      json(res, 200, {
+        ...snapshot(),
+        snowluma: { running, wsPort: Number(new URL(wsUrl).port) || 3001, homeDir },
+      });
+    })();
   };
 
   const controlHandler = (
@@ -280,7 +337,11 @@ export function ranaQqSidecarMiddleware(): Plugin {
         json(res, 200, start());
         return;
       }
-      json(res, 400, { error: "action 只能是 start / stop / restart" });
+      if (action === "start-snowluma") {
+        json(res, 200, await startSnowLuma());
+        return;
+      }
+      json(res, 400, { error: "action 只能是 start / stop / restart / start-snowluma" });
     });
   };
 

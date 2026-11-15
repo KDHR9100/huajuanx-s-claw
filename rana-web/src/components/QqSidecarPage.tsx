@@ -1,6 +1,7 @@
-// QQ 陪伴页：看/管 qq-sidecar 这一个边车——是否在跑、登录的 QQ、WS 连接、群友感参数、
-// 最近收到的消息与回复、日志尾巴，以及启动/停止/重启。
-// 数据来自 /__rana/qq-sidecar（读 sidecar 自己写的心跳与活动日志），本页不做任何配置写入。
+// QQ 陪伴页：看/管 QQ 陪伴链路——SnowLuma（消息搬运工）+ qq-sidecar（桥）。
+// SnowLuma 卡：端口探测在线状态 + 一键启动（重启电脑后它不会自启，断连时在这修复）。
+// 边车卡：是否在跑、登录的 QQ、WS 连接、群友感参数、最近收到的消息与回复、日志尾巴，以及启动/停止/重启。
+// 数据来自 /__rana/qq-sidecar（读 sidecar 自己写的心跳与活动日志 + TCP 探测 SnowLuma），本页不写 SnowLuma 任何配置。
 import { useCallback, useEffect, useState } from "react";
 import { fmtDayTimeOr as fmtTime } from "../lib/fmt";
 
@@ -51,6 +52,7 @@ interface SidecarResp {
   activity: ActivityRow[];
   now: number;
   entryExists: boolean;
+  snowluma?: { running: boolean; wsPort: number; homeDir: string };
 }
 
 const fmtUptime = (startedAt?: number) => {
@@ -85,7 +87,9 @@ export default function QqSidecarPage() {
   });
   const [dirty, setDirty] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
+  const [snowMsg, setSnowMsg] = useState("");
   const running = Boolean(data?.running);
+  const snowlumaRunning = Boolean(data?.snowluma?.running);
 
   const load = useCallback(async () => {
     try {
@@ -139,6 +143,30 @@ export default function QqSidecarPage() {
       await load();
     } catch (e) {
       setMsg(`失败：${(e as Error).message}`);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  /** 启动 SnowLuma（消息搬运工）：发一次控制命令，端口通了状态卡自己变绿（页面每 5 秒轮询）。 */
+  const startSnowLuma = async () => {
+    if (busy) return;
+    setBusy("snowluma");
+    setSnowMsg("");
+    try {
+      const r = await fetch("/__rana/qq-sidecar/control", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "start-snowluma" }),
+      });
+      const out = (await r.json()) as { ok?: boolean; error?: string };
+      if (out.ok === false) {
+        setSnowMsg(`失败：${out.error ?? "未知原因"}`);
+        return;
+      }
+      setSnowMsg("启动命令已发出，几秒后状态会自己变绿；半分钟还不通就去 SnowLuma 安装目录的 logs/ 看它的日志。");
+    } catch (e) {
+      setSnowMsg(`失败：${(e as Error).message}`);
     } finally {
       setBusy("");
     }
@@ -206,6 +234,27 @@ export default function QqSidecarPage() {
             SnowLuma 的 QQ 消息走这个边车进 OpenClaw 的 rana-qq-public · 群友感：合并窗口 / 节流 / 点名必回 / 偶尔潜水
             {error && <span className="sys-err">（{error}）</span>}
           </p>
+        </div>
+
+        {/* SnowLuma（消息搬运工）状态 + 启动 */}
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3>
+            {snowlumaRunning ? "🟢 SnowLuma 在线" : "❌ SnowLuma 没在运行"}{" "}
+            <small>消息搬运工 · 探测端口 {data?.snowluma?.wsPort ?? 3001}</small>
+          </h3>
+          <div className="dsh-actions" style={{ marginBottom: 8 }}>
+            <button className="btn" disabled={Boolean(busy) || snowlumaRunning} onClick={() => void startSnowLuma()}>
+              {busy === "snowluma" ? "启动中…" : "启动 SnowLuma"}
+            </button>
+            {snowMsg && <span className={snowMsg.startsWith("失败") ? "sys-err" : "dsh-ok"}>{snowMsg}</span>}
+          </div>
+          {!snowlumaRunning && (
+            <p className="sys-err" style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}>
+              它是挂在 QQ 本体上的「消息搬运工」：把群消息搬进边车、把回复搬回 QQ，没它整条链路不通，下面的边车跑得再好也没消息可搬。
+              电脑重启后它不会自己起来（老规矩：开机不自启），点上面的按钮即可。
+              {data?.snowluma?.homeDir ? ` 安装位置：${data.snowluma.homeDir}；老起不来就看 ${data.snowluma.homeDir}\\logs\\ 里的日志。` : ""}
+            </p>
+          )}
         </div>
 
         {/* 运行状态 + 启停 */}
