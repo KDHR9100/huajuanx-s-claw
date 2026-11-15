@@ -9,9 +9,9 @@
 //     「QQ 陪伴」页展示与启停（中间件 server/plugins/qq-sidecar.ts）；
 //   - 失败只记日志，不往群里发错误信息。
 import fs from 'node:fs';
-import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { acquirePortLock } from '../lib/single-instance.mjs';
 import { OneBotHttp, OneBotWs, discoverAccount } from './onebot.mjs';
 import { AgentRunner, SerialQueue } from './runner.mjs';
 import { formatIncoming, segmentsToText, splitText, stripMarkdown } from './text.mjs';
@@ -55,15 +55,6 @@ function openLog(file) {
   };
 }
 
-/** 单实例锁：端口被占说明已有 sidecar 在跑（重复实例会把一条消息回两遍）。 */
-function acquireLock(port) {
-  return new Promise((resolve) => {
-    const server = net.createServer();
-    server.once('error', (error) => resolve({ ok: false, error }));
-    server.listen(port, '127.0.0.1', () => resolve({ ok: true, server }));
-  });
-}
-
 async function main() {
   const cfg = loadConfig();
   const fileLog = openLog(cfg.log?.file);
@@ -73,10 +64,13 @@ async function main() {
     fileLog(line);
   };
 
-  const lock = await acquireLock(LOCK_PORT);
-  if (!lock.ok) {
-    if (lock.error?.code === 'EADDRINUSE') log(`端口 ${LOCK_PORT} 已被占用，已有 sidecar 在跑，本进程退出`);
-    else log(`单实例锁失败：${lock.error?.message ?? lock.error}，本进程退出`);
+  // 单实例锁：端口被占说明已有 sidecar 在跑（重复实例会把一条消息回两遍）。
+  let lock;
+  try {
+    lock = await acquirePortLock(LOCK_PORT, 'qq-sidecar');
+  } catch (lockError) {
+    if (lockError?.code === 'EADDRINUSE') log(`端口 ${LOCK_PORT} 已被占用，已有 sidecar 在跑，本进程退出`);
+    else log(`单实例锁失败：${lockError?.message ?? lockError}，本进程退出`);
     return;
   }
 

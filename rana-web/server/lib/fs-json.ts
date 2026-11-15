@@ -35,3 +35,22 @@ export function writeJsonAtomic(file: string, data: unknown) {
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");
   fs.renameSync(tmp, file);
 }
+
+/**
+ * openclaw.json 单写口（2026-11-15 收拢）：此前 model-params / provider-config 共 3 处手抄
+ * 「copyFileSync 备份特定后缀 + writeJsonAtomic 原子写」，收拢为本函数，openclaw.json 只许从这写。
+ * 行为 = 现役做法的并集取最严：备份（旧文件缺失则跳过，同 writeJsonBak 口径）+ 原子写（tmp+rename）。
+ * bakSuffix 沿用各写点原有后缀（.bak-params / .bak-cloud），新写者不传默认 .bak。
+ * file 由调用方传 OPENCLAW_CONFIG（server/lib/paths.ts），与读侧 readFullConfig 同一个常量，读写同源不漂移；
+ * 特意不做成内置默认路径——本模块必须保持顶层零 I/O，单测才能裸机导入（11-15 CI 四连红教训），
+ * 一旦引 paths.ts 就会连带它顶层的 CLI 探测 I/O。
+ */
+export function writeOpenclawConfig(file: string, data: unknown, bakSuffix = ".bak") {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  try {
+    fs.copyFileSync(file, file + bakSuffix);
+  } catch {
+    // 首次写入还没有旧文件
+  }
+  writeJsonAtomic(file, data);
+}

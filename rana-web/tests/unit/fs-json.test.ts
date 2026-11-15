@@ -4,7 +4,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { readJson, writeJsonBak, writeJsonAtomic, backupThenWrite } from "../../server/lib/fs-json";
+import { readJson, writeJsonBak, writeJsonAtomic, backupThenWrite, writeOpenclawConfig } from "../../server/lib/fs-json";
 
 const dir = mkdtempSync(path.join(tmpdir(), "fs-json-test-"));
 const f = path.join(dir, "a", "b", "x.json");
@@ -41,5 +41,36 @@ describe("fs-json", () => {
     expect(existsSync(a + ".tmp")).toBe(false);
     writeJsonAtomic(a, { ok: 2 });
     expect(JSON.parse(readFileSync(a, "utf8"))).toEqual({ ok: 2 });
+  });
+
+  // ---- openclaw.json 单写口（2026-11-15 收拢自 model-params / provider-config 的 3 处手抄） ----
+
+  it("writeOpenclawConfig：首写无旧文件跳过备份（无 .bak），内容正确、无 .tmp 残留、缩进保形", () => {
+    const c = path.join(dir, "cfg", "openclaw.json"); // 父目录不存在，顺带钉住 mkdir 行为
+    const first = { models: { providers: { p1: { baseUrl: "http://x", models: [{ id: "m1" }] } } } };
+    writeOpenclawConfig(c, first);
+    expect(existsSync(c + ".bak")).toBe(false);
+    const text = readFileSync(c, "utf8");
+    expect(JSON.parse(text)).toEqual(first); // 形状保持：原样读回
+    expect(text).toContain('\n  "models"'); // JSON.stringify(x, null, 2) 缩进口径
+    expect(existsSync(c + ".tmp")).toBe(false); // 原子写无残留
+  });
+
+  it("writeOpenclawConfig：再次写入产生 .bak 且滚存上一版", () => {
+    const c = path.join(dir, "cfg", "openclaw.json");
+    writeOpenclawConfig(c, { v: 1 });
+    writeOpenclawConfig(c, { v: 2 });
+    expect(JSON.parse(readFileSync(c + ".bak", "utf8"))).toEqual({ v: 1 });
+    expect(JSON.parse(readFileSync(c, "utf8"))).toEqual({ v: 2 });
+  });
+
+  it("writeOpenclawConfig：自定义后缀（现役写点原语义 .bak-params / .bak-cloud）", () => {
+    const c = path.join(dir, "cfg", "openclaw.json");
+    writeOpenclawConfig(c, { v: 2 }, ".bak-params");
+    expect(JSON.parse(readFileSync(c + ".bak-params", "utf8"))).toEqual({ v: 2 });
+    writeOpenclawConfig(c, { v: 3 }, ".bak-cloud");
+    expect(JSON.parse(readFileSync(c + ".bak-cloud", "utf8"))).toEqual({ v: 2 });
+    writeOpenclawConfig(c, { v: 4 }, ".bak-cloud");
+    expect(JSON.parse(readFileSync(c + ".bak-cloud", "utf8"))).toEqual({ v: 3 }); // 同后缀滚动
   });
 });

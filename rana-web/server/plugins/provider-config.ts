@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileP } from "../../lib/cli-bridge.mjs"; // [2026-11-14 收拢批2] 执行件收拢进 CLI 桥（实现逐字同源）
-import { writeJsonAtomic } from "../lib/fs-json";
+import { writeOpenclawConfig } from "../lib/fs-json";
 import { STATE_HOME, OPENCLAW_CONFIG, OPENCLAW_MJS } from "../lib/paths";
 import { readFullConfig, maskKey, isLocalProvider, providerReferences, type ProviderEntry } from "../lib/config";
 import { defineRanaPlugin } from "../lib/rana-plugin";
@@ -54,7 +54,6 @@ export function ranaProviderConfigMiddleware() {
     if (!cur && (!baseUrl || !/^https?:\/\//.test(baseUrl))) throw new Error("新建 provider 必须填写 http(s):// 开头的 baseUrl");
     if (baseUrl && !/^https?:\/\//.test(baseUrl)) throw new Error("baseUrl 必须以 http(s):// 开头");
     if (!apiKey && !cur?.apiKey) throw new Error("当前无 key，必须填写 apiKey");
-    fs.copyFileSync(OPENCLAW_CONFIG, OPENCLAW_CONFIG + ".bak-cloud");
     let next: ProviderEntry = { ...(cur ?? {}) };
     if (baseUrl) next.baseUrl = baseUrl.replace(/\/+$/, "");
     if (apiKey) next.apiKey = apiKey;
@@ -82,7 +81,7 @@ export function ranaProviderConfigMiddleware() {
       cfg.agents.defaults.model = { ...cfg.agents.defaults.model, primary: firstModel };
     }
     cfg.models = { ...(cfg.models ?? {}), providers };
-    writeJsonAtomic(OPENCLAW_CONFIG, cfg);
+    writeOpenclawConfig(OPENCLAW_CONFIG, cfg, ".bak-cloud");
     return { ok: true as const, saved: id };
   };
 
@@ -94,10 +93,9 @@ export function ranaProviderConfigMiddleware() {
     if (isLocalProvider(cur)) throw new Error("本地 provider（LM Studio）请直接编辑配置文件，不在云端面板删除");
     const refs = providerReferences(cfg, id);
     if (refs.length) throw new Error(`仍被引用，不能删除：${refs.join("；")}`);
-    fs.copyFileSync(OPENCLAW_CONFIG, OPENCLAW_CONFIG + ".bak-cloud");
     delete providers[id];
     cfg.models = { ...(cfg.models ?? {}), providers };
-    writeJsonAtomic(OPENCLAW_CONFIG, cfg);
+    writeOpenclawConfig(OPENCLAW_CONFIG, cfg, ".bak-cloud");
     return { ok: true as const, deleted: id };
   };
 

@@ -1,8 +1,7 @@
-import fs from "node:fs";
 import { OPENCLAW_CONFIG } from "../lib/paths";
 import { readFullConfig } from "../lib/config";
 import { json, isLoopback } from "../lib/http";
-import { writeJsonAtomic } from "../lib/fs-json";
+import { writeOpenclawConfig } from "../lib/fs-json";
 import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
@@ -45,9 +44,8 @@ export function ranaModelParamsMiddleware() {
         const prov = (cfg.models ?? {}).providers ?? {};
         const model = (prov[providerId]?.models ?? []).find((m) => m.id === modelId);
         if (!model) throw new Error(`模型不存在：${providerId}/${modelId}`);
-        fs.copyFileSync(OPENCLAW_CONFIG, OPENCLAW_CONFIG + ".bak-params");
         model.params = { ...(model.params ?? {}), ...clean };
-        writeJsonAtomic(OPENCLAW_CONFIG, cfg);
+        writeOpenclawConfig(OPENCLAW_CONFIG, cfg, ".bak-params");
         json(res, 200, { ok: true, providerId, modelId, params: model.params });
       } catch (e) {
         json(res, 400, { error: (e as Error).message });

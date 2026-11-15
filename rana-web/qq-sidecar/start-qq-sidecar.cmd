@@ -1,5 +1,5 @@
 @echo off
 setlocal
-set OPENCLAW_STATE_DIR=K:\OpenClaw\.openclaw\.openclaw
+if not defined OPENCLAW_STATE_DIR set "OPENCLAW_STATE_DIR=%~dp0..\..\.openclaw\.openclaw"
 cd /d "%~dp0"
 node index.mjs

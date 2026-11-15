@@ -278,7 +278,7 @@ ws.on("open", async () => {
     await withTimeout(
       request("chat.send", {
         sessionKey: tmpKey,
-        message: "请用 read 工具读取 K:/OpenClaw/README.md 的前 5 行，然后用一句话总结这个仓库是做什么的。",
+        message: `请用 read 工具读取 ${path.join(REPO_ROOT, "README.md").replace(/\\/g, "/")} 的前 5 行，然后用一句话总结这个仓库是做什么的。`,
         idempotencyKey: randomUUID(),
       }),
       15000,

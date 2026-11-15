@@ -8,7 +8,6 @@
   "openclaw": {
     "agent": "rana-qq-public",
     "mjsPath": "",
-    "stateDir": "K:/OpenClaw/.openclaw/.openclaw",
     "timeoutSeconds": 300
   },
   "allow": {
