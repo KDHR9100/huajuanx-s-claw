@@ -14,6 +14,7 @@
  * 回补：每班最多补 7 天——从上次写到的日期后一天起（含今天），超长日截断到前 24000 字符。
  * 触发：openclaw cron --command 每晚 23:40，或手动 node 运行。
  * 用法：node companion-diary.mjs [--dry 只统计不落盘] [--since=YYYY-MM-DD 手动回补起点]
+ * Import 期零 I/O（2026-11-15 CI 修复）：读配置/建目录/开日志都在 initRuntime，isMain 守卫 + 测试 import 纯函数两不误
  */
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -27,25 +28,31 @@ const PRIV = `${HOME}/private-memory`;
 const STATE_FILE = PRIV + '/.diary-state.json';
 // 通道与私密桥同款：rp-nsfw provider（经本地 sse-fix-proxy :18801），主人点名的便宜档模型。
 // 2026-11-01 主人拍板：API 挂了该班次失败，水位不前进，下一班自动重试（事件不丢），不留本地兜底。
-const CFG = JSON.parse(fs.readFileSync(HOME + '/openclaw.json', 'utf8'));
-const RP_PROV = CFG.models?.providers?.['rp-nsfw'] || {};
-const CHANNEL = {
-  url: RP_PROV.baseUrl || 'http://127.0.0.1:18801/v1',
-  apiKey: resolveApiKey(RP_PROV.apiKey),
-  model: 'nalang-turbo-0826',
-};
-const NOW = Date.now();
+// 惰性占位（2026-11-15 CI 修复）：原为模块顶层常量/副作用，收进下方 initRuntime()，import 期零 I/O
+let CHANNEL = null;
+let log = () => {}; // 默认 no-op 防呆：未初始化时误调用不炸
+let OWNER_NAME = '主人';
 const CAP_CHARS = 24000; // 超长日截断：每天最多喂给模型 24000 字符
 const BACKFILL_MAX = 7;  // 每班最多回补 7 天
 
-fs.mkdirSync(DIARY_DIR, { recursive: true });
-const log = makeLog(PRIV + '/.diary.log');
+// 运行时初始化：与原模块顶层同序（CFG→RP_PROV→CHANNEL→mkdir→log→IDENTITY→OWNER_NAME），仅 main() 调用
+function initRuntime() {
+  const CFG = JSON.parse(fs.readFileSync(HOME + '/openclaw.json', 'utf8'));
+  const RP_PROV = CFG.models?.providers?.['rp-nsfw'] || {};
+  CHANNEL = {
+    url: RP_PROV.baseUrl || 'http://127.0.0.1:18801/v1',
+    apiKey: resolveApiKey(RP_PROV.apiKey),
+    model: 'nalang-turbo-0826',
+  };
+  fs.mkdirSync(DIARY_DIR, { recursive: true });
+  log = makeLog(PRIV + '/.diary.log');
 
-// 主人对内称呼外置（identity 文件不入公开仓库；缺文件回退中性称呼，与 memory-bridge 同款）
-const IDENTITY = (() => {
-  try { return JSON.parse(fs.readFileSync(new URL('./memory-bridge.identity.json', import.meta.url), 'utf8')); } catch { return {}; }
-})();
-const OWNER_NAME = IDENTITY.realName || '主人';
+  // 主人对内称呼外置（identity 文件不入公开仓库；缺文件回退中性称呼，与 memory-bridge 同款）
+  const IDENTITY = (() => {
+    try { return JSON.parse(fs.readFileSync(new URL('./memory-bridge.identity.json', import.meta.url), 'utf8')); } catch { return {}; }
+  })();
+  OWNER_NAME = IDENTITY.realName || '主人';
+}
 
 const SYS = '任务：写 Rana 的私人复盘日记。禁止复述本任务，禁止扮演对话角色，用 Rana 第一人称写。';
 
@@ -138,6 +145,7 @@ function readDayEvents(sinceMs) {
 
 /* ---------- main ---------- */
 async function main() {
+  initRuntime();
   let state = loadState();
   const today = beijingDateKey(new Date());
   const dry = process.argv.includes('--dry');
