@@ -2,7 +2,7 @@ import path from "node:path";
 import { execFileP } from "../../lib/cli-bridge.mjs"; // [2026-11-14 收拢批2] 执行件收拢进 CLI 桥（实现逐字同源）
 import { STATE_HOME, resolveOpenclawMjs } from "../lib/paths";
 import { json, isLoopback } from "../lib/http";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 审批端点：GET /__rana/approvals（快照）、POST /__rana/approvals（批准/拒绝）。
@@ -12,7 +12,7 @@ import type { Plugin } from "vite";
  * ?withGrants=1 时额外跑一次 CLI approvals grants list（子进程 1~3s，仅页面打开/手动刷新用，
  * 轮询角标别带）。仅本机可访问。
  */
-export function ranaApprovalsMiddleware(): Plugin {
+export function ranaApprovalsMiddleware() {
   const DB_FILE = path.join(STATE_HOME, "state", "openclaw.sqlite");
   const HISTORY_LIMIT = 60;
 
@@ -149,13 +149,8 @@ export function ranaApprovalsMiddleware(): Plugin {
     json(res, 405, { error: "method not allowed" });
   };
 
-  return {
+  return defineRanaPlugin({
     name: "rana-approvals",
-    configureServer(server) {
-      server.middlewares.use("/__rana/approvals", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/approvals", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/approvals": handler },
+  });
 }

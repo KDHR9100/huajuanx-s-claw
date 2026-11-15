@@ -3,14 +3,14 @@ import { OPENCLAW_CONFIG } from "../lib/paths";
 import { readFullConfig } from "../lib/config";
 import { json, isLoopback } from "../lib/http";
 import { writeJsonAtomic } from "../lib/fs-json";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 本地模型超参数端点（仅本地 provider 的模型；写入 openclaw.json 后网关文件监听热重载，真实生效）：
  * POST /__rana/model-params {providerId, modelId, params} —— params 只允许白名单数值键，合并进既有 params。
  * 仅本机回环来源可调。
  */
-export function ranaModelParamsMiddleware(): Plugin {
+export function ranaModelParamsMiddleware() {
   const ALLOWED_KEYS = ["temperature", "top_p", "repeat_penalty", "maxTokens"] as const;
 
   const handler = (
@@ -54,13 +54,8 @@ export function ranaModelParamsMiddleware(): Plugin {
       }
     });
   };
-  return {
+  return defineRanaPlugin({
     name: "rana-model-params",
-    configureServer(server) {
-      server.middlewares.use("/__rana/model-params", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/model-params", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/model-params": handler },
+  });
 }

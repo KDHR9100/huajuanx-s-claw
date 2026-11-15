@@ -5,7 +5,7 @@ import { RANA_WEB } from "../lib/paths";
 import { json, readBody, isLoopback } from "../lib/http";
 import { writeJsonBak } from "../lib/fs-json";
 import { createAgentBridge } from "../lib/agent-session-bridge";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 人生规划端点（数据存本地 .life/ 目录，已进 .gitignore 不入公开仓库）：
@@ -24,7 +24,7 @@ import type { Plugin } from "vite";
  * - POST   /__rana/life/library            {entry|entries, addedBy} 页面确认后落盘
  * - DELETE /__rana/life/library?id=        删除条目
  */
-export function ranaLifeMiddleware(): Plugin {
+export function ranaLifeMiddleware() {
   const here = RANA_WEB;
   const lifeDir = path.join(here, ".life");
   const lifeFile = path.join(lifeDir, "life.json");
@@ -858,13 +858,8 @@ export function ranaLifeMiddleware(): Plugin {
     json(res, 405, { error: "method not allowed" });
   };
 
-  return {
+  return defineRanaPlugin({
     name: "rana-life",
-    configureServer(server) {
-      server.middlewares.use("/__rana/life", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/life", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/life": handler },
+  });
 }

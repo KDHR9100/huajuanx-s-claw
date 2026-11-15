@@ -4,7 +4,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { RANA_WEB } from "../lib/paths";
 import { json, readBody, isLoopback } from "../lib/http";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * QQ 陪伴边车管理端点（本机只读状态 + 启停/重启 + 白名单/群友感改配置）：
@@ -16,7 +16,7 @@ import type { Plugin } from "vite";
  * 数据来源是 sidecar 自己写的 state/status.json（每 10 秒心跳）与 state/activity.jsonl；
  * GET 不返回 token。config.json 与 state/ 都在 qq-sidecar/.gitignore 里，不进公开仓库。
  */
-export function ranaQqSidecarMiddleware(): Plugin {
+export function ranaQqSidecarMiddleware() {
   const DIR = path.join(RANA_WEB, "qq-sidecar");
   const ENTRY = path.join(DIR, "index.mjs");
   const CONFIG_FILE = path.join(DIR, "config.json");
@@ -372,17 +372,12 @@ export function ranaQqSidecarMiddleware(): Plugin {
     });
   };
 
-  return {
+  return defineRanaPlugin({
     name: "rana-qq-sidecar",
-    configureServer(server) {
-      server.middlewares.use("/__rana/qq-sidecar/control", controlHandler as Parameters<typeof server.middlewares.use>[1]);
-      server.middlewares.use("/__rana/qq-sidecar/config", configHandler as Parameters<typeof server.middlewares.use>[1]);
-      server.middlewares.use("/__rana/qq-sidecar", handler as Parameters<typeof server.middlewares.use>[1]);
+    routes: {
+      "/__rana/qq-sidecar/control": controlHandler,
+      "/__rana/qq-sidecar/config": configHandler,
+      "/__rana/qq-sidecar": handler,
     },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/qq-sidecar/control", controlHandler as Parameters<typeof server.middlewares.use>[1]);
-      server.middlewares.use("/__rana/qq-sidecar/config", configHandler as Parameters<typeof server.middlewares.use>[1]);
-      server.middlewares.use("/__rana/qq-sidecar", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+  });
 }

@@ -3,14 +3,14 @@ import path from "node:path";
 import { guardReadJson, CONTRACT_FIELDS } from "../lib/contract-guard";
 import { json } from "../lib/http";
 import { STATE_HOME } from "../lib/paths";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 群画像端点（纯只读展示）：GET /__rana/qq-profile
  * 读公共号工作区 memory/ 下的群画像/群友画像/周报 md + 群别名表（shared-memory/qq-bridge.json）。
  * 画像文件由 rana-qq-public 自己写（group-analyst skill），这里零写入；总结模型的切换走网关 WS RPC cron.update，不经过这里。
  */
-export function ranaQqProfileMiddleware(): Plugin {
+export function ranaQqProfileMiddleware() {
   // 2026-10-25 迁移批1 修复:原硬编码小写 "K:/openclaw/..." 在 Windows 大小写不敏感下侥幸能用,Linux 必读不到。
   // 改走 STATE_HOME(env 优先、缺省相对仓库推导),本地/云端同一条路径。
   const HOME = STATE_HOME;
@@ -82,13 +82,8 @@ export function ranaQqProfileMiddleware(): Plugin {
     json(res, 405, { error: "method not allowed" });
   };
 
-  return {
+  return defineRanaPlugin({
     name: "rana-qq-profile",
-    configureServer(server) {
-      server.middlewares.use("/__rana/qq-profile", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/qq-profile", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/qq-profile": handler },
+  });
 }

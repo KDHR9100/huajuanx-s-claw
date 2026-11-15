@@ -4,7 +4,7 @@ import { execFileP } from "../lib/exec";
 import { RANA_WEB } from "../lib/paths";
 import { json, readBody, isLoopback } from "../lib/http";
 import { writeJsonBak } from "../lib/fs-json";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 追番端点（Bangumi api.bgm.tv 代理 + 本地追番清单，数据存 .bangumi/ 不进公开仓库）：
@@ -18,7 +18,7 @@ import type { Plugin } from "vite";
  * - DELETE /__rana/bangumi/collection?subjectId= 移出追番
  * 这台机器 bgm.tv 直连不通（实测），所有出站走 curl -x http://127.0.0.1:7897（Clash，与状态页探测同款）。
  */
-export function ranaBangumiMiddleware(): Plugin {
+export function ranaBangumiMiddleware() {
   const here = RANA_WEB;
   const bgmDir = path.join(here, ".bangumi");
   const collectionFile = path.join(bgmDir, "collection.json");
@@ -291,13 +291,8 @@ export function ranaBangumiMiddleware(): Plugin {
     json(res, 405, { error: "method not allowed" });
   };
 
-  return {
+  return defineRanaPlugin({
     name: "rana-bangumi",
-    configureServer(server) {
-      server.middlewares.use("/__rana/bangumi", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/bangumi", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/bangumi": handler },
+  });
 }

@@ -3,7 +3,7 @@ import path from "node:path";
 import { STATE_HOME } from "../lib/paths";
 import { json, isLoopback } from "../lib/http";
 import { backupThenWrite } from "../lib/fs-json";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 记忆浏览端点：GET /__rana/memory（文件树）· GET /__rana/memory/read?key= · POST /__rana/memory/save
@@ -14,7 +14,7 @@ import type { Plugin } from "vite";
  * 私密组（SOUL.private.md、private-memory/*.md）仅本地 UI 展示，本端点绝不把内容发往任何远端。
  * 复盘日记组（workspace-rana-rp/memory/diary，日记边车每天一篇的存档）展示比照私密组（解锁确认），文件只读、拒写拒删。
  */
-export function ranaMemoryMiddleware(): Plugin {
+export function ranaMemoryMiddleware() {
   const MAIN = path.join(STATE_HOME, "workspace-main");
   const RP = path.join(STATE_HOME, "workspace-rana-rp");
   const PRIV = path.join(STATE_HOME, "private-memory");
@@ -245,13 +245,8 @@ export function ranaMemoryMiddleware(): Plugin {
     json(res, 405, { error: "method not allowed" });
   };
 
-  return {
+  return defineRanaPlugin({
     name: "rana-memory",
-    configureServer(server) {
-      server.middlewares.use("/__rana/memory", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/memory", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/memory": handler },
+  });
 }

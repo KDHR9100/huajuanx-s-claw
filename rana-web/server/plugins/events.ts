@@ -3,7 +3,7 @@ import path from "node:path";
 import { RANA_WEB } from "../lib/paths";
 import { json, readBody, isLoopback } from "../lib/http";
 import { writeJsonBak } from "../lib/fs-json";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 全局日历端点（数据存本地 .life/events.json，不进公开仓库）：
@@ -14,7 +14,7 @@ import type { Plugin } from "vite";
  * 事件类型：interview 面试 / appointment 约会事务 / activity Live·漫展·出门 / game 游戏活动 / deadline 截止。
  * 课程（course）是 schedule.json 的镜像，由前端当日合并展示，不落本文件（不双写）。
  */
-export function ranaEventsMiddleware(): Plugin {
+export function ranaEventsMiddleware() {
   const here = RANA_WEB;
   const lifeDir = path.join(here, ".life");
   const eventsFile = path.join(lifeDir, "events.json");
@@ -185,13 +185,8 @@ export function ranaEventsMiddleware(): Plugin {
     json(res, 405, { error: "method not allowed" });
   };
 
-  return {
+  return defineRanaPlugin({
     name: "rana-events",
-    configureServer(server) {
-      server.middlewares.use("/__rana/events", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/events", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/events": handler },
+  });
 }

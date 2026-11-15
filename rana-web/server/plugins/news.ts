@@ -4,13 +4,13 @@ import { execFileP } from "../lib/exec";
 import { guardParsedText, CONTRACT_FIELDS } from "../lib/contract-guard";
 import { isLoopback } from "../lib/http";
 import { RANA_WEB } from "../lib/paths";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 早报数据端点：GET /__rana/news 读本地 .news/report.json（由 news-report.mjs 每天 08:00 生成）。
  * 无文件/读失败返回 {empty:true}，前端展示引导文案。
  */
-export function ranaNewsMiddleware(): Plugin {
+export function ranaNewsMiddleware() {
   const here = RANA_WEB;
   const file = path.join(here, ".news", "report.json");
   let generating = false; // 互斥：并发触发生成（含 React dev 双 effect）只跑一次脚本
@@ -61,13 +61,8 @@ export function ranaNewsMiddleware(): Plugin {
     res.statusCode = 405;
     res.end(JSON.stringify({ error: "method not allowed" }));
   };
-  return {
+  return defineRanaPlugin({
     name: "rana-news",
-    configureServer(server) {
-      server.middlewares.use("/__rana/news", newsHandler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/news", newsHandler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/news": newsHandler },
+  });
 }

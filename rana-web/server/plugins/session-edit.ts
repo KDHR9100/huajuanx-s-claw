@@ -11,7 +11,7 @@ import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { STATE_HOME } from "../lib/paths";
 import { json, isLoopback } from "../lib/http";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 import {
   SessionEditError,
   findSessionLocation,
@@ -108,7 +108,7 @@ function parseSubmittedBlocks(raw: unknown): EditableBlock[] {
   });
 }
 
-export function ranaSessionEditMiddleware(): Plugin {
+export function ranaSessionEditMiddleware() {
   const AGENTS_DIR = path.join(STATE_HOME, "agents");
 
   const handler = (
@@ -138,15 +138,10 @@ export function ranaSessionEditMiddleware(): Plugin {
     json(res, 405, { error: "method not allowed" });
   };
 
-  return {
+  return defineRanaPlugin({
     name: "rana-session-edit",
-    configureServer(server) {
-      server.middlewares.use("/__rana/session-edit", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/session-edit", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/session-edit": handler },
+  });
 }
 
 /** GET/POST 共用的请求/响应形态（与 person-graph 同款最小类型） */

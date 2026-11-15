@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { guardReadJson, CONTRACT_FIELDS } from "../lib/contract-guard";
 import { json, isLoopback } from "../lib/http";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 系统会话清理端点：GET /__rana/sessions-cleanup 读进度，POST 启动 cron-session-cleanup.mjs。
@@ -12,7 +12,7 @@ import type { Plugin } from "vite";
  * 进度落盘 %TEMP%\openclaw\cron-session-cleanup.json（脚本每步更新 + 10s 保活，
  * updatedAt 超过 2 分钟视为陈旧锁，允许发起新任务）。脚本 detach 启动，vite 重启不影响手术进行。
  */
-export function ranaSessionsCleanupMiddleware(): Plugin {
+export function ranaSessionsCleanupMiddleware() {
   const script = path.join(path.dirname(fileURLToPath(import.meta.url)), "cron-session-cleanup.mjs");
   const statusFile = path.join(os.tmpdir(), "openclaw", "cron-session-cleanup.json");
   const STALE_MS = 2 * 60 * 1000;
@@ -74,13 +74,8 @@ export function ranaSessionsCleanupMiddleware(): Plugin {
     json(res, 405, { error: "method not allowed" });
   };
 
-  return {
+  return defineRanaPlugin({
     name: "rana-sessions-cleanup",
-    configureServer(server) {
-      server.middlewares.use("/__rana/sessions-cleanup", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/sessions-cleanup", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/sessions-cleanup": handler },
+  });
 }

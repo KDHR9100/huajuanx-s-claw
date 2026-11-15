@@ -4,7 +4,7 @@ import { RANA_WEB } from "../lib/paths";
 import { json, readBody, isLoopback } from "../lib/http";
 import { writeJsonBak } from "../lib/fs-json";
 import { createAgentBridge } from "../lib/agent-session-bridge";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 学习计划端点 v2（数据只存本地 .study/ 目录，已进 .gitignore 不入公开仓库）：
@@ -24,7 +24,7 @@ import type { Plugin } from "vite";
  * - POST   /__rana/study/goals/push       方案确认后写入课程表：生成课程 id、挂默认计划、过期日期自动顺延
  * 服务端还负责：done 课自动排复习课（+1/+7/+16 天）、连续打卡计算、打卡里程碑评语（异步）。
  */
-export function ranaStudyMiddleware(): Plugin {
+export function ranaStudyMiddleware() {
   const here = RANA_WEB;
   const studyDir = path.join(here, ".study");
   const scheduleFile = path.join(studyDir, "schedule.json");
@@ -1053,13 +1053,8 @@ export function ranaStudyMiddleware(): Plugin {
     json(res, 405, { error: "method not allowed" });
   };
 
-  return {
+  return defineRanaPlugin({
     name: "rana-study",
-    configureServer(server) {
-      server.middlewares.use("/__rana/study", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/study", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/study": handler },
+  });
 }

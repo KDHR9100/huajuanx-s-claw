@@ -4,7 +4,7 @@ import { RANA_WEB, STATE_HOME } from "../lib/paths";
 import { json, readBody, isLoopback } from "../lib/http";
 import { writeJsonBak } from "../lib/fs-json";
 import { createAgentBridge } from "../lib/agent-session-bridge";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 问卜（玄学）端点——生辰档案本地存 rana-web/.fate/（已进 .gitignore，不入公开仓库）：
@@ -73,7 +73,7 @@ export function readMaybe(p: string): string | null {
   }
 }
 
-export function ranaFateMiddleware(): Plugin {
+export function ranaFateMiddleware() {
   const here = RANA_WEB;
   const fateDir = path.join(here, ".fate");
   const profilesFile = path.join(fateDir, "profiles.json");
@@ -302,13 +302,8 @@ export function ranaFateMiddleware(): Plugin {
     json(res, 405, { error: "method not allowed" });
   };
 
-  return {
+  return defineRanaPlugin({
     name: "rana-fate",
-    configureServer(server) {
-      server.middlewares.use("/__rana/fate", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/fate", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/fate": handler },
+  });
 }

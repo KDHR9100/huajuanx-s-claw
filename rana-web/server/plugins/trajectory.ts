@@ -3,7 +3,7 @@ import path from "node:path";
 import { execFileP } from "../../lib/cli-bridge.mjs"; // [2026-11-14 收拢批2] 执行件收拢进 CLI 桥（实现逐字同源）
 import { STATE_HOME, OPENCLAW_MJS } from "../lib/paths";
 import { json, readBody, isLoopback } from "../lib/http";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 轨迹回放端点（🔍 过程页的后端；全部仅本机——轨迹含完整对话与装配 prompt）：
@@ -330,7 +330,7 @@ const doExport = async (sessionKey: string): Promise<string> => {
   return out;
 };
 
-export function ranaTrajectoryMiddleware(): Plugin {
+export function ranaTrajectoryMiddleware() {
   const handler = (req: { method?: string; url?: string; socket?: { remoteAddress?: string }; headers?: Record<string, unknown>; on: (ev: string, cb: (c?: string) => void) => void }, res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string | Buffer) => void }) => {
     void (async () => {
       // 轨迹含完整对话与装配 prompt：一律仅本机
@@ -419,13 +419,8 @@ export function ranaTrajectoryMiddleware(): Plugin {
     });
   };
 
-  return {
+  return defineRanaPlugin({
     name: "rana-trajectory",
-    configureServer(server) {
-      server.middlewares.use("/__rana/trajectory", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/trajectory", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/trajectory": handler },
+  });
 }

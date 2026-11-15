@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { json, isLoopback } from "../lib/http";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 乐奈头像端点（图片只存本地 .avatars/ 目录，该目录已进 .gitignore 不入公开仓库）：
@@ -10,7 +10,7 @@ import type { Plugin } from "vite";
  * - POST   /__rana/avatar   上传（png/jpg/webp ≤4MB，raw body + content-type 判类型；仅本机回环）
  * - DELETE /__rana/avatar   恢复默认手绘脸（删除文件）
  */
-export function ranaAvatarMiddleware(): Plugin {
+export function ranaAvatarMiddleware() {
   const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), ".avatars");
   const EXT_BY_TYPE: Record<string, string> = {
     "image/png": "png",
@@ -85,13 +85,8 @@ export function ranaAvatarMiddleware(): Plugin {
     json(res, 405, { error: "method not allowed" });
   };
 
-  return {
+  return defineRanaPlugin({
     name: "rana-avatar",
-    configureServer(server) {
-      server.middlewares.use("/__rana/avatar", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/avatar", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/avatar": handler },
+  });
 }

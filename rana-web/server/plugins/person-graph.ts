@@ -5,11 +5,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { STATE_HOME } from "../lib/paths";
 import { json, isLoopback } from "../lib/http";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 import { parsePersonGraph } from "../lib/person-graph-parse";
 import { backupThenWrite } from "../lib/fs-json";
 
-export function ranaPersonGraphMiddleware(): Plugin {
+export function ranaPersonGraphMiddleware() {
   const GRAPH_MD = path.join(STATE_HOME, "workspace-main", "personal", "graph.md");
 
   const handler = (
@@ -74,13 +74,8 @@ export function ranaPersonGraphMiddleware(): Plugin {
     json(res, 405, { error: "method not allowed" });
   };
 
-  return {
+  return defineRanaPlugin({
     name: "rana-person-graph",
-    configureServer(server) {
-      server.middlewares.use("/__rana/person-graph", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/person-graph", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/person-graph": handler },
+  });
 }

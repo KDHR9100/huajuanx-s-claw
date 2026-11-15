@@ -1,7 +1,7 @@
 import { execFileP } from "../../lib/cli-bridge.mjs"; // [2026-11-14 收拢批2] 执行件收拢进 CLI 桥（实现逐字同源）
 import { STATE_HOME, OPENCLAW_MJS } from "../lib/paths";
 import { readFullConfig } from "../lib/config";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 智能体装备端点（只读，给右侧面板的技能/MCP 卡用）：
@@ -11,7 +11,7 @@ import type { Plugin } from "vite";
  *   自装（workspace 来源）排前面。结果按 agent 缓存 120s，refresh=1 强制刷新。
  * - MCP：读 openclaw.json 的 mcp.servers，只回 server id，command/args/env 一律不外传。
  */
-export function ranaAgentInfoMiddleware(): Plugin {
+export function ranaAgentInfoMiddleware() {
   const CACHE_MS = 120000;
   const AGENT_RE = /^[a-z0-9][a-z0-9-]{0,40}$/;
   const cache = new Map<string, { at: number; data: unknown }>();
@@ -88,13 +88,8 @@ export function ranaAgentInfoMiddleware(): Plugin {
       });
   };
 
-  return {
+  return defineRanaPlugin({
     name: "rana-agent-info",
-    configureServer(server) {
-      server.middlewares.use("/__rana/agent-info", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/agent-info", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/agent-info": handler },
+  });
 }

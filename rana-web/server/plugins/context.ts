@@ -6,7 +6,7 @@ import WebSocket from "ws";
 import { buildDeviceAuthPayloadV3 } from "@openclaw/gateway-client/browser";
 import { readGatewayToken, OPENCLAW_CONFIG, STATE_HOME } from "../lib/paths";
 import { isLoopback } from "../lib/http";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 上下文体检端点：GET /__rana/context（仅本机）
@@ -15,7 +15,7 @@ import type { Plugin } from "vite";
  * 再带主会话实时单轮输入。临时会话跑完即删，不进聊天流、不烧模型 token。
  * 每次点击都新建+删除一个临时会话，所以留给按钮手动触发，不做轮询。
  */
-export function ranaContextMiddleware(): Plugin {
+export function ranaContextMiddleware() {
   const handler = async (
     req: { method?: string; url?: string; socket?: { remoteAddress?: string } },
     res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void },
@@ -48,15 +48,10 @@ export function ranaContextMiddleware(): Plugin {
       res.end(JSON.stringify({ error: (e as Error).message }));
     }
   };
-  return {
+  return defineRanaPlugin({
     name: "rana-context",
-    configureServer(server) {
-      server.middlewares.use("/__rana/context", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/context", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/context": handler },
+  });
 }
 /** 解析 /context list 输出（run 或 estimate 口径都认）：正文数字带千分位逗号 */
 const parseContextReport = (text: string) => {

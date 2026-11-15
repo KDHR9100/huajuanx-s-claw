@@ -3,7 +3,7 @@ import net from "node:net";
 import { execFileP } from "../lib/exec";
 import { RANA_WEB } from "../lib/paths";
 import { isLoopback } from "../lib/http";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 记忆桥手动同步端点（2026-10-06）：RP 上云后本地 LM Studio 平时无模型，桥的 RP 腿每班必败。
@@ -14,7 +14,7 @@ import type { Plugin } from "vite";
  * - GET  /__rana/bridge-sync  当前同步状态（running/step/log/result/error）
  * - POST /__rana/bridge-sync  启动一轮同步（仅可信来源；上一轮没跑完时拒绝重复启动）
  */
-export function bridgeSyncMiddleware(): Plugin {
+export function bridgeSyncMiddleware() {
   const IS_WIN = process.platform === "win32";
   const LMS = IS_WIN ? "C:\\Users\\Administrator\\.lmstudio\\bin\\lms.exe" : "lms";
   const STATUS = {
@@ -130,13 +130,8 @@ export function bridgeSyncMiddleware(): Plugin {
     void runSync();
     json(200, { ok: true, started: true });
   };
-  return {
+  return defineRanaPlugin({
     name: "rana-bridge-sync",
-    configureServer(server) {
-      server.middlewares.use("/__rana/bridge-sync", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/bridge-sync", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/bridge-sync": handler },
+  });
 }

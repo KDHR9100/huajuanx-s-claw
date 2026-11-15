@@ -7,11 +7,11 @@
 import { DatabaseSync } from "node:sqlite";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
-import type { Plugin } from "vite";
 import { STATE_HOME, OPENCLAW_CONFIG, RANA_WEB } from "../lib/paths";
 import { json, isLoopback } from "../lib/http";
 import { readJson, writeJsonAtomic } from "../lib/fs-json";
 import { readLedger, writeLedger, emptyLedger } from "../lib/usage-ledger";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 import type { UsageLedger } from "../lib/usage-ledger";
 import {
   parseRuntimeEvents,
@@ -254,19 +254,14 @@ async function usageHandler(req: UsageReq, res: UsageRes): Promise<void> {
 
 // ===== 插件注册 =====
 
-export function ranaUsageMiddleware(): Plugin {
+export function ranaUsageMiddleware() {
   const handler = (req: UsageReq, res: UsageRes): void => {
     usageHandler(req, res).catch(() => {
       try { json(res, 500, { ok: false, error: "usage 中间件异常" }); } catch { /* 已响应则忽略 */ }
     });
   };
-  return {
+  return defineRanaPlugin({
     name: "rana-usage",
-    configureServer(server) {
-      server.middlewares.use("/__rana/usage", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/usage", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/usage": handler },
+  });
 }

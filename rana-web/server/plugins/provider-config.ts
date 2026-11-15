@@ -5,7 +5,7 @@ import { execFileP } from "../../lib/cli-bridge.mjs"; // [2026-11-14 收拢批2]
 import { writeJsonAtomic } from "../lib/fs-json";
 import { STATE_HOME, OPENCLAW_CONFIG, OPENCLAW_MJS } from "../lib/paths";
 import { readFullConfig, maskKey, isLocalProvider, providerReferences, type ProviderEntry } from "../lib/config";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 云端模型多 provider 配置端点：
@@ -15,7 +15,7 @@ import type { Plugin } from "vite";
  * 写 openclaw.json 后由 gateway 文件监听热重载。
  * 另有 POST /__rana/provider-models {baseUrl, apiKey?} 服务端代理拉取 /models 列表（规避浏览器 CORS）。
  */
-export function ranaProviderConfigMiddleware(): Plugin {
+export function ranaProviderConfigMiddleware() {
   const readProviders = () => readFullConfig().models?.providers ?? {};
 
   /** 读 rana-web/.env 里的明文 key（可选，文件已 gitignore）：每次现读，改完即生效不用重启 vite。
@@ -225,15 +225,11 @@ export function ranaProviderConfigMiddleware(): Plugin {
         });
     });
   };
-  return {
+  return defineRanaPlugin({
     name: "rana-provider-config",
-    configureServer(server) {
-      server.middlewares.use("/__rana/provider-config", handler as Parameters<typeof server.middlewares.use>[1]);
-      server.middlewares.use("/__rana/provider-models", modelsHandler as Parameters<typeof server.middlewares.use>[1]);
+    routes: {
+      "/__rana/provider-config": handler,
+      "/__rana/provider-models": modelsHandler,
     },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/provider-config", handler as Parameters<typeof server.middlewares.use>[1]);
-      server.middlewares.use("/__rana/provider-models", modelsHandler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+  });
 }

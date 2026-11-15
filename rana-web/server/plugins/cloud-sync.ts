@@ -5,7 +5,7 @@ import { execFileP } from "../lib/exec";
 import { guardReadJson, CONTRACT_FIELDS } from "../lib/contract-guard";
 import { RANA_WEB, STATE_HOME } from "../lib/paths";
 import { json, isLoopback } from "../lib/http";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 云→家同步桥（2026-10-25 迁移批1；方案 MIGRATION-PLAN §6——记忆正本在家里，云端运行副本每日被家里拉走）：
@@ -15,7 +15,7 @@ import type { Plugin } from "vite";
  * - POST /__rana/cloud-sync/pull  【本地 Windows】启动一轮拉取（spawn tools/cloud-sync.mjs），进度轮询同 bridge-sync 模式。
  * 不含 tmp/（插件构建缓存）、npm/（插件可重装）——这两块是 8G 备份里的大头，数据快照用不上。
  */
-export function cloudSyncMiddleware(): Plugin {
+export function cloudSyncMiddleware() {
   const IS_WIN = process.platform === "win32";
   const HERE = RANA_WEB;
   const LOCAL_STATE_FILE = path.join(HERE, ".health", "home-sync-state.json"); // 家里:上次拉取记录
@@ -191,15 +191,11 @@ export function cloudSyncMiddleware(): Plugin {
     json(res, 405, { error: "method not allowed" });
   };
 
-  return {
+  return defineRanaPlugin({
     name: "rana-cloud-sync",
-    configureServer(server) {
-      server.middlewares.use("/__rana/cloud-snapshot", snapshotHandler as Parameters<typeof server.middlewares.use>[1]);
-      server.middlewares.use("/__rana/cloud-sync", handler as Parameters<typeof server.middlewares.use>[1]);
+    routes: {
+      "/__rana/cloud-snapshot": snapshotHandler,
+      "/__rana/cloud-sync": handler,
     },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/cloud-snapshot", snapshotHandler as Parameters<typeof server.middlewares.use>[1]);
-      server.middlewares.use("/__rana/cloud-sync", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+  });
 }

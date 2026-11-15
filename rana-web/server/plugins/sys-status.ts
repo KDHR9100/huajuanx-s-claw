@@ -5,7 +5,7 @@ import { guardReadJson, CONTRACT_FIELDS } from "../lib/contract-guard";
 import { RANA_WEB } from "../lib/paths";
 import { readFullConfig, isLocalProvider } from "../lib/config";
 import { json, isLoopback } from "../lib/http";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 电脑状态端点（本机只读监控 + 电源计划切换）：
@@ -19,7 +19,7 @@ import type { Plugin } from "vite";
  * 服务端口清单 = 平台默认项 + rana-web/services.json 用户自加项（{name,port}）。
  * 所有子进程调用均用 execFile 数组参数（不经 shell、无字符串拼接）。
  */
-export function ranaSysStatusMiddleware(): Plugin {
+export function ranaSysStatusMiddleware() {
   const here = RANA_WEB;
   const IS_WIN = process.platform === "win32";
   const PLATFORM = IS_WIN ? "win32" : "linux";
@@ -574,21 +574,14 @@ export function ranaSysStatusMiddleware(): Plugin {
     json(res, 405, { error: "method not allowed" });
   };
 
-  return {
+  return defineRanaPlugin({
     name: "rana-sys-status",
-    configureServer(server) {
-      server.middlewares.use("/__rana/sys/status", handler as Parameters<typeof server.middlewares.use>[1]);
-      server.middlewares.use("/__rana/sys/power", handler as Parameters<typeof server.middlewares.use>[1]);
-      server.middlewares.use("/__rana/sys/virt", virtHandler as Parameters<typeof server.middlewares.use>[1]);
-      server.middlewares.use("/__rana/sys/home-report", homeHandler as Parameters<typeof server.middlewares.use>[1]);
-      server.middlewares.use("/__rana/sys/home", homeHandler as Parameters<typeof server.middlewares.use>[1]);
+    routes: {
+      "/__rana/sys/status": handler,
+      "/__rana/sys/power": handler,
+      "/__rana/sys/virt": virtHandler,
+      "/__rana/sys/home-report": homeHandler,
+      "/__rana/sys/home": homeHandler,
     },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/sys/status", handler as Parameters<typeof server.middlewares.use>[1]);
-      server.middlewares.use("/__rana/sys/power", handler as Parameters<typeof server.middlewares.use>[1]);
-      server.middlewares.use("/__rana/sys/virt", virtHandler as Parameters<typeof server.middlewares.use>[1]);
-      server.middlewares.use("/__rana/sys/home-report", homeHandler as Parameters<typeof server.middlewares.use>[1]);
-      server.middlewares.use("/__rana/sys/home", homeHandler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+  });
 }

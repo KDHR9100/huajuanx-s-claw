@@ -1,14 +1,14 @@
 import { resolveApiKey } from "../../lib/rana-config.mjs";
 import { readFullConfig } from "../lib/config";
 import { json, isLoopback } from "../lib/http";
-import type { Plugin } from "vite";
+import { defineRanaPlugin } from "../lib/rana-plugin";
 
 /**
  * 模型连通测试端点：POST /__rana/model-test {modelId} —— 用该模型发一条最小消息（max_tokens 16），
  * 测能不能通、延迟多少。apiKey 只在运行时从 openclaw.json 读，不进日志不进前端。
  * 仅本机回环来源可调。
  */
-export function ranaModelTestMiddleware(): Plugin {
+export function ranaModelTestMiddleware() {
 
   const testOne = async (providerId: string, model: string) => {
     const p = readFullConfig().models?.providers?.[providerId];
@@ -108,13 +108,8 @@ export function ranaModelTestMiddleware(): Plugin {
         .catch((e: Error) => json(res, 200, { ok: false, error: e.message.includes("aborted") ? "75 秒超时（本地冷加载或思考型慢生成都算）" : e.message.slice(0, 200) }));
     });
   };
-  return {
+  return defineRanaPlugin({
     name: "rana-model-test",
-    configureServer(server) {
-      server.middlewares.use("/__rana/model-test", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use("/__rana/model-test", handler as Parameters<typeof server.middlewares.use>[1]);
-    },
-  };
+    routes: { "/__rana/model-test": handler },
+  });
 }
