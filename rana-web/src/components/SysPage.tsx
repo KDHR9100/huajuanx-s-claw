@@ -50,6 +50,17 @@ interface PatrolInfo {
   anomalies?: Array<{ id: string; label: string; detail: string }>;
   sendError?: string;
 }
+/** 契约守卫灯（server/lib/guard-light.ts 输出）：跨进程文件契约读侧违规台账 */
+interface GuardViolation {
+  contract: string;
+  at: string;
+  problem: string;
+}
+interface GuardLightInfo {
+  lamp: "green" | "red";
+  violations: GuardViolation[];
+  total: number;
+}
 interface StatusPayload {
   platform?: "win32" | "linux";
   sys?: SysInfo;
@@ -59,6 +70,7 @@ interface StatusPayload {
   services?: ServiceRow[];
   net?: NetInfo | null;
   patrol?: PatrolInfo | null;
+  contractGuards?: GuardLightInfo | null;
 }
 
 /** 家里探针上报（/__rana/sys/home；report 结构与 status 的 Windows 部分同构） */
@@ -82,6 +94,14 @@ function fmtUptime(sec: number | null | undefined): string {
 function fmtRate(kbs: number): string {
   if (kbs >= 1024) return `${(kbs / 1024).toFixed(1)} MB/s`;
   return `${Math.round(kbs)} KB/s`;
+}
+
+/** 违规时间一行显示：MM-DD HH:MM（跨天的违规也要看得到日期；烂时间戳原样兜底） */
+function fmtGuardAt(iso: string): string {
+  const t = new Date(iso);
+  if (!iso || Number.isNaN(t.getTime())) return iso || "时间未知";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(t.getMonth() + 1)}-${p(t.getDate())} ${p(t.getHours())}:${p(t.getMinutes())}`;
 }
 
 function DiskBar({ disk }: { disk: DiskRow }) {
@@ -274,6 +294,7 @@ export default function SysPage() {
   const services = data?.services ?? null;
   const net = data?.net ?? null;
   const patrol = data?.patrol ?? null;
+  const guards = data?.contractGuards ?? null;
   const patrolAgeMin = patrol ? Math.max(1, Math.round((Date.now() - patrol.updatedAt) / 60000)) : 0;
   const memUsed = sys ? sys.memTotalGB - sys.memFreeGB : 0;
   const memPct = sys && sys.memTotalGB > 0 ? (memUsed / sys.memTotalGB) * 100 : 0;
@@ -464,6 +485,43 @@ export default function SysPage() {
               </>
             ) : (
               <p className="pending-text">……看不见了。</p>
+            )}
+          </div>
+
+          {/* 契约守卫灯：跨进程文件契约读侧台账（.health/contract-guards.json）——
+              绿=零违规；红=有契约坏过数据（列表=最近 10 条）；灰=灯数据没拿到 */}
+          <div className="card">
+            <h3>
+              <span className="ic">🛡</span>契约守卫 <small>边车写 → 前端读</small>
+            </h3>
+            {!guards ? (
+              <div className="svc-row">
+                <span className="guard-dot dim" />
+                <span className="svc-name">守卫数据读不到</span>
+                <span className="svc-meta">接口没回这盏灯</span>
+              </div>
+            ) : guards.lamp === "red" ? (
+              <>
+                <div className="svc-row">
+                  <span className="guard-dot bad" />
+                  <span className="svc-name">{guards.total} 次契约违规</span>
+                  <span className="svc-meta">最近 {guards.violations.length} 条</span>
+                </div>
+                {guards.violations.map((v, i) => (
+                  <div className="svc-row guard-viol" key={`${v.at}-${i}`}>
+                    <span className="svc-name">{v.contract}</span>
+                    <span className="svc-meta" title={v.problem}>
+                      {fmtGuardAt(v.at)} · {v.problem || "字段异常"}
+                    </span>
+                  </div>
+                ))}
+              </>
+            ) : (
+              <div className="svc-row">
+                <span className="guard-dot" />
+                <span className="svc-name">全部契约健康</span>
+                <span className="svc-meta">台账零违规</span>
+              </div>
             )}
           </div>
 

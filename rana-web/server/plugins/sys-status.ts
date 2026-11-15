@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileP } from "../lib/exec";
 import { guardReadJson, CONTRACT_FIELDS } from "../lib/contract-guard";
+import { guardLight } from "../lib/guard-light";
 import { RANA_WEB } from "../lib/paths";
 import { readFullConfig, isLocalProvider } from "../lib/config";
 import { json, isLoopback } from "../lib/http";
@@ -10,6 +11,7 @@ import { defineRanaPlugin } from "../lib/rana-plugin";
 /**
  * 电脑状态端点（本机只读监控 + 电源计划切换）：
  * - GET /__rana/sys/status  聚合系统数据，8 秒缓存；按运行平台分派——
+ *   · contractGuards：契约守卫灯（.health/contract-guards.json 读侧违规台账，读不到=绿灯）
  *   · win32（家里的电脑）：硬盘/CPU/内存/开机时长/显卡+显存进程/电源计划/虚拟化/服务端口/网速/外网连通（PowerShell 套件）
  *   · linux（云服务器）：/proc + df + ss 同构数据（无电源/虚拟化/GPU 卡）
  * - POST /__rana/sys/power {guid}  切换电源计划（仅接受 GUID 格式参数、仅本机回环来源；仅 win32）
@@ -366,6 +368,20 @@ export function ranaSysStatusMiddleware() {
     }).value;
   };
 
+  /** 契约守卫灯（2026-11-15 亮灯接线）：读 .health/contract-guards.json 违规台账
+   *  （lib/contract-guard.mjs recordViolation 写），翻译成 { lamp, violations, total }。
+   *  纯翻译在 lib/guard-light.ts；这里读不到/坏 JSON 一律传 null → 绿灯降级
+   *  （守卫语义同源：文件首次生成前本就不存在，缺失≠违规）。 */
+  const readContractGuards = () => {
+    let raw: unknown = null;
+    try {
+      raw = JSON.parse(fs.readFileSync(path.join(here, ".health", "contract-guards.json"), "utf8"));
+    } catch {
+      raw = null;
+    }
+    return guardLight(raw, Date.now());
+  };
+
   const buildStatus = async () => {
     // Linux（云服务器）：无电源/虚拟化/GPU 卡，其余同构
     if (!IS_WIN) {
@@ -384,6 +400,7 @@ export function ranaSysStatusMiddleware() {
         services,
         net: { speed: netSpeed, probes: netProbes.probes },
         patrol: readPatrol(),
+        contractGuards: readContractGuards(),
         ts: Date.now(),
       };
     }
@@ -396,7 +413,7 @@ export function ranaSysStatusMiddleware() {
       queryNetSpeed().catch(() => null),
       queryNetProbes().catch(() => ({ probes: [] })),
     ]);
-    return { platform: PLATFORM, sys, gpu, power, virt, services, net: { speed: netSpeed, probes: netProbes.probes }, patrol: readPatrol(), ts: Date.now() };
+    return { platform: PLATFORM, sys, gpu, power, virt, services, net: { speed: netSpeed, probes: netProbes.probes }, patrol: readPatrol(), contractGuards: readContractGuards(), ts: Date.now() };
   };
 
 
