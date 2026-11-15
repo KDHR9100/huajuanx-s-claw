@@ -67,9 +67,9 @@ afterAll(async () => {
 });
 
 describe("①插件注册", () => {
-  it("25 组 /__rana 中间件全部注册（起服务不炸=注册成功；rana-* 计数=25）", () => {
+  it("26 组 /__rana 中间件全部注册（起服务不炸=注册成功；rana-* 计数=26，合并后含 usage）", () => {
     const rana = (server!.config.plugins).filter((p) => p.name?.startsWith("rana-"));
-    expect(rana).toHaveLength(25);
+    expect(rana).toHaveLength(26);
   });
 });
 
@@ -97,12 +97,12 @@ describe("②只读端点 200+JSON 形状（无外部依赖端点）", () => {
     expect(typeof r.body.generatedAt).toBe("number");
   });
 
-  it("GET /__rana/memory → 三组记忆白名单形状（空态）", async () => {
+  it("GET /__rana/memory → 四组记忆白名单形状（空态；合并后含复盘日记组）", async () => {
     const r = await reqJson("/__rana/memory");
     expect(r.status).toBe(200);
     expect(r.ct).toContain("application/json");
     expect(Array.isArray(r.body.groups)).toBe(true);
-    expect((r.body.groups as unknown[]).length).toBe(3);
+    expect((r.body.groups as unknown[]).length).toBe(4);
     expect(typeof r.body.generatedAt).toBe("number");
   });
 
