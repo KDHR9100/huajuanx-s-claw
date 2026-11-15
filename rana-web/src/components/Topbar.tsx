@@ -193,14 +193,113 @@ function BridgeSyncButton() {
   );
 }
 
+/** 思考档位拉条：档位选项随当前会话模型自动适配（模型目录 thinkingLevels），选中即下发 sessions.patch */
+const LEVEL_ZH: Record<string, string> = {
+  off: "关",
+  none: "关",
+  inherit: "默认",
+  minimal: "极简",
+  low: "低",
+  medium: "中",
+  high: "高",
+  xhigh: "特高",
+  max: "满",
+  ultra: "极致",
+  adaptive: "自适应",
+  stream: "流式",
+  on: "开",
+};
+
+function ThinkingPicker() {
+  const models = useAppStore((s) => s.models);
+  const sessions = useAppStore((s) => s.sessions);
+  const currentKey = useAppStore((s) => s.currentKey);
+  const showReasoning = useAppStore((s) => s.showReasoning);
+  const setShowReasoning = useAppStore((s) => s.setShowReasoning);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const row = sessions.find((s) => s.key === currentKey);
+  const level = row?.thinkingLevel;
+  const modelEntry = models.find((m) => isSameModel(row?.model, row?.modelProvider, m));
+  const levels = modelEntry?.thinkingLevels;
+
+  const apply = async (id: string) => {
+    if (!currentKey || busy) return;
+    setBusy(true);
+    try {
+      await gateway.setThinkingLevel(currentKey, id);
+      setOpen(false);
+    } catch (e) {
+      alert(`切换思考档位失败：${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const levelText = level ? (LEVEL_ZH[level] ?? level) : "默认";
+
+  return (
+    <div className="model-picker" ref={ref}>
+      <button
+        className={`btn ghost reason-toggle${level && level !== "off" && level !== "none" ? "" : " off"}`}
+        onClick={() => setOpen((v) => !v)}
+        title="思考档位拉条：档位选项随当前会话模型自动适配，选中即生效（只影响当前会话）"
+      >
+        💭 {levelText}
+        <span className="mp-caret">▼</span>
+      </button>
+      {open && (
+        <div className="mp-menu tp-menu">
+          <div className="mp-label">思考档位 · 随模型自动适配</div>
+          {levels?.length ? (
+            levels.map((lv) => (
+              <button
+                key={lv.id}
+                className={`mp-item${level === lv.id ? " active" : ""}`}
+                disabled={busy}
+                onClick={() => void apply(lv.id)}
+              >
+                <span className="m-name">{LEVEL_ZH[lv.id] ?? lv.label}</span>
+                <span className="m-sub">{lv.id}</span>
+              </button>
+            ))
+          ) : (
+            <div className="tp-empty">
+              {modelEntry
+                ? `当前模型（${modelEntry.name}）目录未提供思考档位，现行档位「${levelText}」为默认，暂不可切`
+                : "会话还没有绑定模型，先在右侧模型拉条里选一个"}
+            </div>
+          )}
+          <button
+            className={`mp-item tp-show${showReasoning ? " active" : ""}`}
+            onClick={() => setShowReasoning(!showReasoning)}
+          >
+            <span className="m-name">👁 显示思考文本（页面显示开关，独立于模型档位）</span>
+            <span className="m-sub">{showReasoning ? "开" : "关"}</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Topbar() {
   const conn = useAppStore((s) => s.conn);
   const sessions = useAppStore((s) => s.sessions);
   const currentKey = useAppStore((s) => s.currentKey);
   const panelOpen = useAppStore((s) => s.panelOpen);
   const togglePanel = useAppStore((s) => s.togglePanel);
-  const showReasoning = useAppStore((s) => s.showReasoning);
-  const setShowReasoning = useAppStore((s) => s.setShowReasoning);
 
   const title = sessions.find((s) => s.key === currentKey)?.title ?? "Rana";
 
@@ -208,13 +307,7 @@ export default function Topbar() {
     <header className="topbar">
       <span className={`conn-dot ${dot(conn)}`} title={conn} />
       <span className="title">{title}</span>
-      <button
-        className={`btn ghost reason-toggle${showReasoning ? "" : " off"}`}
-        onClick={() => setShowReasoning(!showReasoning)}
-        title={showReasoning ? "显示思考过程中：点击关闭" : "思考过程已隐藏：点击开启"}
-      >
-        💭 思考{showReasoning ? "" : "（关）"}
-      </button>
+      <ThinkingPicker />
       <BridgeSyncButton />
       <ModelPicker />
       <button className="btn ghost" onClick={togglePanel} title={panelOpen ? "收起用量面板" : "展开用量面板"}>

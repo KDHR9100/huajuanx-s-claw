@@ -46,8 +46,8 @@ export interface SessionRow {
   model?: string;
   /** 会话当前模型所属 provider（服务端 modelProvider 字段，model 本身是裸名） */
   modelProvider?: string;
-  /** 会话当前思考档位（服务端 reasoningLevel 有效值：off/low/medium/high/stream…），拉条显示与切档用 */
-  reasoningLevel?: string;
+  /** 会话当前思考档位（服务端 thinkingLevel 有效值：off/minimal/low/medium/high/xhigh/adaptive/max/ultra，随模型 clamp），拉条显示与切档用 */
+  thinkingLevel?: string;
   totalTokens?: number;
   inputTokens?: number;
   outputTokens?: number;
@@ -76,7 +76,7 @@ export interface ModelInfo {
 export type ConnState = "connecting" | "connected" | "error" | "closed";
 
 /** 顶部导航的页面视图 */
-export type AppView = "chat" | "sys" | "cron" | "approvals" | "news" | "planning" | "bangumi" | "apps" | "groups" | "qq" | "memory" | "trace";
+export type AppView = "chat" | "sys" | "cron" | "approvals" | "news" | "planning" | "bangumi" | "apps" | "groups" | "qq" | "memory" | "trace" | "usage";
 
 /** 规划页内部的子页签（总览 / 日历 / 课表 / 待办 / 内容库） */
 export type PlanningTab = "overview" | "calendar" | "schedule" | "goals" | "library";
@@ -95,6 +95,7 @@ export const NAV_TABS: Array<{ id: AppView; label: string }> = [
   { id: "qq", label: "🐧 QQ 陪伴" },
   { id: "memory", label: "🧠 记忆" },
   { id: "trace", label: "🔍 过程" },
+  { id: "usage", label: "📊 用量" },
 ];
 
 /** 外观设置（持久化在 localStorage） */

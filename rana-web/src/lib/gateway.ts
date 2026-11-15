@@ -574,7 +574,7 @@ class GatewayConnection {
         updatedAt: (r.updatedAt as number) ?? (r.lastActivityAt as number),
         model: r.model ? String(r.model) : undefined,
         modelProvider: r.modelProvider ? String(r.modelProvider) : undefined,
-        reasoningLevel: r.reasoningLevel ? String(r.reasoningLevel) : undefined,
+        thinkingLevel: r.thinkingLevel ? String(r.thinkingLevel) : undefined,
         inputTokens: r.inputTokens as number | undefined,
         outputTokens: r.outputTokens as number | undefined,
         totalTokens: r.totalTokens as number | undefined,
@@ -662,6 +662,8 @@ class GatewayConnection {
       }
       store().setMessages(sessionKey, mapped);
       if (res.sessionInfo?.model) store().mergeSession({ key: sessionKey, model: String(res.sessionInfo.model) });
+      // 思考档位与列表同一套投影，切进会话立刻回显（不等列表刷新）
+      if (res.sessionInfo?.thinkingLevel) store().mergeSession({ key: sessionKey, thinkingLevel: String(res.sessionInfo.thinkingLevel) });
     } catch (e) {
       console.warn("[gateway] chat.history 失败:", e);
     }
@@ -746,7 +748,7 @@ class GatewayConnection {
   async setThinkingLevel(sessionKey: string, level: string) {
     try {
       await this.request("sessions.patch", { key: sessionKey, thinkingLevel: level });
-      store().mergeSession({ key: sessionKey, reasoningLevel: level });
+      store().mergeSession({ key: sessionKey, thinkingLevel: level });
     } catch (e) {
       console.warn("[gateway] 切思考档位失败:", e);
       throw e;
