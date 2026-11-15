@@ -42,12 +42,12 @@
 | 症状域 | 搜索关键词 |
 | --- | --- |
 | 网关起不来/秒拒/空转/卡死 | `秒拒`、`空转`、`degraded`、`\\?\`、`DataCloneError`、`Async work scope`、`卡死病` |
-| QQ/微信不通/行为怪 | `user:c2c`、`ask_user`、`channelAccounts`、`静默装死`、`收图`、`分块流式`、`missing scope`、`OneBot 401`、`qq-sidecar`、`cmd 碎片` |
+| QQ/微信不通/行为怪 | `user:c2c`、`ask_user`、`channelAccounts`、`静默装死`、`收图`、`分块流式`、`missing scope`、`OneBot 401`、`qq-sidecar`、`cmd 碎片`、`EADDRINUSE`、`hookAutoLoad`、`start-all`、`code=1006` |
 | 模型 400/403/超时/审查 | `Free quota`、`data_inspection`、`输出审查`、`content 块数组`、`maxTokens`、`SSE` |
 | LM Studio/显存 | `双实例`、`:2`、`JIT`、`ctx 2048`、`显存`、`embedding` |
 | 前端白屏/闪回/显示错 | `白屏`、`闪回`、`气泡弹两遍`、`页签不可达`、`闰`、`复读` |
 | cron 不跑/静默停摆 | `store 孤儿`、`静默降级`、`水位`、`罐头话`、`timed out`、`did not finish stopping` |
-| 备份/git 推送挂死 | `100MB`、`migration-sync`、`会话池`、`filter-branch`、`WMI`、`winnat`、`TLS connect`、`ECONNRESET`、`静默失败` |
+| 备份/git 推送挂死 | `100MB`、`migration-sync`、`会话池`、`filter-branch`、`WMI`、`winnat`、`TLS connect`、`ECONNRESET`、`静默失败`、`CI 红灯`、`Run failed`、`UTC`、`时区` |
 | Tailscale/内网穿透不通 | `rx 0`、`DERP`、`3478`、`home DERP`、`lax`、`LastHandshake` |
 | WebUI 报来源被拒/连错网关 | `origin not allowed`、`allowedOrigins`、`publicOrigin`、`rewriteWsOrigin`、`18789`、`webchat connected` |
 | Windows 环境怪癖 | `GBK`、`heredoc`、`反斜杠`、`DPI`、`IAB` |
@@ -63,6 +63,32 @@
 ***
 
 ## 登记区
+
+## [已解决] 私有备份仓 CI 又红——存活时长用例写死 +08:00 偏移，UTC 考场差 8 小时（2026-11-11）
+- 症状：GitHub 邮件「[huajuanx-claw-private] Run failed: CI - main (1b6b1de)」，job `build-and-test` 1 分 17 秒失败；本机（东八区 Windows）跑 npm ci / build / test 三步全绿 255 用例，故障只在 CI 现形。
+- 根因：与 2026-11-08 同族——`owner-status.test.mjs`「updateUsage 存活时长」把进程启动时间写死成 `"2026-11-08T18:00:00.000+08:00"`，而 `now` 用 `new Date(2026,10,8,20,0,0)` 按宿主机本地钟构造。东八区机器两边相减 = 120 分钟，Ubuntu/UTC 机器上 since 落到 10:00Z 而 now = 20:00Z，相减 = 600 分钟，断言 `minutes: 120` 直接翻车。
+- 解决方案：用例内加 `localIso(d)` 助手，用 `getTimezoneOffset()` 按宿主机实际偏移拼 ISO 串（形态仍是 PowerShell 给 StartTime 的样子），since 与 now 恒同钟——任何时区都算 120 分钟，不再依赖东八区。改动单文件单用例，实现代码零改动。
+- 状态：已解决（2026-11-11 本地复现+验证：把备份仓 1b6b1de 原样内容导出后 `TZ=UTC` 跑，修复前 1 失败/255，修复后 19 文件 255 全绿；本机 +08 时区 247 全绿。经主人拍板直接推私密仓 commit d9a2588，CI run 42864701823 全步骤 success——真机 Ubuntu/UTC 复考绿灯实证）。
+
+## [已解决] 早晚问候把分钟快照当实况——脑补「从昨晚打到现在」冤枉主人；哨兵补双时长账本根治（2026-11-08）
+- 症状：21:00 早晚问候（glm-5.3-flash 隔离会话）读 owner-status.json 快照后自行推断游戏时长，发给主人「看你在三角洲里从昨晚一路打到现在都快一整天了」——主人实际只晚上玩了一会儿；这句冤枉还把当晚 QQ 私聊（ds）推进「被冤枉→生气→道歉」环，把 ds 的元话语泄漏（*补一句*/*语气很平*）全勾了出来，主人报「AI 味重」。
+- 根因：问候提示词只给了 owner-status.json（单分钟切片快照），没有时长事实可引，glm 拿瞬时快照脑补时间跨度。
+- 解决方案：①哨兵 owner-status.mjs 加双时长账本 `.health/owner-usage.json`——专注时长（前台进程逐轮累计秒，切窗记给上一窗、键鼠空闲≥15分那轮不计、两轮间隔超90秒不补记；focusMinutes 为分钟好读版）＋存活时长（按进程最早 StartTime 推算，拿不到启动时间退回「首次见到」并标 approx，本轮消失即撤账）＋日切封存昨日 Top3（yesterday.top）；PowerShell 采集加 procInfo（按名分组取最早 StartTime，ISO 带时区）。纯函数 updateUsage/emptyUsage 补 6 用例，全量 234 绿。②早晚问候提示词（state/openclaw.sqlite cron_jobs，CLI 编辑）加第⑤步读账本引数字＋纪律「时长只许引账本数字，严禁自行推断『从昨晚打到现在』这类跨度」，工具预算 5→6 次。
+- 状态：已解决（2026-11-08 落地；账本需积累数据，次日起问候才有完整数字可引）。
+
+## [已解决] 备份仓 CI 红灯——两个用例只适配本机（东八区+Windows），Ubuntu/UTC 考场现原形（2026-11-08）
+- 症状：GitHub 邮件「Run failed: CI - main」；私有备份仓的自动 CI 里 npm ci/build 两步全绿，test 步红，2/221 用例翻车（本地 Windows 全绿，故障只在 CI 现形）。
+- 根因：备份仓每次备份提交都自动跑与公开仓相同的 CI（Ubuntu + UTC 时区），把本机 WIP 快照也考了一遍。两个用例把「本机环境」当成了默认值：①owner-status.test.mjs「间隔未到/间隔刚过」把 now（本地时间构造）与 lastNagAt（写死 UTC 串=北京时间23:00）两种时钟混用，只在东八区成立——UTC 机器上「差10分钟」变「差8小时10分」，该等的变成开催；②fate.ts resolveDossierPaths 防路径穿越守卫只靠 path.dirname 对比，Windows 上 \ 是分隔符所以 ..\..\evil 会逃出目录被拦，Linux 上 \ 只是普通字符不逃逸，守卫放行 → 用例翻车。
+- 解决方案：①两个用例的 lastNagAt 改为 new Date(2026,10,7,23,0).toISOString()——与 now 同钟构造，任何时区差值恒定；②守卫加 `!/[\\/]/.test(nick)`——含 / 或 \ 一律拒（平台无关），dirname 对比留作兜底；修后 213 用例+tsc 双绿。
+- 经验：测试里「本地构造 + 写死 UTC 串」混用=时区彩票，成对值必须同钟构造；路径守卫必须对 / 与 \ 都设卡，不能依赖 path API 的平台差异行为。备份仓 CI 是未推公开仓的 WIP 的第一考场（owner-status 那笔 7a914e3 尚未推公开仓）。
+- 状态：已解决（2026-11-08 经主人拍板「最小推送」，两个修复文件带入备份仓 commit 0087d30 并推送，CI run 42486642470 全步骤 success——真机 Ubuntu/UTC 复考绿灯实证）。
+
+## [已解决] 机器重启后 QQ 陪伴链路全断——SnowLuma 无自启+自动挂接默认关+双号抢 OneBot 端口（2026-11-08）
+- 症状：🐧QQ陪伴页边车「运行中」但 WS 永远未连接（code=1006 每 30s 重试）、账号探测全挂；SnowLuma 进程不存在，或起来了但 OneBot 端口 3000/3001 不监听；点页面「启动 SnowLuma」会起出第二个实例（WebUI 改听 5100），因它无单实例锁。
+- 根因：①SnowLuma 无自启，机器重启后没人拉它；②hookAutoLoad 默认 false——挂接只在 QQ 启动时刻发生，且对已运行的 QQ 不主动注入（11-02 装机时是网页手动注入的，重启即失传）；③开自动挂接后，主人号与乐奈号的 onebot_<QQ>.json 都配了 3000/3001，两边抢端口，主人号先起占住（乐奈号侧 EADDRINUSE），sidecar 探测「谁的令牌能过」就挂到了主人号——回群身份错误；④sidecar 的账号探测只在启动时跑一次，SnowLuma 后上线时旧 sidecar 拿着空令牌干敲，须重启边车才重探测。
+- 解决方案：①SnowLuma runtime.json `hookAutoLoad=true`（备份 .bak-20261108），启动即自动注入发现的 QQ 进程，不依赖 QQ 启动顺序；②主人号的 onebot_<QQ>.json httpServers/wsServers 清空（备份同日），3000/3001 只归乐奈号，边车探测唯一能过的就是乐奈号；③🐧QQ陪伴页新增 SnowLuma 状态卡+一键启动（`/__rana/qq-sidecar` 加 `snowluma` 探测字段 + control 新动作 `start-snowluma`；5099 有应答时拒绝重复启动）；④新增 `rana-web/start-all.cmd` 一键全套（5099 探测防重复 + call start-rana.cmd），重启电脑后双击一次全拉起。
+- 判定顺序（下次照抄）：`netstat` 看 3000/3001 监听？无→SnowLuma 没跑或没挂上，看它日志有无 `hook auto-load enabled` + `login detected`；有→看 sidecar 日志「探测到当前登录 QQ」是不是乐奈号，不是→页面「重启」边车。「WS 已连接」＝链路通。
+- 状态：已解决（2026-11-08 实测：自动挂接双号成功、3000/3001 只属乐奈号、sidecar 探测到乐奈号且 WS 已连接；183 用例+tsc 双绿）。
 
 ## [已解决] QQ 公号接入网关三坑——token 直连无 operator scope / WS 缺 Origin 被拒 / .cmd 中英混排被 cmd 拆碎（2026-11-02）
 - 症状：自研 qq-sidecar 想直连本机网关 WS 代替 CLI 时，握手与 connect 都成功（protocol=4、server=2026.9.7），但 `sessions.list` 返回 `FORBIDDEN: missing scope: operator.read`；用纯 WS 探针连 `ws://127.0.0.1:18789` 时若不带 Origin 头，直接被拒 `origin not allowed`；把启动脚本写成 LF+中文注释的 `.cmd` 后双击，cmd 把一行拆成多截报 `'cal' 不是内部或外部命令`、`'NODE_EXE' 不是...`、`'t'`、`'o'` 等碎片错误。

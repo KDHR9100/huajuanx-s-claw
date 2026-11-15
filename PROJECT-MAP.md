@@ -199,6 +199,7 @@ npm run preview   # 生产预览（中间件同样挂载，token 端点除外—
 | 升级 openclaw | 台账 10-01 升级条目 + §1.6 | **先手动备份全部 agent 库**（`agents/*/agent/*.sqlite`，自动快照只保 state 库）→ 升级 → 跑 `state tmp/apply-*.cjs` 全套重打 | 本机 dist 补丁：env-clone-fix / scope-closed-fallback / pmgate（读工具硬闸门）/ creation-pub（\\?\ 前缀）/ worker-cpu / qqbot 收图+/helps 补丁——**漏一个出怪病** |
 | 改 RP 链路 | 台账 09-25 / 10-03 条目 | sse-fix-proxy.mjs | 会话钉子只有一种合法清除形态：删光 override 字段 |
 | 提交/推送 | AGENTS.md 铁律 | push-public.cmd 是**主人手动**跑的（git add -A 全量） | 任何新文件默认将公开，密钥/私人内容先查 .gitignore |
+| 查数据事实/字段语义 | §8 实证事实卡 | **先跑卡内实查配方再信** | 与代码冲突以代码为准，回写本卡 |
 
 ---
 
@@ -219,7 +220,7 @@ npm run preview   # 生产预览（中间件同样挂载，token 端点除外—
 | 文档 | 角色 | 新鲜度 |
 | --- | --- | --- |
 | AGENTS.md | AI 入场规矩+速览（每会话自动注入） | 活文档 |
-| PROJECT-MAP.md（本文） | AI 地图：结构/入手路由/时间线 | 活文档（动结构必须同步） |
+| PROJECT-MAP.md（本文） | AI 地图：结构/入手路由/时间线/**§8 实证事实卡** | 活文档（动结构必须同步；摸底必回写 §8） |
 | KNOWN-ISSUES.md | 问题台账（排障先查；解决后回写；顶部索引） | 活文档，新条目永远加顶部 |
 | PROJECT-STATE-2026-11-03.md | 权威现状快照（挂账分层/红线/实查配方） | 基线 11-03；大施工后应出新版（10-17 旧版已归档） |
 | README.md | 人看的长文档（架构/功能/协议/运维） | 11-03 对齐 |
@@ -249,6 +250,53 @@ npm run preview   # 生产预览（中间件同样挂载，token 端点除外—
 - **11-01**：人物图谱 v1+v2（记忆页🕸页签，graph.md 三表即数据源，ADR-0001 + GLOSSARY 落地）；网关启动提速（砍 github+acpx 插件，冷启动 310s→45s）；记忆桥机制收拢 lib/memory-bridge-core.mjs（13 用例单测）；main/QQ 公众号转正 glm-5.3-flash（deepseek/token-plan 全线退役）。
 - **11-02**：qq-sidecar QQ 个人号陪伴链路落地（SnowLuma OneBot v11 → 自研边车 → rana-qq-public CLI 单轮 46s/轮）+ 🐧QQ 陪伴页；备份仓 push 积压 7 提交案（migration-sync 快照超 100MB 硬限 + exec 会话池收割 + HTTPS 代理上传死锁 → SSH 443 定案）。
 - **11-08**：主人状态哨兵落地（`owner-status.mjs` cron 每分钟直跑：PowerShell 采前台窗口标题/进程清单/键鼠空闲 → 快照落 `.health/owner-status.json`；深夜 23:00–03:00 游戏连跑 ≥20 分钟 → CLI 拉起 main 用 message 工具 QQ 催睡，账本防唠叨 ≤2 次/间隔 30 分/空闲 40 分不空喊；main 新技能 `owner-status` 教她读快照「实时看主人」；早晚问候加记仇线读昨晚催睡账；规则引擎 19 用例，全量 202 绿）。
+
+---
+
+---
+
+## 8. 实证事实卡（数据语义与代码惯例，每条带实证日期）
+
+> **本卡纪律**：只收「慢腐烂」的结构性/数据语义事实；进行中状态不收（归 PROJECT-STATE）。
+> 读卡三步：**看日期 → 跑实查配方 → 再动手**；与代码冲突以代码为准并回写本卡。
+> **摸底必回写**：任何 agent 做了代码/数据探查，实证到的新事实顺手补进来（与 KNOWN-ISSUES 台账制度同款）。
+
+### 8.1 agent 库数据事实（2026-11-08 实证，三库一致）
+
+- **会话行的 token 字段是「最后一次 run」的滚动快照**：`sessions.list` / `session_nodes.entry_json` 的 totalTokens/inputTokens/estimatedCostUsd 每轮被覆盖，不能当历史账本；totalTokens 语义=当前上下文占用而非累计。
+- **每轮用量真身在 `trajectory_runtime_events`**：每 run 恰一条 `model.completed` 带 `data.usage`（键名 `total`，导出包里叫 `totalTokens`，两种都认）；中断/报错的 run 无 usage 对象（main 库 25/238 条）；`created_at`=epoch 毫秒（与事件内 ts 同毫秒）；run_id 全非空。
+- **model.completed 不带模型名**：同 run 的 `prompt.submitted`/`context.compiled`/`trace.metadata` 事件顶层带 `provider/modelId/modelApi`，按 `run_id` 关联取模型；归属不到记 (unknown)。
+- **防双计**：`assistant.message` 等其他类型也带 usage——统计只认 model.completed。
+- **`transcript_events`**（11-05 实证）：一行一事件，`event_json`(TEXT) 或 `event_zstd`(BLOB) 二选一；形如 `{type:"message", id, timestamp, message:{role, content:[块数组]}}`（session-edit-core.ts 头注释同款）。
+- **删除/重置不物理销毁**：转录归档进 `session_transcript_archives`（zstd blob，retention 默认永久）；**会话级汇总从此常规查询摸不到——要历史请落自家账本**（§8.4）。
+- `agents/*/sessions/*.jsonl.deleted.*.zst`（649 个）= 旧格式一次性软删档案，无 API，别考古。
+
+**实查配方**（只读随时可跑）：
+
+```bash
+node -e "const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('K:/OpenClaw/.openclaw/.openclaw/agents/main/agent/openclaw-agent.sqlite',{readOnly:true});const r=db.prepare('SELECT event_json FROM trajectory_runtime_events WHERE event_json LIKE ? LIMIT 1').get('%model.completed%');const ev=JSON.parse(r.event_json);console.log(ev.type, '| total:', ev.data.usage.total)"
+```
+
+### 8.2 中间件惯例（26 组，2026-11-08）
+
+- `server/index.ts` 的 `buildServerPlugins()` 显式装配；每插件 configureServer+configurePreviewServer 双注册；新中间件照抄任一现役插件的骨架。
+- server-lib 四件套：`http.ts`（json/readBody/isLoopback——写端点回环+Origin 双校验必抄）、`fs-json.ts`（readJson/writeJsonAtomic/backupThenWrite）、`paths.ts`（RANA_WEB/STATE_HOME/OPENCLAW_MJS）、`config.ts`（readFullConfig/maskKey）。
+- agent 库只读访问先例链：approvals.ts（state 库）→ session-edit.ts（agent 库 + VACUUM INTO 当日备份）→ usage.ts（per-agent 水位增量）；库被网关 WAL 占用时 readOnly 打开安全。
+- 后台任务进度留痕两变种：sessions-cleanup（detached 子进程+进度 json）、usage.ts（进程内异步+进度 json）；进度文件都放 `.health/`（gitignored）。
+
+### 8.3 前端惯例（2026-11-08 复核）
+
+- 页签四步链见 §1.2；store 有 `setCurrentKey`+`setView`，可跨页直跳指定会话（先例：UsagePage 的 jumpToSession，跳前查 sessions 列表确认活着）。
+- **无图表库**，图全是手写：进度条 `.bar`、分段堆叠条 `.ctx-seg-bar`+`.ctx-legend`（UsagePanel）、日历格 `.cal-grid`（repeat(7,minmax(0,1fr)) 防内容撑宽）、热力染色 `color-mix(in srgb, var(--accent) X%, var(--bg-panel))`。
+- `fmtTokens` 口径：≥1M→"1.23M"、≥1k→"1.2k"（UsagePanel 与 src/lib/usage-view.ts 同款，勿再手抄第二份）。
+- 测试套路：逻辑抽**零依赖叶模块**配 vitest 直测（gateway.ts 顶层牵动 zustand store，直接 import 会炸——reconnect-backoff.test.ts 头注释）。
+- **WS vs /__rana 分工**：网关会话数据（sessions.list/chat.history/sessions.rewind…）走 WS；本机文件/系统探针/跨会话聚合走 /__rana HTTP 中间件。
+
+### 8.4 用量账本链路（2026-11-08 落地）
+
+- 账本 `rana-web/.health/usage-ledger.json`（gitignored）：days 每日桶 + sessions 会话桶 + per-agent `lastEventTs` 水位；会话被清理/归档后历史不蒸发。
+- 增量补账：GET /__rana/usage 按水位拉新（30s 节流），回看 30 分钟宽限窗补 runId→模型映射（长 run 的 prompt.submitted 可能落在水位之前）；`POST /__rana/usage/rebuild` 全量重建（进度落 .health/usage-rebuild.json）。
+- 聚合规则纯函数在 `server/lib/usage-aggregate.ts`，白名单/分桶/合并幂等有单测守门；聚合口径=只认 model.completed+usage（空轮不计）。
 
 ---
 

@@ -30,7 +30,7 @@ Rana · OpenClaw：开源 AI 助手框架 OpenClaw（npm 包 `openclaw`）+ 自�
 
 | 文档 | 用途 |
 | --- | --- |
-| [PROJECT-MAP.md](PROJECT-MAP.md) | ★ AI 进场全貌：代码地图 / 按任务入手 / 红线 / 时间线 |
+| [PROJECT-MAP.md](PROJECT-MAP.md) | ★ AI 进场全貌：代码地图 / 按任务入手 / 红线 / 时间线 / **§8 实证事实卡**（数据语义·代码惯例，带实查配方） |
 | [KNOWN-ISSUES.md](KNOWN-ISSUES.md) | ★ 排障台账（先查索引，解决后回写） |
 | [PROJECT-STATE-2026-11-03.md](PROJECT-STATE-2026-11-03.md) | ★ 权威现状快照（对齐状态以此为准） |
 | [README.md](README.md) | 人看的长文档（架构/功能/协议/运维） |
