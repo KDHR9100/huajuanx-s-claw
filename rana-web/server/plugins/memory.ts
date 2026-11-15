@@ -7,6 +7,13 @@ import { defineRanaPlugin } from "../lib/rana-plugin";
 import { parsePersonGraph } from "../lib/person-graph-parse";
 import { buildTimeline, diaryTimelineItem, graphTimelineItem } from "../lib/memory-timeline";
 import type { TimelineItem } from "../lib/memory-timeline";
+import {
+  normalizeQuery,
+  normalizeLimit,
+  listAgentDbs,
+  parseAgentsFilter,
+  searchAgentDbs,
+} from "../lib/memory-search";
 
 /**
  * 记忆浏览端点：GET /__rana/memory（文件树）· GET /__rana/memory/read?key= · POST /__rana/memory/save
@@ -18,6 +25,9 @@ import type { TimelineItem } from "../lib/memory-timeline";
  * 复盘日记组（workspace-rana-rp/memory/diary，日记边车每天一篇的存档）展示比照私密组（解锁确认），文件只读、拒写拒删。
  * 2026-11-15 时间线卡：GET / 响应另带 timeline 字段（复盘日记/人物图谱/记忆文件改动聚合，
  * 见 lib/memory-timeline.ts；只加字段不碰既有字段，读不到的源整类缺席）。
+ * 2026-11-15 全文搜索卡：GET /search 跨 agent 库搜 transcript_events 的对话正文（q 必填 ≥2 字符、
+ * agents 白名单、limit 默认 30 cap 50）。同中间件多路由，插件计数 26 不变；
+ * 核心逻辑在 lib/memory-search.ts（纯函数直测）。q 不落盘不进日志，端点只读。
  */
 export function ranaMemoryMiddleware() {
   const MAIN = path.join(STATE_HOME, "workspace-main");
@@ -183,6 +193,20 @@ export function ranaMemoryMiddleware() {
     if (req.method === "GET" && route === "/") {
       const { groups } = buildIndex();
       json(res, 200, { groups, generatedAt: Date.now(), timeline: buildTimelineData() });
+      return;
+    }
+    if (req.method === "GET" && route === "/search") {
+      // 🔎 历史对话全文搜索：跨 agent 库搜 transcript_events 对话正文（只读、q 不进日志）
+      const checked = normalizeQuery(u.searchParams.get("q"));
+      if (!checked.ok) {
+        json(res, 400, { ok: false, error: checked.error });
+        return;
+      }
+      const all = listAgentDbs();
+      const refs = parseAgentsFilter(u.searchParams.get("agents"), all);
+      const limit = normalizeLimit(u.searchParams.get("limit"));
+      const summary = searchAgentDbs(checked.q, refs, { limit });
+      json(res, 200, { ok: true, q: checked.q, limit, ...summary });
       return;
     }
     if (req.method === "GET" && route === "/read") {

@@ -4,10 +4,11 @@
 // 机器维护文件（MEMORY.md/共享纪要/巡检状态等）服务端标记 editable=false，保存会被 400 拒绝。
 // 2026-10-25 迁移批1 加「☁️ 云端同步」卡：家里(win32)=拉取按钮+上次拉取；云端(linux)=家里最后拉取时间。
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fmtAgo, fmtHm } from "../lib/fmt";
+import { fmtAgo, fmtHm, fmtSmartTime } from "../lib/fmt";
 import { HOST_IS_WINDOWS } from "../lib/platform";
 import { groupTimelineByDay } from "../../server/lib/memory-timeline";
 import type { TimelineItem, TimelineSource } from "../../server/lib/memory-timeline";
+import { useAppStore } from "../store/useAppStore";
 import PersonGraph from "./PersonGraph";
 
 interface MemFile {
@@ -224,6 +225,180 @@ function TimelineCard({ items, unlocked, unlock }: { items: TimelineItem[]; unlo
   );
 }
 
+// ===== 🔎 历史对话全文搜索卡（2026-11-15）：跨 agent 库搜 transcript_events 对话正文 =====
+// 数据：GET /__rana/memory/search?q=…&agents=…&limit=…（服务端 LIKE 粗筛+正文精筛，q 不落盘不进日志）。
+// 口径诚实声明：只搜未归档正文（event_json），深档案（event_zstd）不含；跳转按钮只在会话活着时可点。
+
+interface SearchHit {
+  agentId: string;
+  agentName?: string;
+  sessionKey?: string;
+  ts: number;
+  role: string;
+  snippet: string;
+}
+interface SearchResp {
+  ok?: boolean;
+  error?: string;
+  q?: string;
+  hits?: SearchHit[];
+  total?: number;
+  dbCount?: number;
+  agents?: Array<{ id: string; name: string }>;
+  partialAgents?: string[];
+  skippedAgents?: string[];
+  elapsedMs?: number;
+}
+
+const ROLE_LABEL: Record<string, string> = { user: "你", assistant: "她" };
+
+/** snippet 命中词染色：按搜索词大小写不敏感切三段，中段染乐奈绿（切不中就原文展示，不硬猜） */
+function highlightSnippet(snippet: string, q: string) {
+  if (!q) return snippet;
+  const idx = snippet.toLowerCase().indexOf(q.toLowerCase());
+  if (idx < 0) return snippet;
+  return (
+    <>
+      {snippet.slice(0, idx)}
+      <mark className="ms-hit-word">{snippet.slice(idx, idx + q.length)}</mark>
+      {snippet.slice(idx + q.length)}
+    </>
+  );
+}
+
+function FullTextSearchCard() {
+  const [input, setInput] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [result, setResult] = useState<SearchResp | null>(null);
+  const [err, setErr] = useState("");
+  // agent 范围 chips：多选，全不选=搜全部库；候选清单来自最近一次搜索响应
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [knownAgents, setKnownAgents] = useState<Array<{ id: string; name: string }>>([]);
+  // 跳转依据：store 会话列表（UsagePage jumpToSession 同款先例）
+  const sessions = useAppStore((s) => s.sessions);
+
+  const toggleAgent = (id: string) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const runSearch = async () => {
+    const q = input.trim();
+    if (q.length < 2) {
+      setErr("搜索词至少 2 个字符");
+      return;
+    }
+    setSearching(true);
+    setErr("");
+    try {
+      const params = new URLSearchParams({ q });
+      if (picked.size > 0) params.set("agents", [...picked].join(","));
+      const r = await fetch(`/__rana/memory/search?${params.toString()}`);
+      const d = (await r.json()) as SearchResp;
+      if (!r.ok || !d.ok) throw new Error(d.error ?? "HTTP " + r.status);
+      setResult(d);
+      setKnownAgents(d.agents ?? []);
+    } catch (e) {
+      setResult(null);
+      setErr((e as Error).message);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  /** 跳到那条消息：sessionKey 有值且会话还活着 → 直达聊天页该会话（查不到就置灰） */
+  const jump = (key: string) => {
+    const st = useAppStore.getState();
+    if (!st.sessions.some((x) => x.key === key)) return;
+    st.setCurrentKey(key);
+    st.setView("chat");
+  };
+
+  const hits = result?.hits ?? [];
+  const searchQ = result?.q ?? "";
+
+  return (
+    <div className="card" style={{ marginBottom: 12 }}>
+      <div className="tl-head">
+        <h3 style={{ margin: 0 }}>🔎 历史对话全文搜索</h3>
+        <span className="tl-legend">跨 agent 库搜两个人的聊天记录 · 全程本地</span>
+      </div>
+      <div className="ms-tools">
+        <input
+          className="ms-input"
+          value={input}
+          maxLength={64}
+          placeholder="搜聊天正文…（回车触发，如：draining）"
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !searching) void runSearch();
+          }}
+        />
+        <button className="ms-chip" disabled={searching} onClick={() => void runSearch()}>
+          {searching ? "搜索中…" : "搜索"}
+        </button>
+        <button className={`ms-chip${picked.size === 0 ? " on" : ""}`} onClick={() => setPicked(new Set())}>
+          全部
+        </button>
+        {knownAgents.map((a) => (
+          <button key={a.id} className={`ms-chip${picked.has(a.id) ? " on" : ""}`} onClick={() => toggleAgent(a.id)}>
+            {a.name}
+          </button>
+        ))}
+      </div>
+      {err && <div className="ms-err">⚠ {err}</div>}
+      {searching && <div className="ms-empty">搜索中——逐库扫描对话正文…</div>}
+      {!searching && !err && !result && (
+        <div className="ms-empty">还没有搜索。输入关键词回车，翻两年聊天记录不用再一个会话会话点。</div>
+      )}
+      {!searching && result && (
+        <>
+          <div className="ms-stats">
+            本次搜「{searchQ}」命中 <b>{result.total ?? 0}</b> 条 · 跨 <b>{result.dbCount ?? 0}</b> 库 · 用时{" "}
+            <b>{result.elapsedMs ?? 0} ms</b> · 深档案（zstd）不含
+            {(result.partialAgents?.length ?? 0) > 0 && <span className="ms-err"> · 部分库扫描超限，结果可能不全</span>}
+            {(result.skippedAgents?.length ?? 0) > 0 && ` · ${result.skippedAgents?.length} 个库打不开已跳过`}
+          </div>
+          {hits.length === 0 ? (
+            <div className="ms-empty">没有命中。换个词、或把范围 chips 全开再试。</div>
+          ) : (
+            hits.map((h, i) => {
+              const alive = !!h.sessionKey && sessions.some((x) => x.key === h.sessionKey);
+              return (
+                <div key={`${h.agentId}-${h.ts}-${i}`} className="ms-row">
+                  <div className="ms-row-head">
+                    <span className="ms-time">{fmtSmartTime(h.ts)}</span>
+                    <span className="ms-badge">{h.agentName ?? h.agentId}</span>
+                    <span className="ms-role">{ROLE_LABEL[h.role] ?? h.role}</span>
+                    <button
+                      className="ms-jump"
+                      disabled={!alive}
+                      onClick={() => h.sessionKey && jump(h.sessionKey)}
+                      title={
+                        !h.sessionKey
+                          ? "该消息所在会话已归档，无法跳转"
+                          : alive
+                            ? "跳到聊天页该会话"
+                            : "该会话已不在会话列表（可能已清理或归档）"
+                      }
+                    >
+                      跳到那条消息 →
+                    </button>
+                  </div>
+                  <div className="ms-snippet">{highlightSnippet(h.snippet, searchQ)}</div>
+                </div>
+              );
+            })
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function MemoryPage() {
   const [groups, setGroups] = useState<MemGroup[]>([]);
   const [loadErr, setLoadErr] = useState("");
@@ -348,6 +523,7 @@ export default function MemoryPage() {
         </div>
         {loadErr && <div className="set-error">⚠ 读取文件树失败：{loadErr}</div>}
         <CloudSyncCard />
+        <FullTextSearchCard />
         <TimelineCard items={timeline} unlocked={unlocked} unlock={unlock} />
         <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
           <button className="mem-save" style={{ opacity: view === "files" ? 1 : 0.5 }} onClick={() => setView("files")}>📂 文件</button>

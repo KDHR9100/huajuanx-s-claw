@@ -270,6 +270,7 @@ npm run preview   # 生产预览（中间件同样挂载，token 端点除外—
 - **`transcript_events`**（11-05 实证）：一行一事件，`event_json`(TEXT) 或 `event_zstd`(BLOB) 二选一；形如 `{type:"message", id, timestamp, message:{role, content:[块数组]}}`（session-edit-core.ts 头注释同款）。
 - **删除/重置不物理销毁**：转录归档进 `session_transcript_archives`（zstd blob，retention 默认永久）；**会话级汇总从此常规查询摸不到——要历史请落自家账本**（§8.4）。
 - `agents/*/sessions/*.jsonl.deleted.*.zst`（649 个）= 旧格式一次性软删档案，无 API，别考古。
+- **`session_windows` 表**（11-15 会话健康哨兵实查，四库）：每会话窗口一行，`status` 有效值 = done / failed / timeout / running / killed / null；`created_at`/`updated_at`/`ended_at` 均为 epoch 毫秒（列全集见 server/lib/session-health.ts 投影）。**同 session_key 可有多代窗口**（每代重建新窗口，created_at 大者为最新）。当日分布：main 440 行（历史 failed 15）、qq-public 45（failed 13）、rana-rp 5（failed 4）、openclaw 空表。哨兵口径（11-15 主人真数据拍板）= **每 key 取最新窗口判定**：最新窗口 failed=真坏死（实测 main 0 / rp 2 / qq 0），历史 failed 被新窗口顶掉=伤疤不算病（历史累计 32 vs 真坏死 2，差 30 个假警报）；timeout/killed 是自动化任务的正常异常终态。查询封装在 `server/lib/session-health.ts`。
 
 **实查配方**（只读随时可跑）：
 

@@ -28,6 +28,7 @@ import LmStudioModal from "./components/LmStudioModal";
 import { HOST_IS_WINDOWS } from "./lib/platform";
 import CloudConfigModal from "./components/CloudConfigModal";
 import SystemCleanupModal from "./components/SystemCleanupModal";
+import CommandPalette from "./components/CommandPalette";
 
 // 页面级兜底：单页渲染崩了只挂那一页，导航与其余页面照常
 const page = (label: string, node: ReactNode) => <ErrorBoundary label={label}>{node}</ErrorBoundary>;
@@ -171,6 +172,7 @@ export default function App() {
       {HOST_IS_WINDOWS && <LmStudioModal />}
       <CloudConfigModal />
       <SystemCleanupModal />
+      <CommandPalette />
     </>
   );
 }

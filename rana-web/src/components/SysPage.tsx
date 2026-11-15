@@ -61,6 +61,31 @@ interface GuardLightInfo {
   violations: GuardViolation[];
   total: number;
 }
+/** 会话健康哨兵（server/lib/session-health.ts 输出）：各 agent 库 session_windows 窗口健康。
+ *  口径：每 session_key 取最新窗口判定——最新窗口 failed=真坏死（sick）；
+ *  被新窗口顶掉的老 failed=伤疤（healedFailed），不算病。 */
+interface ShSickRow {
+  sessionKey: string;
+  name?: string | null;
+  lastFailedAt: number | null;
+}
+interface ShAgentRow {
+  id: string;
+  name: string;
+  total: number;
+  sick: number;
+  healedFailed?: number;
+  sickRows?: ShSickRow[];
+  lastFailedAt: number | null;
+  lastFailedKey: string | null;
+  lastFailedName?: string | null;
+  unknown?: boolean;
+}
+interface SessionHealthInfo {
+  lamp: "green" | "red" | "gray";
+  agents: ShAgentRow[];
+  checkedAt: number;
+}
 interface StatusPayload {
   platform?: "win32" | "linux";
   sys?: SysInfo;
@@ -71,6 +96,7 @@ interface StatusPayload {
   net?: NetInfo | null;
   patrol?: PatrolInfo | null;
   contractGuards?: GuardLightInfo | null;
+  sessionHealth?: SessionHealthInfo | null;
 }
 
 /** 家里探针上报（/__rana/sys/home；report 结构与 status 的 Windows 部分同构） */
@@ -102,6 +128,21 @@ function fmtGuardAt(iso: string): string {
   if (!iso || Number.isNaN(t.getTime())) return iso || "时间未知";
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(t.getMonth() + 1)}-${p(t.getDate())} ${p(t.getHours())}:${p(t.getMinutes())}`;
+}
+
+/** 会话 failed 时间一行显示：epoch ms → MM-DD HH:MM（烂时间戳兜底「时间未知」） */
+function fmtSessionTs(ts: number | null | undefined): string {
+  if (typeof ts !== "number" || !Number.isFinite(ts) || ts <= 0) return "时间未知";
+  const t = new Date(ts);
+  if (Number.isNaN(t.getTime())) return "时间未知";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(t.getMonth() + 1)}-${p(t.getDate())} ${p(t.getHours())}:${p(t.getMinutes())}`;
+}
+
+/** session_key 缩略：去掉 agent:<id>: 前缀（agent:main:cron:x → cron:x），一行放得下 */
+function shortSessionKey(key: string | null | undefined): string {
+  if (!key) return "未知窗口";
+  return key.replace(/^agent:[^:]+:/, "");
 }
 
 function DiskBar({ disk }: { disk: DiskRow }) {
@@ -295,6 +336,7 @@ export default function SysPage() {
   const net = data?.net ?? null;
   const patrol = data?.patrol ?? null;
   const guards = data?.contractGuards ?? null;
+  const sh = data?.sessionHealth ?? null;
   const patrolAgeMin = patrol ? Math.max(1, Math.round((Date.now() - patrol.updatedAt) / 60000)) : 0;
   const memUsed = sys ? sys.memTotalGB - sys.memFreeGB : 0;
   const memPct = sys && sys.memTotalGB > 0 ? (memUsed / sys.memTotalGB) * 100 : 0;
@@ -522,6 +564,77 @@ export default function SysPage() {
                 <span className="svc-name">全部契约健康</span>
                 <span className="svc-meta">台账零违规</span>
               </div>
+            )}
+          </div>
+
+          {/* 会话健康哨兵：只读直查各 agent 库 session_windows 表（不动库）——
+              绿=全部会话健康；红=N 个窗口被盖 failed 章坏死（展开最近失败明细）；灰=库读不到 */}
+          <div className="card">
+            <h3>
+              <span className="ic">🩺</span>会话健康哨兵 <small>直读 agent 库 · 只读不动库</small>
+            </h3>
+            {!sh ? (
+              <div className="svc-row">
+                <span className="guard-dot dim" />
+                <span className="svc-name">哨兵数据读不到</span>
+                <span className="svc-meta">接口没回这盏灯</span>
+              </div>
+            ) : (
+              <>
+                  <div className="sh-head">
+                  <span className={`sh-lamp ${sh.lamp}`} />
+                  <div className="sh-verdict">
+                    <b>
+                      {sh.lamp === "red"
+                        ? `${sh.agents.reduce((n, a) => n + (a.unknown ? 0 : a.sick), 0)} 个会话窗口坏死`
+                        : sh.lamp === "green"
+                          ? "全部会话健康"
+                          : "agent 库读不到"}
+                    </b>
+                    <span>
+                      {sh.lamp === "red"
+                        ? "会话的最新窗口被盖 failed 章后每条消息都会 draining 超时——和前几次发病一个症状"
+                        : sh.lamp === "green"
+                          ? "所有 agent 的会话窗口零坏死"
+                          : "agent 库没读出来（网关没启动或路径不对），先降级观察"}
+                    </span>
+                  </div>
+                </div>
+                {sh.agents.map((a) => (
+                  <div className="svc-row" key={a.id}>
+                    <span className={`guard-dot${a.unknown ? " dim" : a.sick > 0 ? " bad" : ""}`} />
+                    <span className="svc-name">{a.name}</span>
+                    <span
+                      className="svc-meta"
+                      title={a.healedFailed ? `另有 ${a.healedFailed} 个历史 failed 已被新窗口顶掉` : undefined}
+                    >
+                      {a.unknown
+                        ? "库读不到 · 降级观察"
+                        : `${a.total} 个会话窗口 · ${a.sick > 0 ? `${a.sick} 个坏死` : "全部正常"}${
+                            a.healedFailed ? ` · 另有 ${a.healedFailed} 个历史 failed 已被新窗口顶掉` : ""
+                          }`}
+                    </span>
+                  </div>
+                ))}
+                {sh.lamp === "red" &&
+                  sh.agents
+                    .filter((a) => !a.unknown && a.sick > 0 && a.sickRows?.length)
+                    .map((a) => (
+                      <div className="sh-detail" key={`shf-${a.id}`}>
+                        {a.sickRows!.map((s) => (
+                          <div className="svc-row" key={s.sessionKey}>
+                            <span className="svc-name" title={s.sessionKey}>
+                              {a.name} / {s.name || shortSessionKey(s.sessionKey)}
+                            </span>
+                            <span className="svc-meta">最近 failed {fmtSessionTs(s.lastFailedAt)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                <div className="plan-hint">
+                  建议：先重启网关，再不好按台账 draining 条目手术 · 数据源 session_windows 表 status 字段 · 只读连接，不动库
+                </div>
+              </>
             )}
           </div>
 

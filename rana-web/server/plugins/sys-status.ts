@@ -5,6 +5,7 @@ import { guardReadJson, CONTRACT_FIELDS } from "../lib/contract-guard";
 import { guardLight } from "../lib/guard-light";
 import { RANA_WEB } from "../lib/paths";
 import { readFullConfig, isLocalProvider } from "../lib/config";
+import { collectSessionHealth } from "../lib/session-health";
 import { json, isLoopback } from "../lib/http";
 import { defineRanaPlugin } from "../lib/rana-plugin";
 
@@ -382,6 +383,24 @@ export function ranaSysStatusMiddleware() {
     return guardLight(raw, Date.now());
   };
 
+  /** 会话健康哨兵（2026-11-15 状态页新卡）：只读直查各 agent 库 session_windows 表。
+   *  查询有成本（逐个 readOnly 打开 sqlite），不跟 8 秒系统缓存走，单独 5 分钟 TTL；
+   *  collectSessionHealth 内部 per-agent 降级不炸，这里整体 catch 双保险转灰灯。
+   *  ?fresh=1（页面「立即刷新」）时同样重置，让哨兵也能立即重扫。 */
+  const SESSION_HEALTH_TTL_MS = 5 * 60_000;
+  let shCache: { at: number; data: ReturnType<typeof collectSessionHealth> } | null = null;
+  const readSessionHealth = () => {
+    if (shCache && Date.now() - shCache.at < SESSION_HEALTH_TTL_MS) return shCache.data;
+    let data: ReturnType<typeof collectSessionHealth>;
+    try {
+      data = collectSessionHealth();
+    } catch {
+      data = { lamp: "gray", agents: [], checkedAt: Date.now() };
+    }
+    shCache = { at: Date.now(), data };
+    return data;
+  };
+
   const buildStatus = async () => {
     // Linux（云服务器）：无电源/虚拟化/GPU 卡，其余同构
     if (!IS_WIN) {
@@ -401,6 +420,7 @@ export function ranaSysStatusMiddleware() {
         net: { speed: netSpeed, probes: netProbes.probes },
         patrol: readPatrol(),
         contractGuards: readContractGuards(),
+        sessionHealth: readSessionHealth(),
         ts: Date.now(),
       };
     }
@@ -413,7 +433,7 @@ export function ranaSysStatusMiddleware() {
       queryNetSpeed().catch(() => null),
       queryNetProbes().catch(() => ({ probes: [] })),
     ]);
-    return { platform: PLATFORM, sys, gpu, power, virt, services, net: { speed: netSpeed, probes: netProbes.probes }, patrol: readPatrol(), contractGuards: readContractGuards(), ts: Date.now() };
+    return { platform: PLATFORM, sys, gpu, power, virt, services, net: { speed: netSpeed, probes: netProbes.probes }, patrol: readPatrol(), contractGuards: readContractGuards(), sessionHealth: readSessionHealth(), ts: Date.now() };
   };
 
 
@@ -425,10 +445,11 @@ export function ranaSysStatusMiddleware() {
     res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void },
   ) => {
     if (req.method === "GET") {
-      // ?fresh=1：页面"立即刷新"——绕过 8 秒缓存，外网连通性也重测一遍
+      // ?fresh=1：页面"立即刷新"——绕过 8 秒缓存，外网连通性也重测一遍，会话哨兵也重扫
       if (new URL(req.url ?? "/", "http://x").searchParams.get("fresh") === "1") {
         cache = null;
         netProbeCache = null;
+        shCache = null;
       }
       if (cache && Date.now() - cache.at < CACHE_MS) {
         json(res, 200, cache.data);
