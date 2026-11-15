@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { RANA_WEB } from "../lib/paths";
 import { json, readBody, isLoopback } from "../lib/http";
 import { defineRanaPlugin } from "../lib/rana-plugin";
+import { buildOwnerRhythm } from "../lib/owner-rhythm";
 
 /**
  * QQ 陪伴边车管理端点（本机只读状态 + 启停/重启 + 白名单/群友感改配置）：
@@ -15,6 +16,8 @@ import { defineRanaPlugin } from "../lib/rana-plugin";
  *
  * 数据来源是 sidecar 自己写的 state/status.json（每 10 秒心跳）与 state/activity.jsonl；
  * GET 不返回 token。config.json 与 state/ 都在 qq-sidecar/.gitignore 里，不进公开仓库。
+ * 2026-11-15 作息卡：GET 另带 rhythm 字段（哨兵账本 owner-usage/watch-state/config 聚合，
+ * 见 lib/owner-rhythm.ts；读不到整体降级 null，只加字段不碰既有字段）。
  */
 export function ranaQqSidecarMiddleware() {
   const DIR = path.join(RANA_WEB, "qq-sidecar");
@@ -33,6 +36,15 @@ export function ranaQqSidecarMiddleware() {
       return true;
     } catch {
       return false;
+    }
+  };
+
+  /** 读 JSON 小文件，坏/缺返回 null（作息卡账本允许缺省，纯函数侧降级） */
+  const readJsonFile = <T,>(file: string): T | null => {
+    try {
+      return JSON.parse(fs.readFileSync(file, "utf8")) as T;
+    } catch {
+      return null;
     }
   };
 
@@ -109,6 +121,13 @@ export function ranaQqSidecarMiddleware() {
       config: readConfigSummary(),
       logs: tailLines(LOG_FILE, 40),
       activity: readActivity(40),
+      // [2026-11-15 作息卡] 主人作息（哨兵账本聚合，纯函数降级：三份文件读不到就 null/空槽）
+      rhythm: buildOwnerRhythm({
+        usage: readJsonFile(path.join(RANA_WEB, ".health", "owner-usage.json")),
+        state: readJsonFile(path.join(RANA_WEB, ".health", "owner-watch-state.json")),
+        config: readJsonFile(path.join(RANA_WEB, "owner-status.config.json")),
+        now: new Date(),
+      }),
       now: Date.now(),
       entryExists: fs.existsSync(ENTRY),
     };

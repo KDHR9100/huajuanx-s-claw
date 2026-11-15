@@ -3,9 +3,11 @@
 // 私密组 danger=true：进入和保存各有一次确认；内容仅本地 UI 展示。
 // 机器维护文件（MEMORY.md/共享纪要/巡检状态等）服务端标记 editable=false，保存会被 400 拒绝。
 // 2026-10-25 迁移批1 加「☁️ 云端同步」卡：家里(win32)=拉取按钮+上次拉取；云端(linux)=家里最后拉取时间。
-import { useCallback, useEffect, useState } from "react";
-import { fmtAgo } from "../lib/fmt";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { fmtAgo, fmtHm } from "../lib/fmt";
 import { HOST_IS_WINDOWS } from "../lib/platform";
+import { groupTimelineByDay } from "../../server/lib/memory-timeline";
+import type { TimelineItem, TimelineSource } from "../../server/lib/memory-timeline";
 import PersonGraph from "./PersonGraph";
 
 interface MemFile {
@@ -101,6 +103,127 @@ function CloudSyncCard() {
   );
 }
 
+// ===== 🕰 时间线卡（2026-11-15）：复盘日记/人物图谱事件/记忆文件改动按天汇一条流 =====
+// 展开走 /__rana/memory/read 白名单通道；日记组/私密组比照页内解锁确认（每组每次进页只确认一次）。
+
+type ExpandState = { state: "loading" } | { state: "ok"; content: string } | { state: "err"; msg: string };
+
+const TL_BADGE: Record<TimelineSource, string> = { diary: "日记", graph: "图谱", memory: "记忆" };
+
+function TimelineCard({ items, unlocked, unlock }: { items: TimelineItem[]; unlocked: Set<string>; unlock: (groupId: string) => boolean }) {
+  const [query, setQuery] = useState("");
+  const [sources, setSources] = useState<Set<TimelineSource>>(new Set(["diary", "graph", "memory"]));
+  const [expanded, setExpanded] = useState<Record<string, ExpandState>>({});
+
+  const toggleSource = (s: TimelineSource) =>
+    setSources((prev) => {
+      const next = new Set(prev);
+      if (next.has(s)) next.delete(s);
+      else next.add(s);
+      return next;
+    });
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return items.filter((it) => sources.has(it.source) && (!q || it.title.toLowerCase().includes(q) || (it.excerpt ?? "").toLowerCase().includes(q)));
+  }, [items, query, sources]);
+
+  const dayGroups = useMemo(() => groupTimelineByDay(filtered, new Date()), [filtered]);
+
+  /** 展开/收起：私密组（private/diary）先走与文件视图相同的解锁确认；读不到显示「无法读取」 */
+  const toggle = async (it: TimelineItem) => {
+    if (!it.key) return;
+    const k = it.key;
+    if (expanded[k] && expanded[k].state !== "loading") {
+      setExpanded((prev) => {
+        const next = { ...prev };
+        delete next[k];
+        return next;
+      });
+      return;
+    }
+    const groupId = k.split(":")[0];
+    if ((groupId === "private" || groupId === "diary") && !unlocked.has(groupId)) {
+      if (!unlock(groupId)) return;
+    }
+    setExpanded((prev) => ({ ...prev, [k]: { state: "loading" } }));
+    try {
+      const r = await fetch(`/__rana/memory/read?key=${encodeURIComponent(k)}`);
+      const d = (await r.json()) as { error?: string; content?: string; empty?: boolean };
+      if (d.error) throw new Error(d.error);
+      setExpanded((prev) => ({ ...prev, [k]: { state: "ok", content: d.empty ? "" : d.content ?? "" } }));
+    } catch (e) {
+      setExpanded((prev) => ({ ...prev, [k]: { state: "err", msg: (e as Error).message } }));
+    }
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 12 }}>
+      <div className="tl-head">
+        <h3 style={{ margin: 0 }}>🕰 时间线</h3>
+        <span className="tl-legend">📖 复盘日记 · 🕸 人物图谱事件 · 📝 记忆文件改动</span>
+      </div>
+      <div className="tl-tools">
+        <input
+          className="tl-search"
+          value={query}
+          placeholder="搜记忆…（标题与摘要，本地过滤）"
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        {(["diary", "graph", "memory"] as TimelineSource[]).map((s) => (
+          <button key={s} className={`tl-chip${sources.has(s) ? " on" : ""}`} onClick={() => toggleSource(s)}>
+            {s === "diary" ? "📖 日记" : s === "graph" ? "🕸 图谱" : "📝 记忆"}
+          </button>
+        ))}
+      </div>
+      {items.length === 0 ? (
+        <div className="tl-empty">还没有可聚合的记忆事件。</div>
+      ) : dayGroups.length === 0 ? (
+        <div className="tl-empty">没有匹配的时间线条目（放宽搜索、或把来源 chip 打开试试）。</div>
+      ) : (
+        dayGroups.map((g) => (
+          <div key={g.day}>
+            <div className="tl-day">
+              <span>
+                {g.label} {g.day.slice(5, 7)}-{g.day.slice(8, 10)}
+              </span>
+              <span className="tl-day-count">{g.items.length} 条</span>
+            </div>
+            {g.items.map((it, i) => {
+              const k = it.key ?? "";
+              const ex = k ? expanded[k] : undefined;
+              return (
+              <div key={`${it.ts}-${it.source}-${i}`}>
+                <div className="tl-row">
+                  <span className="tl-time">{fmtHm(it.ts)}</span>
+                  <span className={`tl-badge ${it.source}`}>{TL_BADGE[it.source]}</span>
+                  <span className="tl-text">
+                    {it.title}
+                    {it.excerpt ? <span className="tl-excerpt"> · {it.excerpt}</span> : null}
+                  </span>
+                  {k && (
+                    <button className="tl-open" onClick={() => void toggle(it)}>
+                      {ex ? (ex.state === "ok" ? "▾ 收起" : "…" ) : "▸ 展开"}
+                    </button>
+                  )}
+                </div>
+                {ex && (
+                  <>
+                    {ex.state === "loading" && <div className="tl-body">读取中…</div>}
+                    {ex.state === "err" && <div className="tl-err">无法读取：{ex.msg}</div>}
+                    {ex.state === "ok" && <pre className="tl-body">{ex.content || "（空文件）"}</pre>}
+                  </>
+                )}
+              </div>
+              );
+            })}
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
 export default function MemoryPage() {
   const [groups, setGroups] = useState<MemGroup[]>([]);
   const [loadErr, setLoadErr] = useState("");
@@ -115,17 +238,31 @@ export default function MemoryPage() {
   const [unlocked, setUnlocked] = useState<Set<string>>(new Set());
   // 文件/图谱双视图：图谱数据走专用通道（服务端只放行 graph.md 一个文件）
   const [view, setView] = useState<"files" | "graph">("files");
+  // 🕰 时间线：服务端聚合的日记/图谱/记忆事件流（GET /__rana/memory 的 additive 字段）
+  const [timeline, setTimeline] = useState<TimelineItem[]>([]);
 
   const loadTree = useCallback(async () => {
     try {
       const r = await fetch("/__rana/memory");
-      const d = (await r.json()) as { groups?: MemGroup[] };
+      const d = (await r.json()) as { groups?: MemGroup[]; timeline?: TimelineItem[] };
       setGroups(d.groups ?? []);
+      setTimeline(Array.isArray(d.timeline) ? d.timeline : []);
       setLoadErr("");
     } catch (e) {
       setLoadErr((e as Error).message);
     }
   }, []);
+
+  /** 时间线展开私密组条目用的解锁确认（文案与文件视图一致；每组每次进页只确认一次） */
+  const unlock = useCallback(
+    (groupId: string) => {
+      if (unlocked.has(groupId)) return true;
+      if (!window.confirm("这是私密层文件（仅本地模型可见，云端永远读不到）。\n确定在本机界面上打开吗？")) return false;
+      setUnlocked((prev) => new Set(prev).add(groupId));
+      return true;
+    },
+    [unlocked],
+  );
 
   useEffect(() => {
     void loadTree();
@@ -211,6 +348,7 @@ export default function MemoryPage() {
         </div>
         {loadErr && <div className="set-error">⚠ 读取文件树失败：{loadErr}</div>}
         <CloudSyncCard />
+        <TimelineCard items={timeline} unlocked={unlocked} unlock={unlock} />
         <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
           <button className="mem-save" style={{ opacity: view === "files" ? 1 : 0.5 }} onClick={() => setView("files")}>📂 文件</button>
           <button className="mem-save" style={{ opacity: view === "graph" ? 1 : 0.5 }} onClick={() => setView("graph")}>🕸 人物图谱</button>

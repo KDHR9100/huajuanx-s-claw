@@ -4,6 +4,9 @@ import { STATE_HOME } from "../lib/paths";
 import { json, isLoopback } from "../lib/http";
 import { backupThenWrite } from "../lib/fs-json";
 import { defineRanaPlugin } from "../lib/rana-plugin";
+import { parsePersonGraph } from "../lib/person-graph-parse";
+import { buildTimeline, diaryTimelineItem, graphTimelineItem } from "../lib/memory-timeline";
+import type { TimelineItem } from "../lib/memory-timeline";
 
 /**
  * 记忆浏览端点：GET /__rana/memory（文件树）· GET /__rana/memory/read?key= · POST /__rana/memory/save
@@ -13,12 +16,16 @@ import { defineRanaPlugin } from "../lib/rana-plugin";
  * 只读组是机器维护文件（MEMORY.md/DREAMS.md/共享纪要/巡检状态等）——手改会被桥和 dreaming 覆盖。
  * 私密组（SOUL.private.md、private-memory/*.md）仅本地 UI 展示，本端点绝不把内容发往任何远端。
  * 复盘日记组（workspace-rana-rp/memory/diary，日记边车每天一篇的存档）展示比照私密组（解锁确认），文件只读、拒写拒删。
+ * 2026-11-15 时间线卡：GET / 响应另带 timeline 字段（复盘日记/人物图谱/记忆文件改动聚合，
+ * 见 lib/memory-timeline.ts；只加字段不碰既有字段，读不到的源整类缺席）。
  */
 export function ranaMemoryMiddleware() {
   const MAIN = path.join(STATE_HOME, "workspace-main");
   const RP = path.join(STATE_HOME, "workspace-rana-rp");
   const PRIV = path.join(STATE_HOME, "private-memory");
   const DIARY = path.join(RP, "memory", "diary");
+  // 人物图谱（person-graph.ts 同款路径，只读借用来给时间线供一个条目；不新增任何写通道）
+  const GRAPH_MD = path.join(MAIN, "personal", "graph.md");
 
 
 
@@ -129,6 +136,43 @@ export function ranaMemoryMiddleware() {
     return { groups, map };
   };
 
+  /**
+   * 🕰 时间线聚合（2026-11-15 加，additive）：三类记忆事件汇一条流——
+   * - 复盘日记：diary 组文件（key 在白名单，前端可展开原文），标题取首个 # 行、摘要取正文首行
+   * - 人物图谱：graph.md 三张表没有 ts 字段 -> 整份用 mtime；不在记忆白名单 -> 无 key 只读展示
+   * - 记忆文件：白名单各组全部文件的 mtime，title=key（diary 组已单列，跳过防双份）
+   * 读不到的源整类缺席（buildTimeline 里降级），cap 50、ts 降序。
+   */
+  const buildTimelineData = (): TimelineItem[] => {
+    const { groups } = buildIndex();
+    const memoryItems: TimelineItem[] = [];
+    for (const g of groups) {
+      if (g.id === "diary") continue;
+      for (const f of g.files) memoryItems.push({ ts: f.mtime, source: "memory", title: f.key, key: f.key });
+    }
+    const diaryItems: TimelineItem[] = [];
+    for (const f of listDir(DIARY)) {
+      const { mtime } = statOf(path.join(DIARY, f));
+      let content = "";
+      try {
+        content = fs.readFileSync(path.join(DIARY, f), "utf8");
+      } catch {
+        // 读不到内容就用文件名当标题，不算失败
+      }
+      const item = diaryTimelineItem(`diary:${f}`, f, mtime, content);
+      if (item) diaryItems.push(item);
+    }
+    const graphItems: TimelineItem[] = [];
+    try {
+      const md = fs.readFileSync(GRAPH_MD, "utf8");
+      const item = graphTimelineItem(fs.statSync(GRAPH_MD).mtimeMs, parsePersonGraph(md));
+      if (item) graphItems.push(item);
+    } catch {
+      // graph.md 不存在/不可读 -> 图谱这一源缺席
+    }
+    return buildTimeline({ diary: diaryItems, graph: graphItems, memory: memoryItems });
+  };
+
   const handler = (
     req: { method?: string; url?: string; socket?: { remoteAddress?: string }; headers?: Record<string, unknown>; on: (ev: string, cb: (c?: string) => void) => void },
     res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (s: string) => void },
@@ -138,7 +182,7 @@ export function ranaMemoryMiddleware() {
 
     if (req.method === "GET" && route === "/") {
       const { groups } = buildIndex();
-      json(res, 200, { groups, generatedAt: Date.now() });
+      json(res, 200, { groups, generatedAt: Date.now(), timeline: buildTimelineData() });
       return;
     }
     if (req.method === "GET" && route === "/read") {

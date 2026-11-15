@@ -255,6 +255,7 @@ export function emptyUsage() {
     alive: {},
     lastTick: null,
     yesterday: null,
+    history: [],
   };
 }
 
@@ -275,6 +276,15 @@ export function updateUsage(usage, { now, fgProc, idleSec, procInfo, config }) {
       .sort((a, b) => b.minutes - a.minutes)
       .slice(0, 3);
     usage.yesterday = usage.day ? { day: usage.day, top } : null;
+    // [2026-11-15 作息卡] 日切封账：当天全部程序合计专注分钟追加进 history（作息卡近7天热力读；
+    // 旧账本没这字段就地起账），cap 30 条、最新在后。
+    if (usage.day) {
+      const totalSec = Object.values(usage.focusSeconds ?? {}).reduce((sum, sec) => sum + (Number(sec) || 0), 0);
+      usage.history = [
+        ...(Array.isArray(usage.history) ? usage.history : []),
+        { day: usage.day, totalFocusMinutes: Math.round(totalSec / 60) },
+      ].slice(-30);
+    }
     usage.day = day;
     usage.focusSeconds = {};
     usage.focusMinutes = {};

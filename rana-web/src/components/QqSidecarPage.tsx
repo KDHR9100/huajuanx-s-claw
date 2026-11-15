@@ -35,6 +35,25 @@ interface ActivityRow {
   addressed?: boolean;
 }
 
+interface RhythmLastNight {
+  game: string;
+  minutes: number;
+  windowLabel: string;
+}
+
+/** /__rana/qq-sidecar 的 rhythm 字段（哨兵账本聚合，读不到时整个为 null） */
+interface OwnerRhythm {
+  day: string;
+  idleSkipMinutes: number;
+  focusTop5: Array<{ name: string; minutes: number }>;
+  yesterday: { day: string; top: Array<{ name: string; minutes: number }> } | null;
+  lastNight: RhythmLastNight | null;
+  nagsLastNight: number;
+  nagTimes: string[];
+  weekHistory: Array<{ day: string; totalFocusMinutes: number | null }>;
+  updatedAt: string | null;
+}
+
 interface SidecarResp {
   running: boolean;
   stale: boolean;
@@ -53,6 +72,7 @@ interface SidecarResp {
   now: number;
   entryExists: boolean;
   snowluma?: { running: boolean; wsPort: number; homeDir: string };
+  rhythm?: OwnerRhythm | null;
 }
 
 const fmtUptime = (startedAt?: number) => {
@@ -68,6 +88,125 @@ const rowStyle = { display: "flex", gap: 8, padding: "4px 0", fontSize: 13 } as 
 const labelStyle = { opacity: 0.65, minWidth: 96 } as const;
 const inputStyle = { width: "100%", padding: "4px 6px", fontSize: 13, boxSizing: "border-box" } as const;
 const formLabel = { display: "block", fontSize: 13 } as const;
+
+// ===== 🌙 今日作息卡（2026-11-15）：哨兵账本只读快照，键鼠空闲超线不计专注 =====
+
+const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+/** "2026-11-15" -> "11-15 周六"（解析不动就原样返回，不编日期） */
+const dayChipLabel = (day: string) => {
+  const d = new Date(`${day}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? day : `${d.getMonth() + 1}-${d.getDate()} ${WEEKDAY_NAMES[d.getDay()]}`;
+};
+/** 分钟 -> "3小时12分" / "1小时" / "46分" */
+const fmtMinutes = (min: number) => {
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  if (h > 0) return m > 0 ? `${h}小时${m}分` : `${h}小时`;
+  return `${m}分`;
+};
+
+function RhythmCard({ rhythm }: { rhythm: OwnerRhythm | null | undefined }) {
+  if (!rhythm) {
+    return (
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h3>🌙 今日作息 <small>主人状态哨兵的账本快照</small></h3>
+        <div className="rhythm-empty">账本还在积累，今晚再看。哨兵账本（owner-usage.json）还没写出来，读不到就不编数。</div>
+      </div>
+    );
+  }
+  const hasFocus = rhythm.focusTop5.length > 0;
+  const hasWeek = rhythm.weekHistory.some((d) => d.totalFocusMinutes != null && d.totalFocusMinutes > 0);
+  const hasNight = Boolean(rhythm.lastNight) || rhythm.nagsLastNight > 0;
+  const topMax = Math.max(1, ...rhythm.focusTop5.map((x) => x.minutes));
+  const weekVals = rhythm.weekHistory.map((d) => d.totalFocusMinutes).filter((v): v is number => v != null && v > 0);
+  const weekMax = Math.max(1, ...weekVals);
+  const heatLevel = (v: number | null) => (v == null || v <= 0 ? 0 : v / weekMax <= 0.34 ? 1 : v / weekMax <= 0.67 ? 2 : 3);
+
+  if (!hasFocus && !hasWeek && !hasNight) {
+    return (
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h3>🌙 今日作息 <span className="rhythm-chip">{dayChipLabel(rhythm.day)}</span> <small>每分钟快照 · 键鼠空闲≥{rhythm.idleSkipMinutes}分不计专注</small></h3>
+        <div className="rhythm-empty">账本还在积累，今晚再看。</div>
+        <div className="rhythm-foot">🔒 数据只在自家电脑上 · owner-usage.json</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <h3>
+        🌙 今日作息 <span className="rhythm-chip">{dayChipLabel(rhythm.day)}</span>{" "}
+        <small>每分钟快照 · 键鼠空闲≥{rhythm.idleSkipMinutes}分不计专注</small>
+      </h3>
+
+      {hasFocus && (
+        <>
+          <div className="rhythm-sec">今日专注 TOP 5</div>
+          <div className="rhythm-bars">
+            {rhythm.focusTop5.map((x) => (
+              <div key={x.name} className="rhythm-row" title={`${x.name}：${fmtMinutes(x.minutes)}`}>
+                <span className="rhythm-name">{x.name}</span>
+                <span className="rhythm-track">
+                  <span className="rhythm-fill" style={{ width: `${Math.max(3, Math.round((x.minutes / topMax) * 100))}%` }} />
+                </span>
+                <span className="rhythm-min">{fmtMinutes(x.minutes)}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {hasNight && (
+        <>
+          <div className="rhythm-sec">昨晚</div>
+          <div className="rhythm-night">
+            {rhythm.lastNight && (
+              <div className="rhythm-night-main">
+                <span>
+                  🌙 昨晚 {rhythm.lastNight.windowLabel} {rhythm.lastNight.game}
+                </span>
+                <span className="rhythm-night-min">
+                  {rhythm.lastNight.minutes >= 60 ? `${(rhythm.lastNight.minutes / 60).toFixed(1)}h` : `${rhythm.lastNight.minutes}分`}
+                </span>
+              </div>
+            )}
+            {rhythm.nagsLastNight > 0 && (
+              <div className="rhythm-night-sub">
+                深夜窗口有催睡 {rhythm.nagsLastNight} 次（{rhythm.nagTimes.join("、")}）
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      <div className="rhythm-sec">近 7 天 · 每日专注总时长</div>
+      <div className="rhythm-week">
+        {rhythm.weekHistory.map((d, i) => {
+          const isToday = i === rhythm.weekHistory.length - 1;
+          const level = heatLevel(d.totalFocusMinutes);
+          const label = d.day.slice(8, 10); // "2026-11-15" -> "15"（格子小，完整日期放悬浮提示）
+          return (
+            <div key={d.day} className="rhythm-day">
+              <span
+                className={`rhythm-cell l${level}${isToday ? " today" : ""}`}
+                title={`${d.day}：${d.totalFocusMinutes == null ? "未积累" : fmtMinutes(d.totalFocusMinutes)}`}
+              />
+              <span className="rhythm-day-num">{label}</span>
+            </div>
+          );
+        })}
+        <div className="rhythm-legend">
+          <i style={{ background: "color-mix(in srgb, var(--accent) 35%, var(--bg-panel))" }} />
+          <i style={{ background: "color-mix(in srgb, var(--accent) 65%, var(--bg-panel))" }} />
+          <i style={{ background: "var(--accent)" }} />
+          <span>少→多</span>
+        </div>
+      </div>
+
+      <div className="rhythm-foot">🔒 数据只在自家电脑上 · owner-usage.json</div>
+    </div>
+  );
+}
 
 export default function QqSidecarPage() {
   const [data, setData] = useState<SidecarResp | null>(null);
@@ -235,6 +374,9 @@ export default function QqSidecarPage() {
             {error && <span className="sys-err">（{error}）</span>}
           </p>
         </div>
+
+        {/* 🌙 今日作息：哨兵账本快照（owner-usage.json 等仅本机文件，读不到降级空态） */}
+        <RhythmCard rhythm={data?.rhythm} />
 
         {/* SnowLuma（消息搬运工）状态 + 启动 */}
         <div className="card" style={{ marginBottom: 16 }}>

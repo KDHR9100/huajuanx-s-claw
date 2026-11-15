@@ -2548,3 +2548,56 @@ label.lib-cand { cursor: pointer; }
 .usage-sess-row:hover { border-color: var(--accent); }
 .usage-sess-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
 .usage-sess-meta { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+
+/* ===== 今日作息卡（🌙 QQ陪伴页，2026-11-15）：哨兵账本 owner-usage.json 只读展示，无数据降级空态 ===== */
+
+.rhythm-chip { display: inline-block; font-size: 12px; padding: 1px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-dim); background: var(--bg-hover); vertical-align: 1px; }
+.rhythm-sec { font-size: 12.5px; font-weight: 600; color: var(--text-dim); margin: 12px 0 6px; letter-spacing: 0.4px; }
+.rhythm-bars { display: grid; gap: 6px; }
+.rhythm-row { display: grid; grid-template-columns: 120px 1fr auto; align-items: center; gap: 10px; }
+.rhythm-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rhythm-track { display: block; height: 12px; border-radius: 6px; background: var(--bg-hover); overflow: hidden; }
+.rhythm-fill { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 55%, var(--bg-panel)), var(--accent)); }
+.rhythm-min { font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rhythm-night { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-hover); padding: 8px 12px; display: grid; gap: 3px; }
+.rhythm-night-main { display: flex; align-items: baseline; gap: 8px; font-size: 13.5px; font-weight: 600; }
+.rhythm-night-min { margin-left: auto; color: var(--accent-strong); font-weight: 700; font-variant-numeric: tabular-nums; }
+.rhythm-night-sub { font-size: 12.5px; color: var(--text-dim); }
+.rhythm-week { display: flex; align-items: flex-end; gap: 9px; }
+.rhythm-day { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.rhythm-cell { width: 22px; height: 22px; border-radius: 6px; background: var(--bg-hover); }
+.rhythm-cell.l1 { background: color-mix(in srgb, var(--accent) 35%, var(--bg-panel)); }
+.rhythm-cell.l2 { background: color-mix(in srgb, var(--accent) 65%, var(--bg-panel)); }
+.rhythm-cell.l3 { background: var(--accent); }
+.rhythm-cell.today { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
+.rhythm-day-num { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.rhythm-legend { margin-left: auto; display: flex; align-items: center; gap: 3px; font-size: 11.5px; color: var(--text-dim); }
+.rhythm-legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.rhythm-foot { margin-top: 12px; font-size: 12px; color: var(--text-dim); }
+.rhythm-empty { font-size: 13px; color: var(--text-dim); padding: 4px 0; line-height: 1.6; }
+
+/* ===== 记忆时间线（🕰 记忆页，2026-11-15）：日记/图谱/记忆文件改动按天汇一条流 ===== */
+
+.tl-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tl-legend { margin-left: auto; font-size: 12px; color: var(--text-dim); }
+.tl-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0 4px; }
+.tl-search { flex: 1 1 180px; min-width: 160px; padding: 5px 10px; font-size: 13px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text); font-family: inherit; }
+.tl-search:focus { outline: none; border-color: var(--accent); }
+.tl-search::placeholder { color: var(--text-dim); }
+.tl-chip { font-size: 12.5px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); cursor: pointer; }
+.tl-chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
+.tl-day { display: flex; align-items: baseline; gap: 8px; margin: 12px 2px 6px; font-size: 12.5px; font-weight: 600; color: var(--text-dim); border-bottom: 1px dashed var(--border); padding-bottom: 4px; }
+.tl-day-count { margin-left: auto; font-weight: 400; }
+.tl-row { display: flex; align-items: baseline; gap: 8px; padding: 5px 2px; font-size: 13px; border-bottom: 1px dashed color-mix(in srgb, var(--border) 55%, transparent); }
+.tl-time { font-variant-numeric: tabular-nums; color: var(--text-dim); font-size: 12.5px; flex-shrink: 0; }
+.tl-badge { flex-shrink: 0; font-size: 11.5px; padding: 0 7px; border-radius: 999px; border: 1px solid; line-height: 18px; }
+.tl-badge.diary { color: var(--accent-strong); border-color: var(--accent-strong); }
+.tl-badge.graph { color: #5b9bd5; border-color: #5b9bd5; }
+.tl-badge.memory { color: #d9a05b; border-color: #d9a05b; }
+.tl-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-excerpt { color: var(--text-dim); }
+.tl-open { flex-shrink: 0; border: none; background: transparent; color: var(--accent-strong); cursor: pointer; font-size: 12.5px; padding: 0 2px; font-family: inherit; }
+.tl-open:hover { text-decoration: underline; }
+.tl-body { margin: 4px 0 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; font-family: inherit; }
+.tl-err { margin: 4px 0 8px; color: var(--danger); font-size: 12.5px; }
+.tl-empty { font-size: 13px; color: var(--text-dim); padding: 6px 0; }
