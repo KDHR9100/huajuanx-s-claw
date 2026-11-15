@@ -427,6 +427,12 @@ body.has-bg .session-item:hover { background: color-mix(in srgb, var(--bg-hover)
 .mp-item .m-name { font-size: 13.5px; font-weight: 600; }
 .mp-item .m-sub { font-size: 11.5px; color: var(--text-dim); }
 
+/* 思考档位拉条（ThinkingPicker）：复用 mp-menu 弹层，档位随模型自动适配 */
+.tp-menu { min-width: 240px; max-height: 60vh; overflow-y: auto; }
+.tp-empty { padding: 10px 12px; font-size: 12.5px; color: var(--text-dim); line-height: 1.6; }
+.tp-show .m-name { font-weight: 400; font-size: 12.5px; }
+.tp-show { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 6px; }
+
 /* chat */
 /* min-height:0 关键：否则内容撑高滚动区，把输入框推出视口 */
 .chat-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 26px; scroll-behavior: smooth; }
@@ -2520,3 +2526,25 @@ label.lib-cand { cursor: pointer; }
 }
 .msg-edit-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .msg-edit-actions .btn { font-size: 12.5px; padding: 4px 14px; }
+
+/* ===== 用量页（📊）——KPI/日柱/热力图/模型构成/会话榜 ===== */
+
+.usage-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
+.usage-dot { display: inline-block; width: 8px; height: 8px; border-radius: 3px; margin-right: 6px; }
+.usage-kpis { margin-bottom: 14px; }
+
+.usage-bars { display: flex; align-items: flex-end; gap: 3px; height: 140px; padding: 6px 2px 0; }
+.usage-bar-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; justify-content: flex-end; }
+.usage-bar { width: 100%; min-height: 2px; border-radius: 4px 4px 2px 2px; background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--bg-panel))); }
+
+.usage-heat-col { display: grid; grid-template-rows: repeat(7, 16px); gap: 3px; }
+.usage-heat-cell { width: 16px; border-radius: 4px; background: var(--bg-hover); }
+.usage-heat-cell.today { outline: 2px solid var(--accent); outline-offset: 1px; }
+.usage-heat-cell.future { opacity: .35; }
+.usage-rebuilding { text-align: center; color: var(--text-dim); margin-bottom: 14px; }
+
+.usage-sess { display: grid; gap: 6px; }
+.usage-sess-row { display: flex; align-items: center; gap: 8px; text-align: left; padding: 7px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg-panel); cursor: pointer; }
+.usage-sess-row:hover { border-color: var(--accent); }
+.usage-sess-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
+.usage-sess-meta { font-size: 12px; color: var(--text-dim); white-space: nowrap; }

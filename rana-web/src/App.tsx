@@ -21,6 +21,7 @@ import GroupsPage from "./components/GroupsPage";
 import QqSidecarPage from "./components/QqSidecarPage";
 import MemoryPage from "./components/MemoryPage";
 import TracePage from "./components/TracePage";
+import UsagePage from "./components/UsagePage";
 import ErrorBoundary from "./components/ErrorBoundary";
 import SettingsModal from "./components/SettingsModal";
 import LmStudioModal from "./components/LmStudioModal";
@@ -156,6 +157,12 @@ export default function App() {
             <main className="main">
               {connBanner}
               {page("过程", <TracePage />)}
+            </main>
+          )}
+          {view === "usage" && (
+            <main className="main">
+              {connBanner}
+              {page("用量", <UsagePage />)}
             </main>
           )}
         </div>
