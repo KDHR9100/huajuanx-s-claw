@@ -7,16 +7,18 @@ import type { Plugin } from "vite";
 
 /**
  * 记忆浏览端点：GET /__rana/memory（文件树）· GET /__rana/memory/read?key= · POST /__rana/memory/save
- * 读/改 Rana 的记忆与人设文件（workspace-main / workspace-rana-rp / private-memory 三组）。
+ * 读/改 Rana 的记忆与人设文件（workspace-main / workspace-rana-rp / private-memory 三组 + 复盘日记只读组）。
  * 安全模型是白名单制：前端只传 key，key→绝对路径映射在服务端每次请求时重建，绝不接受前端传路径；
  * 写操作仅限 loopback + editable 文件，写前自动留 .bak，内容上限 2MB。
  * 只读组是机器维护文件（MEMORY.md/DREAMS.md/共享纪要/巡检状态等）——手改会被桥和 dreaming 覆盖。
  * 私密组（SOUL.private.md、private-memory/*.md）仅本地 UI 展示，本端点绝不把内容发往任何远端。
+ * 复盘日记组（workspace-rana-rp/memory/diary，日记边车每天一篇的存档）展示比照私密组（解锁确认），文件只读、拒写拒删。
  */
 export function ranaMemoryMiddleware(): Plugin {
   const MAIN = path.join(STATE_HOME, "workspace-main");
   const RP = path.join(STATE_HOME, "workspace-rana-rp");
   const PRIV = path.join(STATE_HOME, "private-memory");
+  const DIARY = path.join(RP, "memory", "diary");
 
 
 
@@ -113,6 +115,14 @@ export function ranaMemoryMiddleware(): Plugin {
     addGroup("private", "私密层 · private-memory", true, (push) => {
       for (const f of listDir(PRIV)) {
         if (/^\d{4}-\d{2}\.md$/.test(f)) push(f, PRIV, null, true, true, true);
+      }
+    });
+    // 复盘日记（workspace-rana-rp/memory/diary）：日记边车每天一篇的只读存档。
+    // 展示比照私密组（进组需解锁确认）；文件本身不 editable、不 deletable、不标 danger，
+    // save/delete 由通用只读检查拒绝（与 MEMORY.md 等系统维护文件同一通道）。
+    addGroup("diary", "📖 复盘日记", true, (push) => {
+      for (const f of listDir(DIARY)) {
+        push(f, DIARY, null, false, false, false);
       }
     });
 
