@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileP } from "../lib/exec";
+import { execFileP } from "../../lib/cli-bridge.mjs"; // [2026-11-14 收拢批2] 执行件收拢进 CLI 桥（实现逐字同源）
 import { writeJsonAtomic } from "../lib/fs-json";
 import { STATE_HOME, OPENCLAW_CONFIG, OPENCLAW_MJS } from "../lib/paths";
 import { readFullConfig, maskKey, isLocalProvider, providerReferences, type ProviderEntry } from "../lib/config";

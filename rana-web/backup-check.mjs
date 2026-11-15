@@ -19,6 +19,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+// [2026-11-14 卡2] 状态契约写侧自检：核心与规格表和 server 插件同源（lib/contract-guard.mjs），不重演「漏姊妹脚本」
+import { guardReadJson, CONTRACT_FIELDS } from './lib/contract-guard.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // 2026-10-25 迁移批1:全改 env 注入(云端备份链路批3 重定义时配 Linux 值),缺省保留本机旧值;git 走 PATH
@@ -27,6 +29,7 @@ const REPO = process.env.RANA_BACKUP_REPO || 'K:/openclaw-backup';
 const GIT = process.env.RANA_GIT_BIN || 'git';
 const OUT_DIR = path.join(HERE, '.backup-check');
 const OUT = path.join(OUT_DIR, 'status.json');
+// [2026-11-14 卡2] status.json 契约规格在 lib/contract-guard.mjs 的 CONTRACT_FIELDS["backup-check/status"]（单源）
 const MAX_AGE_H = 26;
 const RUNNING_GRACE_H = 2;
 
@@ -97,4 +100,9 @@ const status = { ok, reason: reason || undefined, detail: detail || undefined, c
 fs.mkdirSync(OUT_DIR, { recursive: true });
 fs.writeFileSync(OUT, JSON.stringify(status, null, 1));
 console.log(JSON.stringify(status, null, 1));
+// [2026-11-14 卡2] 写侧自检：写完立刻读回校验契约（通过=无感；不过=守卫已 console 留痕+记台账）。
+// 退出码语义不变——仍按本脚本的健康判定（ok）走，不因自检失败改判（判错方向会误报备份健康）。
+if (!guardReadJson({ contract: 'backup-check/status', file: OUT, fields: CONTRACT_FIELDS['backup-check/status'], fallback: null }).ok) {
+  console.error('状态文件写后自检未通过（坏数据已由守卫留痕并记入 .health/contract-guards.json），backup-check-alert 读到的可能是坏数据');
+}
 process.exit(ok ? 0 : 1);

@@ -3,11 +3,15 @@
 // 选 CLI 而不是网关 WS 的原因：纯 token 握手拿不到 operator.read/write；
 // 设备配对需要人工授权。CLI 复用网关既有鉴权，零配置。
 // 代价：每条消息启动一次进程、无流式、无中途打断；P2 需要时再升级。
-import { spawn, execSync } from 'node:child_process';
+//
+// [2026-11-14 收拢批1] AgentRunner 的 spawn/硬超时/4MB 看门/首{到末}兜底解析迁到
+// lib/cli-bridge.mjs 的 runCli（全部作策略参数注入，run() 调用方签名不变）。
+// resolveOpenclawMjs 语义与桥版不等价（explicit 参数优先/APPDATA 猜测/失败抛错 vs 裸名兜底），
+// 按「宁缺勿歪」保留本地实现，未收编。
+import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-
-const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
+import { runCli, PARSE, MAX_OUTPUT_BYTES } from '../lib/cli-bridge.mjs';
 
 /**
  * 定位全局 openclaw 入口。
@@ -24,25 +28,8 @@ export function resolveOpenclawMjs(explicit) {
   return path.join(root, 'openclaw', 'openclaw.mjs');
 }
 
-/** 把 stdout 里夹杂的日志剥掉，取 JSON 主体（CLI 正常时是纯 JSON）。 */
-function parseJsonOutput(raw) {
-  const text = raw.replace(/^\uFEFF/, '').trim();
-  try {
-    return JSON.parse(text);
-  } catch {
-    // 兜底：抓第一个 { 到最后一个 }
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    if (start >= 0 && end > start) {
-      try {
-        return JSON.parse(text.slice(start, end + 1));
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  }
-}
+// [2026-11-14 收拢批1] 原 parseJsonOutput（首{到末}兜底解析）逐字迁入 lib/cli-bridge.mjs 的
+// PARSE.firstToLastJson，本文件经由 runCli 的 parse 策略参数注入使用。
 
 function extractReply(payload) {
   const result = payload?.result ?? {};
@@ -68,53 +55,32 @@ export class AgentRunner {
    * @param {{sessionKey:string, message:string, timeoutSeconds?:number}} opts
    */
   run({ sessionKey, message, timeoutSeconds }) {
-    const mjs = this.mjsPath;
+    const t = timeoutSeconds ?? this.timeoutSeconds;
     const args = [
-      mjs, 'agent',
+      this.mjsPath, 'agent',
       '--agent', this.agent,
       '--session-key', sessionKey,
       '--message', message,
       '--json',
-      '--timeout', String(timeoutSeconds ?? this.timeoutSeconds),
+      '--timeout', String(t),
     ];
-    return new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, args, {
-        env: { ...process.env, OPENCLAW_STATE_DIR: this.stateDir },
-        windowsHide: true,
-      });
-      let stdout = '';
-      let stderr = '';
-      let killedByTimeout = false;
-      const hardTimeout = setTimeout(() => {
-        killedByTimeout = true;
-        child.kill();
-      }, ((timeoutSeconds ?? this.timeoutSeconds) + 30) * 1000);
-
-      child.stdout.on('data', (chunk) => {
-        stdout += chunk.toString();
-        if (stdout.length > MAX_OUTPUT_BYTES) child.kill();
-      });
-      child.stderr.on('data', (chunk) => {
-        stderr += chunk.toString();
-      });
-      child.on('error', (error) => {
-        clearTimeout(hardTimeout);
-        reject(error);
-      });
-      child.on('close', (code) => {
-        clearTimeout(hardTimeout);
-        if (killedByTimeout) {
-          reject(new Error(`agent 运行超时（${timeoutSeconds ?? this.timeoutSeconds}s）`));
-          return;
-        }
-        const payload = parseJsonOutput(stdout);
-        if (code !== 0 || !payload || payload.status !== 'ok') {
-          const detail = stderr.trim().split('\n').slice(-3).join(' | ') || `exit=${code}`;
-          reject(new Error(`agent 运行失败: ${detail}`));
-          return;
-        }
-        resolve({ text: extractReply(payload), runId: payload.runId });
-      });
+    // spawn + (t+30)s 硬超时 + 4MB 看门 + 首{到末}兜底解析：全部是桥的策略参数；错误话术与状态校验留本类
+    return runCli({
+      command: process.execPath,
+      args,
+      env: { ...process.env, OPENCLAW_STATE_DIR: this.stateDir },
+      windowsHide: true,
+      hardTimeoutMs: (t + 30) * 1000,
+      maxOutputBytes: MAX_OUTPUT_BYTES,
+      parse: PARSE.firstToLastJson,
+    }).then((r) => {
+      if (r.timedOut) throw new Error(`agent 运行超时（${t}s）`);
+      const payload = r.parsed;
+      if (r.code !== 0 || !payload || payload.status !== 'ok') {
+        const detail = r.stderr.trim().split('\n').slice(-3).join(' | ') || `exit=${r.code}`;
+        throw new Error(`agent 运行失败: ${detail}`);
+      }
+      return { text: extractReply(payload), runId: payload.runId };
     });
   }
 }

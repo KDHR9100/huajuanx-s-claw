@@ -1,5 +1,5 @@
 import path from "node:path";
-import { execFileP } from "../lib/exec";
+import { execFileP } from "../../lib/cli-bridge.mjs"; // [2026-11-14 收拢批2] 执行件收拢进 CLI 桥（实现逐字同源）
 import { STATE_HOME, resolveOpenclawMjs } from "../lib/paths";
 import { json, isLoopback } from "../lib/http";
 import type { Plugin } from "vite";

@@ -41,7 +41,7 @@
 
 | 症状域 | 搜索关键词 |
 | --- | --- |
-| 网关起不来/秒拒/空转/卡死 | `秒拒`、`空转`、`degraded`、`\\?\`、`DataCloneError`、`Async work scope`、`卡死病` |
+| 网关起不来/秒拒/空转/卡死/会话坏死 | `秒拒`、`空转`、`degraded`、`\\?\`、`DataCloneError`、`Async work scope`、`卡死病`、`draining`、`rollover`、`会话坏死` |
 | QQ/微信不通/行为怪 | `user:c2c`、`ask_user`、`channelAccounts`、`静默装死`、`收图`、`分块流式`、`missing scope`、`OneBot 401`、`qq-sidecar`、`cmd 碎片`、`EADDRINUSE`、`hookAutoLoad`、`start-all`、`code=1006` |
 | 模型 400/403/超时/审查 | `Free quota`、`data_inspection`、`输出审查`、`content 块数组`、`maxTokens`、`SSE` |
 | LM Studio/显存 | `双实例`、`:2`、`JIT`、`ctx 2048`、`显存`、`embedding` |
@@ -63,6 +63,29 @@
 ***
 
 ## 登记区
+
+## [已解决] owner-status 测试时区依赖——UTC 跑 CI 必挂，备份仓 CI 四连红（2026-11-14 发现并修复）
+- 症状：分支 arch-cli-bridge-20261114 四笔提交 CI 全红，挂点 `npm test`——decideNightNag「间隔未到不重复催」在 UTC runner 上 fire:true（主人机 UTC+8 一直绿）。我方 14 个 HTTP 冒烟用例在真 CI 全过，卡 3 设计获实机认证。
+- 根因：用例账本时间戳写死 `"2026-11-07T15:00:00Z"`，`now` 却用本地时区构造——UTC+8 机器正好差 10 分钟（gap-wait 判定对），UTC 机器差 8 小时（gap 判定翻转）。**11-08 备份仓时区案同家族**；且 main 的 CI 从未跑过 7a914e3（该笔只在本地主检出、未推备份仓），我的分支带着它首推才首曝。
+- 解决方案：账本时间戳改 `new Date(2026,10,7,23,0).toISOString()`（与 now 同框本地构造，任何时区自洽）；「间隔刚过」用例同款加固（它原本是碰巧过）。f761bce 推送后 CI 复考**绿灯**。
+- 教训固化：①**本地构造的日期与写死的时间戳不许混框**（11-08/11-14 两案同根）；②**未推备份仓的提交=CI 盲区**，长驻分支首推即首考，发现红灯先查时间戳混框。
+- 状态：已解决（CI f761bce completed success 实证）。
+
+## [已解决] git-activity-cron.mjs import 误插注释块——被触发即 ReferenceError（2026-11-14 发现并修复）
+- 症状：脚本一旦被 cron 触发即崩（L20 模块顶层调用 resolveOpenclawMjs()，而 L4 的 import 语句被 c07a9e5「11-06 路径三级兜底」提交误插在文件头 doc 注释块内，import 未生效）。
+- 根因：11-06 收拢改路径兜底时把 import 行插进了 JSDoc 注释块内，语法上 import 失效；生产走 glm 中继推送链，`--notify` 直推链「已备好待用」未排程，故至今未暴露。
+- 解决方案：import 行挪回 import 区（3ae0403）；修后 node --check + 全量 350 用例绿；同款病全仓扫描（fate/life/study 三处为 /__rana/* 路径通配符误报，人工核对排除）。教训：**import 永远放 import 区，别插注释块**；`node --check` 查不出这种病（语法合法、运行时才炸）。
+- 状态：已解决（2026-11-14 修复，主人授权「你自己看要不要」；周一班次前落地）。
+
+## [已解决·待复测] 网页聊天 draining/rollover 超时坏死病——瞬时失败被登记库盖 failed 章，之后每条消息滚存死等 15s 恶性循环；手术复位+dist 第 5 刀双保险（2026-11-14）
+- 症状：网页聊天页发消息报 `Error: timed out draining work before reply session rollover: agent:main:dashboard:<uuid>`，该会话此后每条消息必报，重启网关无效；11-09 一案（a8a0aa31）、11-14 一案（a2f91c11），换了新会话照样坏死=机制病。
+- 根因：窗口 status=failed 后，网关回复前先做 session rollover，rollover 排空在途工作死等 15s（dist get-reply 硬编码 `timeoutMs:15e3`）返回 false 即 throw，新窗口写回 failed——一次瞬时失败（网络抖动/模型超时）即进恶性循环。机制见 dist `get-reply-*.mjs`。
+- 解决方案（双保险，2026-11-14 02:34 落地）：
+  1. **登记手术**：agent 库 `session_windows` 把坏死会话当前窗口 `status: failed→done`（1 行，库先备份 `.bak-surgery-20261114`；node:sqlite 直改，网关停止态操作）——让下条消息免滚存直接续聊。
+  2. **dist 第 5 刀**：`apply-drain-rollover-patch-20261114.cjs`（state `tmp/`，升级后随全套重打）把滚存排空超时的 throw 改为 console.warn 后继续滚存（interrupt 已送达，best-effort）——瞬时失败只损失一条消息，不再毁会话。锚点唯一，已验证 throw 文本零残留。
+  3. 长期：证据包发上游（与 \?\路径案/DataCloneError/Async scope closed 同家族）。
+- 排障抓手：再遇 draining 报错，先 node:sqlite 查 `session_windows` status，别只查网络；手术后新消息 outcome=ok 即验收。
+- 状态：已解决（2026-11-14 08:10 主人网页聊天真实流量验收：同一窗口 99b34c88 一轮 102 秒跑完 status=done，无滚存无 failed；登记手术+dist 第 5 刀双保险生效）。
 
 ## [已解决] 私有备份仓 CI 又红——存活时长用例写死 +08:00 偏移，UTC 考场差 8 小时（2026-11-11）
 - 症状：GitHub 邮件「[huajuanx-claw-private] Run failed: CI - main (1b6b1de)」，job `build-and-test` 1 分 17 秒失败；本机（东八区 Windows）跑 npm ci / build / test 三步全绿 255 用例，故障只在 CI 现形。

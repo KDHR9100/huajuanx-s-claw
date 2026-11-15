@@ -17,7 +17,10 @@
 // 无密钥声明：本文件不含任何 QQ ID/token；QQ 目标从状态目录私有配置读，缺失则只记档不开口。
 // 退出码恒为 0，异常记进 state.lastError（不污染 cron 收据）。
 
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
+// [2026-11-14 收拢批2] 状态目录与 detached 拉起收拢进 CLI 桥（STATE_DIR 语义逐项对拍等价；
+// OPENCLAW_MJS 的硬编码本机绝对路径兜底与桥版不等价，按宁缺勿歪保留本地）。
+import { STATE_HOME, spawnCli } from "./lib/cli-bridge.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -25,7 +28,7 @@ import { promisify } from "node:util";
 
 const execFileP = promisify(execFile);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const STATE_DIR = process.env.OPENCLAW_STATE_DIR || path.resolve(HERE, "..", ".openclaw", ".openclaw");
+const STATE_DIR = STATE_HOME;
 const CONFIG_FILE = path.join(HERE, "owner-status.config.json");
 const PRIVATE_FILE = path.join(STATE_DIR, "owner-watch.json");
 const HEALTH_DIR = path.join(HERE, ".health");
@@ -330,12 +333,12 @@ function wakeMain({ game, minutes, title, idleSec, count, isTest }) {
   const prompt = buildNagPrompt({ count, game, minutes, title, idleSec, qqTarget: priv.qqTarget, channel: priv.channel, isTest });
   const mjs = process.env.OPENCLAW_MJS || "C:/Users/Administrator/AppData/Roaming/npm/node_modules/openclaw/openclaw.mjs";
   const timeout = priv.timeoutSeconds ?? 240;
-  const child = spawn(
-    process.execPath,
-    [mjs, "agent", "--agent", priv.agent ?? "main", "--session-key", priv.sessionKey ?? "main:owner-watch", "--message", prompt, "--json", "--timeout", String(timeout)],
-    { env: { ...process.env, OPENCLAW_STATE_DIR: STATE_DIR }, detached: true, stdio: "ignore", windowsHide: true },
-  );
-  child.unref();
+  // [2026-11-14 收拢批2] detached 拉起迁 cli-bridge.spawnCli：detached + stdio ignore + windowsHide + unref + env 原语义逐项保留
+  spawnCli({
+    args: [mjs, "agent", "--agent", priv.agent ?? "main", "--session-key", priv.sessionKey ?? "main:owner-watch", "--message", prompt, "--json", "--timeout", String(timeout)],
+    env: { ...process.env, OPENCLAW_STATE_DIR: STATE_DIR },
+    detached: true, stdio: "ignore", windowsHide: true, unref: true,
+  });
   return { ok: true };
 }
 

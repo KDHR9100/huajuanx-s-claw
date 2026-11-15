@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFileP } from "../lib/exec";
+import { execFileP } from "../../lib/cli-bridge.mjs"; // [2026-11-14 收拢批2] 执行件收拢进 CLI 桥（实现逐字同源）
 import { STATE_HOME, OPENCLAW_MJS } from "../lib/paths";
 import { json, readBody, isLoopback } from "../lib/http";
 import type { Plugin } from "vite";

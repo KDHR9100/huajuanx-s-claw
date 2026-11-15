@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileP } from "../lib/exec";
+import { guardParsedText, CONTRACT_FIELDS } from "../lib/contract-guard";
 import { isLoopback } from "../lib/http";
 import { RANA_WEB } from "../lib/paths";
 import type { Plugin } from "vite";
@@ -20,7 +21,11 @@ export function ranaNewsMiddleware(): Plugin {
     res.setHeader("content-type", "application/json");
     if (req.method === "GET") {
       try {
-        res.end(fs.readFileSync(file, "utf8"));
+        const text = fs.readFileSync(file, "utf8");
+        // [2026-11-14 卡2] 契约守卫：坏 JSON/关键字段坏→留痕+降级 {empty:true}（原逻辑坏 parse 也走这里但无痕）；
+        // 守卫通过=原文逐字节透传，与此前行为一致。
+        const { value } = guardParsedText({ contract: "news/report", file, fields: CONTRACT_FIELDS["news/report"], text, fallback: null });
+        res.end(value === null ? JSON.stringify({ empty: true }) : text);
       } catch {
         res.end(JSON.stringify({ empty: true }));
       }
