@@ -1,7 +1,7 @@
 // owner-status.mjs 规则引擎测试：游戏识别 / 深夜窗口 / 催睡判定 / 提示词。
 // 绝不运行原脚本主流程（哨兵生产脚本，主流程会真拉人发 QQ）——只 import 纯函数。
 import { describe, it, expect } from "vitest";
-import { matchGame, withinNightWindow, decideNightNag, buildNagPrompt } from "../../owner-status.mjs";
+import { matchGame, withinNightWindow, decideNightNag, buildNagPrompt, updateUsage, emptyUsage } from "../../owner-status.mjs";
 
 const GAMES = [
   { name: "三角洲行动", keywords: ["三角洲", "Delta Force", "DeltaForce"] },
@@ -73,12 +73,15 @@ describe("decideNightNag", () => {
     expect(d).toEqual({ fire: false, reason: "max-nags" });
   });
   it("间隔未到不重复催", () => {
-    const ledger = { nags: [{ at: "2026-11-07T15:00:00Z" }], lastNagAt: "2026-11-07T15:00:00Z" };
+    // lastNagAt 与 now 用同一种时钟（本地构造再转 ISO）：写死 UTC 串等于东八区特权，CI 的 UTC 机器上差 8 小时直接翻车
+    const at2300 = new Date(2026, 10, 7, 23, 0).toISOString();
+    const ledger = { nags: [{ at: at2300 }], lastNagAt: at2300 };
     const d = decideNightNag({ ...base, now: new Date(2026, 10, 7, 23, 10), matchedGame: "三角洲行动", streakMinutes: 90, idleSec: 0, ledger, config: { nagGapMinutes: 30 } });
     expect(d).toEqual({ fire: false, reason: "gap-wait" });
   });
   it("间隔刚过：第 2 次，且提示词换狠一点的口吻", () => {
-    const ledger = { nags: [{ at: "2026-11-07T15:00:00Z" }], lastNagAt: "2026-11-07T15:00:00Z" };
+    const at2300 = new Date(2026, 10, 7, 23, 0).toISOString(); // 同款病：与 now 同钟构造，任何时区都成立
+    const ledger = { nags: [{ at: at2300 }], lastNagAt: at2300 };
     const d = decideNightNag({ ...base, now: new Date(2026, 10, 7, 23, 31), matchedGame: "三角洲行动", streakMinutes: 90, idleSec: 0, ledger, config: { nagGapMinutes: 30, maxNags: 2 } });
     expect(d).toEqual({ fire: true, reason: "night-nag", count: 2 });
     expect(buildNagPrompt({ count: 2, game: "三角洲行动", minutes: 90, title: "x", idleSec: 0, qqTarget: "t", channel: "qqbot" })).toContain("更不客气");
@@ -97,6 +100,76 @@ describe("buildNagPrompt", () => {
   it("验收模式换抬头", () => {
     const p = buildNagPrompt({ count: 1, game: "街霸6", minutes: 25, title: "x", idleSec: 0, qqTarget: "T1", channel: "qqbot", isTest: true });
     expect(p).toContain("【催睡链路验收】");
+  });
+});
+
+describe("updateUsage 专注时长", () => {
+  // 时钟纪律同上文：本地构造 now，与 localDateKey 同钟，任何时区跑都成立
+  const mkNow = (h, m, s = 0) => new Date(2026, 10, 8, h, m, s);
+
+  it("同一前台进程逐轮累计（60 秒一轮记 60 秒）", () => {
+    const u = emptyUsage();
+    updateUsage(u, { now: mkNow(20, 0, 0), fgProc: "msedge", idleSec: 0, procInfo: [] });
+    updateUsage(u, { now: mkNow(20, 1, 0), fgProc: "msedge", idleSec: 0, procInfo: [] });
+    expect(u.focusSeconds["msedge"]).toBe(60);
+    expect(u.focusMinutes["msedge"]).toBe(1);
+  });
+
+  it("切窗口：那一段记给上一个窗口，新窗口从下一轮起算", () => {
+    const u = emptyUsage();
+    updateUsage(u, { now: mkNow(20, 0, 0), fgProc: "msedge", idleSec: 0, procInfo: [] });
+    updateUsage(u, { now: mkNow(20, 1, 0), fgProc: "QQ", idleSec: 0, procInfo: [] });
+    expect(u.focusSeconds["msedge"]).toBe(60);
+    expect(u.focusSeconds["QQ"]).toBeUndefined();
+  });
+
+  it("键鼠空闲超线的那一轮不记专注，人回来接着记", () => {
+    const u = emptyUsage();
+    updateUsage(u, { now: mkNow(20, 0, 0), fgProc: "msedge", idleSec: 0, procInfo: [] });
+    updateUsage(u, { now: mkNow(20, 1, 0), fgProc: "msedge", idleSec: 900, procInfo: [] });
+    expect(u.focusSeconds["msedge"]).toBeUndefined();
+    updateUsage(u, { now: mkNow(20, 2, 0), fgProc: "msedge", idleSec: 0, procInfo: [] });
+    expect(u.focusSeconds["msedge"]).toBe(60);
+  });
+
+  it("两轮间隔超 90 秒的部分不补记（漏跑/睡眠后不一次性补大账）", () => {
+    const u = emptyUsage();
+    updateUsage(u, { now: mkNow(20, 0, 0), fgProc: "msedge", idleSec: 0, procInfo: [] });
+    updateUsage(u, { now: mkNow(20, 10, 0), fgProc: "msedge", idleSec: 0, procInfo: [] });
+    expect(u.focusSeconds["msedge"]).toBe(90);
+  });
+});
+
+describe("updateUsage 存活时长与日切", () => {
+  const mkNow = (h, m, s = 0) => new Date(2026, 10, 8, h, m, s);
+  // 带偏移量的 ISO 串（PowerShell 给 StartTime 的形态）：偏移量必须随宿主机走，
+  // 不能写死 +08:00——CI(Ubuntu/UTC) 下写死的偏移会与 mkNow 的本地钟相差 8 小时
+  const localIso = (d) => {
+    const p = (n) => String(n).padStart(2, "0");
+    const off = -d.getTimezoneOffset();
+    const abs = Math.abs(off);
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.000${off >= 0 ? "+" : "-"}${p(Math.floor(abs / 60))}:${p(abs % 60)}`;
+  };
+
+  it("优先进程启动时间；拿不到退回首次见到并标 approx；消失的名字撤账", () => {
+    const u = emptyUsage();
+    const sIso = localIso(new Date(2026, 10, 8, 18, 0, 0));
+    updateUsage(u, { now: mkNow(20, 0, 0), fgProc: "msedge", idleSec: 0, procInfo: [{ n: "msedge", s: sIso }, { n: "foo" }] });
+    expect(u.alive["msedge"]).toEqual({ since: sIso, minutes: 120 });
+    expect(u.alive["foo"]).toEqual({ since: mkNow(20, 0, 0).toISOString(), minutes: 0, approx: true });
+    updateUsage(u, { now: mkNow(20, 1, 0), fgProc: "msedge", idleSec: 0, procInfo: [{ n: "foo" }] });
+    expect(u.alive["msedge"]).toBeUndefined();
+    expect(u.alive["foo"]).toEqual({ since: mkNow(20, 0, 0).toISOString(), minutes: 1, approx: true });
+  });
+
+  it("日切：focus 清零，昨日 Top3 封存进 yesterday", () => {
+    const u = emptyUsage();
+    updateUsage(u, { now: mkNow(23, 59, 0), fgProc: "msedge", idleSec: 0, procInfo: [] });
+    updateUsage(u, { now: mkNow(23, 59, 30), fgProc: "msedge", idleSec: 0, procInfo: [] });
+    updateUsage(u, { now: new Date(2026, 10, 9, 0, 0, 0), fgProc: "QQ", idleSec: 0, procInfo: [] });
+    expect(u.day).toBe("2026-11-09");
+    expect(u.focusSeconds["msedge"]).toBeUndefined();
+    expect(u.yesterday).toEqual({ day: "2026-11-08", top: [{ name: "msedge", minutes: 1 }] });
   });
 });
 

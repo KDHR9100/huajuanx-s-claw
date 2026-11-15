@@ -12,6 +12,7 @@
 //   {STATE_DIR}/owner-watch.json               私有配置（QQ 目标/会话键，绝不进仓）
 //   rana-web/.health/owner-status.json         快照（她与早晚问候读这个；.health/ 已 gitignore）
 //   rana-web/.health/owner-watch-state.json    哨兵内部状态（连跑计时/账本/昨日摘要）
+//   rana-web/.health/owner-usage.json          使用时长账本（今天各程序专注分钟/进程存活分钟/昨日Top3；早晚问候读事实用）
 //
 // 无密钥声明：本文件不含任何 QQ ID/token；QQ 目标从状态目录私有配置读，缺失则只记档不开口。
 // 退出码恒为 0，异常记进 state.lastError（不污染 cron 收据）。
@@ -30,6 +31,7 @@ const PRIVATE_FILE = path.join(STATE_DIR, "owner-watch.json");
 const HEALTH_DIR = path.join(HERE, ".health");
 const SNAPSHOT_FILE = path.join(HEALTH_DIR, "owner-status.json");
 const STATE_FILE = path.join(HEALTH_DIR, "owner-watch-state.json");
+const USAGE_FILE = path.join(HEALTH_DIR, "owner-usage.json");
 const NIGHT_START_DEFAULT = "23:00";
 const NIGHT_END_DEFAULT = "03:00";
 const PS_TIMEOUT_MS = 20000;
@@ -143,8 +145,16 @@ $lii.cbSize = [System.Runtime.InteropServices.Marshal]::SizeOf($lii)
 [W]::GetLastInputInfo([ref]$lii) | Out-Null
 $idleSec = [math]::Round(([Environment]::TickCount - [int64]$lii.dwTime) / 1000)
 if ($idleSec -lt 0) { $idleSec = 0 }
-$procs = @(Get-Process | Select-Object -ExpandProperty ProcessName -Unique)
-[pscustomobject]@{ fgTitle=$sb.ToString(); fgProc=$fgProc; fgPid=$pidOut; idleSec=$idleSec; procs=$procs } | ConvertTo-Json -Compress -Depth 3`;
+$all = Get-Process
+$procs = @($all | Select-Object -ExpandProperty ProcessName -Unique)
+$procInfo = @($all | Group-Object ProcessName | ForEach-Object {
+  $min = $null
+  foreach ($p in $_.Group) { try { $v = $p.StartTime; if ($null -eq $min -or $v -lt $min) { $min = $v } } catch {} }
+  $s = $null
+  if ($null -ne $min) { $s = $min.ToString('yyyy-MM-ddTHH:mm:ss.fffzzz') }
+  [pscustomobject]@{ n = $_.Name; s = $s }
+})
+[pscustomobject]@{ fgTitle=$sb.ToString(); fgProc=$fgProc; fgPid=$pidOut; idleSec=$idleSec; procs=$procs; procInfo=$procInfo } | ConvertTo-Json -Compress -Depth 4`;
   const { stdout } = await execFileP(
     "powershell",
     ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", ps],
@@ -225,7 +235,88 @@ function recordNag(state, { game, at }) {
   state.ledger.lastNagAt = at.toISOString();
 }
 
-// ---------- 开口（拉起 main 一轮） ----------
+// ---------- 使用时长账本（专注+存活，早晚问候读事实用） ----------
+
+const TICK_CAP_MS = 90 * 1000;
+const FOCUS_IDLE_SKIP_MIN_DEFAULT = 15;
+
+/** 空账本。 */
+export function emptyUsage() {
+  return {
+    version: 1,
+    day: "",
+    updatedAt: null,
+    focusSeconds: {},
+    focusMinutes: {},
+    firstSeen: {},
+    alive: {},
+    lastTick: null,
+    yesterday: null,
+  };
+}
+
+/**
+ * 双时长账本推进（纯函数，不碰盘，供 vitest 直测）：
+ * - 专注时长：前台进程逐轮累计秒；切窗口时把上一段记给上一个窗口；两轮间隔超 90 秒的部分不补记（漏跑/睡眠后不一次性补大账）；
+ *   键鼠空闲超线（focusIdleSkipMinutes，默认 15 分钟）这一轮不记账——人不在不算「盯着」。
+ * - 存活时长：按本轮进程清单里每个名字的最早启动时间推算；拿不到启动时间的退回「本轮清单里首次见到」并标 approx；
+ *   本轮清单里消失的名字一并从账上撤下（进程真关了）。
+ * - 日切：focus 清零，昨日 Top3 封存进 yesterday（问候的「昨晚」口径）。
+ */
+export function updateUsage(usage, { now, fgProc, idleSec, procInfo, config }) {
+  const day = localDateKey(now);
+  if (usage.day !== day) {
+    const top = Object.entries(usage.focusSeconds ?? {})
+      .map(([name, sec]) => ({ name, minutes: Math.round(sec / 60) }))
+      .filter((x) => x.minutes > 0)
+      .sort((a, b) => b.minutes - a.minutes)
+      .slice(0, 3);
+    usage.yesterday = usage.day ? { day: usage.day, top } : null;
+    usage.day = day;
+    usage.focusSeconds = {};
+    usage.focusMinutes = {};
+    usage.lastTick = null;
+  }
+  usage.updatedAt = now.toISOString();
+
+  // 专注时长：把「上一轮 tick 到现在」这一段记给上一轮的前台进程
+  const proc = String(fgProc ?? "");
+  const last = usage.lastTick;
+  if (proc) {
+    const idleSkip = idleSec != null && idleSec >= (config?.focusIdleSkipMinutes ?? FOCUS_IDLE_SKIP_MIN_DEFAULT) * 60;
+    if (last && last.proc && last.ts && !idleSkip) {
+      const dt = Math.min(Math.max(now.getTime() - new Date(last.ts).getTime(), 0), TICK_CAP_MS);
+      if (dt > 0) usage.focusSeconds[last.proc] = (usage.focusSeconds[last.proc] ?? 0) + Math.round(dt / 1000);
+    }
+    usage.lastTick = { proc, ts: now.toISOString() };
+  }
+
+  // 存活时长：本轮清单重建 alive；优先用最早启动时间，拿不到退回首次见到（approx 标记）
+  const alive = {};
+  const seen = {};
+  const oldSeen = usage.firstSeen ?? {};
+  const list = Array.isArray(procInfo) ? procInfo : [];
+  for (const entry of list) {
+    const name = String(entry?.n ?? "");
+    if (!name) continue;
+    const startIso = entry.s ? String(entry.s) : null;
+    const fallback = startIso ?? oldSeen[name] ?? now.toISOString();
+    seen[name] = fallback;
+    const t = Date.parse(fallback);
+    alive[name] = Number.isFinite(t)
+      ? { since: fallback, minutes: Math.max(0, Math.round((now.getTime() - t) / 60000)), ...(startIso ? {} : { approx: true }) }
+      : { since: null, minutes: 0, approx: true };
+  }
+  usage.firstSeen = seen;
+  usage.alive = alive;
+
+  // 问候模型好读版：分钟取整
+  usage.focusMinutes = {};
+  for (const [name, sec] of Object.entries(usage.focusSeconds)) {
+    usage.focusMinutes[name] = Math.round(sec / 60);
+  }
+  return usage;
+}
 
 /**
  * 拉人：读私有配置组提示词，detached 拉起 CLI 一轮（不等结果、立即返回，主流程不阻塞）。
@@ -270,6 +361,19 @@ async function main() {
 
   const matched = probeData ? matchGame(config?.games ?? [], probeData) : null;
   if (probeData) updateStreaks(state, matched, now);
+
+  // 使用时长账本：本轮采集成功就顺手记账落盘（失败不挡主流程，异常留痕）
+  if (probeData) {
+    try {
+      const usage = readJson(USAGE_FILE) ?? emptyUsage();
+      updateUsage(usage, { now, fgProc: probeData.fgProc, idleSec: probeData.idleSec, procInfo: probeData.procInfo, config });
+      fs.mkdirSync(HEALTH_DIR, { recursive: true });
+      writeJsonAtomic(USAGE_FILE, usage);
+    } catch (e) {
+      state.lastError = { at: now.toISOString(), where: "usage-ledger", message: String(e?.message ?? e) };
+      saveState(state);
+    }
+  }
 
   const since = matched ? state.streaks[matched] : null;
   const minutes = since ? Math.max(1, Math.round((Date.now() - new Date(since).getTime()) / 60000)) : 0;
