@@ -64,6 +64,13 @@
 
 ## 登记区
 
+## [已解决] 公开仓 CI 四连红——测试 import 生产模块，模块顶层 I/O 在 CI 裸机炸 ENOENT（2026-11-15）
+- 症状：b1c9d73..9843b20 四笔推送 CI 全红（run 28-31），挂点 `npm test`，48 秒内败；本机（Windows + 真实状态目录）401 用例全绿，故障只在 CI 现形。邮件「CI: All jobs have failed / Failed in 48 seconds / 4 annotations」。
+- 根因：`companion-diary.mjs` 模块顶层读 `openclaw.json` + `resolveApiKey`（读盘）+ `mkdirSync` + `makeLog` + identity 文件——该测试只 import 8 个纯函数，但 import 即触发顶层 I/O；本机有真实状态目录所以永远绿，CI 裸机（Ubuntu 无 openclaw.json）ENOENT 整文件炸。该测试此前从未进过任何仓（11-08 落地后一直未提交），今天随 b1c9d73 首次曝光。
+- 排障路径存档：TZ=UTC 本地复现**不红**（排除时区家族）→ 查 CI node 22 vs 本机 24（未定案）→ 拉 run 43708669115 的 job 日志 grep 定位 ENOENT 真身。**教训：本机绿 + CI 红且 TZ=UTC 复现不了时，直接拉 CI 日志，别在时区一棵树上吊死。**
+- 解决方案：六处顶层副作用收进 `initRuntime()`，main() 首行调用（cron 行为一字不变）；裸机模拟（OPENCLAW_STATE_DIR 指不存在路径 + TZ=UTC）15/15 绿实证。修于 fc0e8a9，CI run 复考 **completed success**。
+- 状态：已解决（2026-11-15 CI 绿灯实证）。
+
 ## [已解决] owner-status 测试时区依赖——UTC 跑 CI 必挂，备份仓 CI 四连红（2026-11-14 发现并修复）
 - 症状：分支 arch-cli-bridge-20261114 四笔提交 CI 全红，挂点 `npm test`——decideNightNag「间隔未到不重复催」在 UTC runner 上 fire:true（主人机 UTC+8 一直绿）。我方 14 个 HTTP 冒烟用例在真 CI 全过，卡 3 设计获实机认证。
 - 根因：用例账本时间戳写死 `"2026-11-07T15:00:00Z"`，`now` 却用本地时区构造——UTC+8 机器正好差 10 分钟（gap-wait 判定对），UTC 机器差 8 小时（gap 判定翻转）。**11-08 备份仓时区案同家族**；且 main 的 CI 从未跑过 7a914e3（该笔只在本地主检出、未推备份仓），我的分支带着它首推才首曝。
