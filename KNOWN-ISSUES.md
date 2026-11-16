@@ -64,6 +64,14 @@
 
 ## 登记区
 
+## [已解决] 状态页哨兵红灯——RP 技能审查周任务连败盖 failed 章 + 孤儿窗口永不自愈；手术消红，禁用受上游保护改留观（2026-11-16）
+- 症状：状态页 🩺会话健康哨兵红灯（RP 侧 2 个真坏死），交接书预期为「draining 病残留」——实查不是。真坏死行 = rana-rp 库 session_windows 里「Automation: skill-collection-review-rana-rp」的 10-27 与 11-03 两窗口。
+- 根因：①白名单病（10-14~11-03 每周 error：`agents.rana-rp.tools.allow` 解析后无可调用工具）——**现已清**（当前配置 allow 已删只剩 alsoAllow）；②rp-nsfw 通道 403（11-10 起 preflight skipped，11-01 已实锤待拍板的老病）——skipped 不产生窗口。另 10-27 那条对应任务已删 = 孤儿窗口，无新窗口顶替，按 11-15 口径永远红。
+- 解决方案：①手术 rana-rp 库 rid=4/5 两行 failed→done（库备份 `.bak-surgery-20261116` 23MB 快照，node:sqlite backup API 生成一致快照，changes=2，复查 0 真坏死灯转绿）；②「禁用任务」半途改判：上游把 `skill-collection-review:*` 与 `heartbeat:*` 同列为系统属主声明（dist `system-owned-declaration-*.mjs`），CLI 编辑/删除/auto-disable 全被拒，单独禁用无开关（关全局工坊自主模式会殃及 main/qq公号同款任务）——delivery=none 失败静默 + skipped 不产生窗口 → **留观零副作用**，下次触发大概率 skipped 无窗口，灯不会复红。
+- 哨兵口径盲区（留观不修）：任务已删的孤儿窗口按现口径永远红。若再遇，同款手术或将来给哨兵加「任务已删→伤疤」口径（需跨库读 cron_jobs，暂不做）。
+- 排障抓手：哨兵红灯别急着按 draining 条目手术——先查 cron_run_receipts（state/openclaw.sqlite）拿真败因，preflight skipped 与白名单 error 是两回事。
+- 状态：已解决（2026-11-16 手术完成；哨兵 5 分钟 TTL 后或状态页「立即刷新」复扫即绿）。
+
 ## [已解决] 公开仓 CI 四连红——测试 import 生产模块，模块顶层 I/O 在 CI 裸机炸 ENOENT（2026-11-15）
 - 症状：b1c9d73..9843b20 四笔推送 CI 全红（run 28-31），挂点 `npm test`，48 秒内败；本机（Windows + 真实状态目录）401 用例全绿，故障只在 CI 现形。邮件「CI: All jobs have failed / Failed in 48 seconds / 4 annotations」。
 - 根因：`companion-diary.mjs` 模块顶层读 `openclaw.json` + `resolveApiKey`（读盘）+ `mkdirSync` + `makeLog` + identity 文件——该测试只 import 8 个纯函数，但 import 即触发顶层 I/O；本机有真实状态目录所以永远绿，CI 裸机（Ubuntu 无 openclaw.json）ENOENT 整文件炸。该测试此前从未进过任何仓（11-08 落地后一直未提交），今天随 b1c9d73 首次曝光。
@@ -90,7 +98,7 @@
 - 解决方案（双保险，2026-11-14 02:34 落地）：
   1. **登记手术**：agent 库 `session_windows` 把坏死会话当前窗口 `status: failed→done`（1 行，库先备份 `.bak-surgery-20261114`；node:sqlite 直改，网关停止态操作）——让下条消息免滚存直接续聊。
   2. **dist 第 5 刀**：`apply-drain-rollover-patch-20261114.cjs`（state `tmp/`，升级后随全套重打）把滚存排空超时的 throw 改为 console.warn 后继续滚存（interrupt 已送达，best-effort）——瞬时失败只损失一条消息，不再毁会话。锚点唯一，已验证 throw 文本零残留。
-  3. 长期：证据包发上游（与 \?\路径案/DataCloneError/Async scope closed 同家族）。
+  3. ~~长期：证据包发上游~~（2026-11-16 结案：A 案空转烧核 = 上游 #170013 同案但根因未钉，主人拍板不发留本地；B 案 \?\路径 = 上游 #164762 已修（closed as completed），**升级 9.8+ 后可撤本地 `__pubNorm` 补丁**；证据包原件留 state docs/upstream-issues-draft-20261007.md）。
 - 排障抓手：再遇 draining 报错，先 node:sqlite 查 `session_windows` status，别只查网络；手术后新消息 outcome=ok 即验收。
 - 状态：已解决（2026-11-14 08:10 主人网页聊天真实流量验收：同一窗口 99b34c88 一轮 102 秒跑完 status=done，无滚存无 failed；登记手术+dist 第 5 刀双保险生效）。
 
