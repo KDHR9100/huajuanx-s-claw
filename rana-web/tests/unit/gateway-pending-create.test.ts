@@ -12,7 +12,8 @@ import {
   computeMigratedSessionFields,
 } from "../../src/lib/pendingCreateKeys";
 
-// ── 参照实现（逐字复制自 gateway.ts:675-683 sendChat 取 key 分支）──
+// ── 参照实现（源自 gateway.ts:675-683 sendChat 取 key 分支；2026-11-17 拍板统一后
+//    与 delete 侧同语义：resolve("") 也按失败放弃）──
 async function refResolveForSend(map: Map<string, Promise<string>>, sessionKey: string): Promise<string | null> {
   let key = sessionKey;
   if (key.startsWith("pending-create:")) {
@@ -23,6 +24,7 @@ async function refResolveForSend(map: Map<string, Promise<string>>, sessionKey: 
     } catch {
       return null; // gateway:682 catch → 静默放弃
     }
+    if (!key) return null; // 2026-11-17 统一拍板：resolve("")=失败放弃（原透传空串，死分支收拢）
   }
   return key;
 }
@@ -105,9 +107,9 @@ describe("resolvePendingCreateKeyForSend（gateway.ts:675-683 差分）", () => 
     await expect(resolvePendingCreateKeyForSend(map, "pending-create:g3")).resolves.toBeNull();
   });
 
-  it("promise resolve(\"\") → 透传空串（send 侧现行语义，与 delete 侧的差异点）", async () => {
+  it("promise resolve(\"\") → null（2026-11-17 拍板与 delete 侧统一：空串=失败放弃，不再透传）", async () => {
     const map = new Map([["pending-create:g4", Promise.resolve("")]] as const);
-    await expect(resolvePendingCreateKeyForSend(map, "pending-create:g4")).resolves.toBe("");
+    await expect(resolvePendingCreateKeyForSend(map, "pending-create:g4")).resolves.toBeNull();
   });
 
   it("未决 promise → 等待创建完成（sendChat 期间拿到真实 key 再发送）", async () => {
@@ -152,7 +154,7 @@ describe("resolvePendingCreateKeyForDelete（gateway.ts:832-838 差分）", () =
     await expect(resolvePendingCreateKeyForDelete(map, "pending-create:h3")).resolves.toBeNull();
   });
 
-  it("promise resolve(\"\") → null（与 send 侧透传空串的差异点，`if (!real)` 钉死）", async () => {
+  it("promise resolve(\"\") → null（与 send 侧同语义，`if (!real)` 钉死）", async () => {
     const map = new Map([["pending-create:h4", Promise.resolve("")]] as const);
     await expect(resolvePendingCreateKeyForDelete(map, "pending-create:h4")).resolves.toBeNull();
   });

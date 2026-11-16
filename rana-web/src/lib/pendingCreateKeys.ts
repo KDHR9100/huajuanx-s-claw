@@ -13,10 +13,10 @@
 //   1) 生命周期：createSession 先发占位 key 并把创建 promise 存入 pendingCreates
 //      （789），promise settle 后无论成败立即从 map 移除（790 的 finally），
 //      失败时 catch 吞掉防 unhandled rejection。
-//   2) send 与 delete 的取 key 语义有细微差异：send 侧 promise resolve("")
-//      会透传空串继续发送；delete 侧 resolve("") 按失败放弃（!real 判定）。
-//      实际运行中 sessions.create 响应缺 key 会 throw（行 780），故两者观察等价，
-//      但本模块按各自现行实现逐字保留差异，不做"顺手统一"。
+//   2) send 与 delete 的取 key 语义**已统一**（2026-11-17 主人拍板「向 delete 看齐」）：
+//      promise resolve("") 两边都按失败放弃（返回 null）。统一前 send 侧曾透传空串
+//      继续发送（可能发出 sessionKey="" 的请求）；实际运行中 sessions.create 响应缺 key
+//      会 throw（gateway.ts:780），原属死分支，故统一是观察等价的防御性收拢。
 //   3) refreshSessions：占位会话只要服务端列表还没出现就保留并排在列表最前，
 //      防乐观创建的占位行被刷新冲掉。
 // 采用方式：并行 WIP 落地后由 adoption patch 把 gateway.ts 上述分支替换为
@@ -53,13 +53,14 @@ export async function resolvePendingCreateKeyForSend(
     } catch {
       return null;
     }
+    if (!key) return null; // 2026-11-17 拍板：与 delete 侧统一，resolve("")=失败放弃，不再透传空串
   }
   return key;
 }
 
 /**
  * deleteSession 侧取真实 key（逐字对应 gateway.ts:832-838）。
- * 与 send 侧的差异：resolve("") 按 `if (!real)` 判失败 → 返回 null。
+ * 与 send 侧语义一致：resolve("") 均按失败放弃（2026-11-17 统一拍板，见头注释第 2 条）。
  */
 export async function resolvePendingCreateKeyForDelete(
   map: ReadonlyMap<string, Promise<string>>,
