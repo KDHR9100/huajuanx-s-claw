@@ -6,6 +6,7 @@ import { buildDeviceAuthPayloadV3 } from "@openclaw/gateway-client/browser";
 import { loadBrowserIdentity } from "./identity";
 import { reconnectBackoffMs } from "./reconnectBackoff";
 import { extractThinking } from "./reasoning";
+import { mergeOlderMessages, nextOlderOffset } from "./history-paging";
 import { FinalRunCache, isDuplicateOfRecentMessage } from "./finalRunDedup";
 import { appendToDeleteChain } from "./deleteChain";
 import {
@@ -92,7 +93,32 @@ function mapServerAttachments(m: Record<string, unknown>): ChatAttachment[] | un
     const kind = (typeof a.type === "string" && a.type === "image") || mimeType?.startsWith("image/") ? "image" : "file";
     out.push({ name, ...(mimeType ? { mimeType } : {}), kind });
   }
-  return out.length ? out : undefined;
+    return out.length ? out : undefined;
+}
+
+/**
+ * chat.history 行 → ChatMessage；无文本且无附件的行丢弃。
+ * seq = __openclaw.seq（转录记录号，1 基升序）——「加载更早」的翻页锚点，丢了按钮就失效。
+ */
+function mapHistoryRow(m: Record<string, unknown>, fallbackIndex: number): ChatMessage | null {
+  const role = String(m.role ?? "");
+  if (role !== "user" && role !== "assistant") return null;
+  const text = extractText(m);
+  const thinking = extractThinking(m.content);
+  const atts = mapServerAttachments(m);
+  if (!text && !atts) return null;
+  const meta = m.__openclaw as Record<string, unknown> | undefined;
+  const seq = typeof meta?.seq === "number" && Number.isFinite(meta.seq) && meta.seq > 0 ? meta.seq : undefined;
+  return {
+    id: String(m.id ?? m.messageId ?? `h-${fallbackIndex}`),
+    role: role as "user" | "assistant",
+    text,
+    ts: (m.timestamp as number) ?? (m.ts as number) ?? 0,
+    model: m.model ? String(m.model) : undefined,
+    ...(seq ? { seq } : {}),
+    ...(atts ? { attachments: atts } : {}),
+    ...(thinking ? { reasoning: thinking } : {}),
+  };
 }
 
 /**
@@ -642,28 +668,43 @@ class GatewayConnection {
       const rows = res.messages ?? [];
       const mapped: ChatMessage[] = [];
       for (const m of rows as Array<Record<string, unknown>>) {
-        const role = String(m.role ?? "");
-        if (role !== "user" && role !== "assistant") continue;
-        const text = extractText(m);
-        const thinking = extractThinking(m.content);
-        const atts = mapServerAttachments(m);
-        if (!text && !atts) continue;
-        mapped.push({
-          id: String(m.id ?? m.messageId ?? `h-${mapped.length}`),
-          role: role as "user" | "assistant",
-          text,
-          ts: (m.timestamp as number) ?? (m.ts as number) ?? 0,
-          model: m.model ? String(m.model) : undefined,
-          ...(atts ? { attachments: atts } : {}),
-          ...(thinking ? { reasoning: thinking } : {}),
-        });
+        const row = mapHistoryRow(m, mapped.length);
+        if (row) mapped.push(row);
       }
       store().setMessages(sessionKey, mapped);
       if (res.sessionInfo?.model) store().mergeSession({ key: sessionKey, model: String(res.sessionInfo.model) });
       // 思考档位与列表同一套投影，切进会话立刻回显（不等列表刷新）
       if (res.sessionInfo?.thinkingLevel) store().mergeSession({ key: sessionKey, thinkingLevel: String(res.sessionInfo.thinkingLevel) });
     } catch (e) {
-      console.warn("[gateway] chat.history 失败:", e);
+      console.warn("[gateway] chat.history 尾窗加载失败:", e);
+    }
+  }
+
+  /**
+   * 「加载更早」：按当前最旧一条的 seq 向前翻一页（默认 200 条），前插去重。
+   * offset 按「记录号」计数（record 1 = 最旧），与消息 __openclaw.seq 同一坐标系。
+   * exhausted=true 表示确认翻到底；请求失败 exhausted=false，按钮保留可重试。
+   */
+  async loadHistoryOlder(sessionKey: string): Promise<{ added: number; exhausted: boolean }> {
+    const s = store();
+    const list = s.messages[sessionKey] ?? [];
+    const oldestSeq = list[0]?.seq;
+    if (!list.length || !oldestSeq) return { added: 0, exhausted: true };
+    const limit = 200;
+    const offset = nextOlderOffset(oldestSeq, limit);
+    try {
+      const res = (await this.request("chat.history", { sessionKey, offset, limit })) as { messages?: unknown[] };
+      const page: ChatMessage[] = [];
+      for (const m of res.messages ?? []) {
+        const row = mapHistoryRow(m as Record<string, unknown>, page.length);
+        if (row) page.push(row);
+      }
+      const { merged, added } = mergeOlderMessages(list, page);
+      if (added > 0) s.setMessages(sessionKey, merged);
+      return { added, exhausted: added === 0 };
+    } catch (e) {
+      console.warn("[gateway] chat.history 向前翻页失败:", e);
+      return { added: 0, exhausted: false };
     }
   }
 

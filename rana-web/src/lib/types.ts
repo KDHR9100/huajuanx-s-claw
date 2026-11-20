@@ -37,6 +37,8 @@ export interface ChatMessage {
   attachments?: ChatAttachment[];
   /** 原生思考块（会话库 content 里的 thinking/reasoning 块，历史加载/落库事件时提取；内联 <think> 仍由 splitReasoning 现场拆） */
   reasoning?: string;
+  /** 转录记录号（__openclaw.seq，1 基升序，「加载更早」的翻页锚点；本地乐观消息没有） */
+  seq?: number;
 }
 
 export interface SessionRow {

@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAppStore } from "../store/useAppStore";
 import { gateway } from "../lib/gateway";
 import Markdown from "./Markdown";
@@ -361,6 +361,46 @@ export default function ChatStream() {
   const messages = currentKey ? messagesMap[currentKey] ?? [] : [];
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
+  const [older, setOlder] = useState<{ loading: boolean; exhausted: boolean }>({ loading: false, exhausted: false });
+  const prependPrevHeight = useRef<number | null>(null);
+  const prevLenRef = useRef(0);
+
+  // 「加载更早」状态在会话切换时重置
+  useEffect(() => {
+    setOlder({ loading: false, exhausted: false });
+    prevLenRef.current = messages.length;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentKey]);
+
+  // 整体重拉（编辑完成后 loadHistory 重设为尾窗）会让长度骤降，此时重置翻页状态
+  useEffect(() => {
+    if (messages.length < prevLenRef.current) setOlder({ loading: false, exhausted: false });
+    prevLenRef.current = messages.length;
+  }, [messages.length]);
+
+  // 前插旧消息后保持视口不动：scrollTop 补上新增的内容高度差（临时关掉 smooth 防晃动）
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el && prependPrevHeight.current != null) {
+      const delta = el.scrollHeight - prependPrevHeight.current;
+      el.style.scrollBehavior = "auto";
+      el.scrollTop += delta;
+      el.style.scrollBehavior = "";
+      prependPrevHeight.current = null;
+    }
+  }, [messages.length]);
+
+  const onLoadOlder = async () => {
+    if (!currentKey || older.loading) return;
+    prependPrevHeight.current = scrollRef.current?.scrollHeight ?? null;
+    setOlder((v) => ({ ...v, loading: true }));
+    try {
+      const { exhausted } = await gateway.loadHistoryOlder(currentKey);
+      setOlder({ loading: false, exhausted });
+    } catch {
+      setOlder({ loading: false, exhausted: false });
+    }
+  };
 
   const text = messages.map((m) => m.text.length).join(",");
   useEffect(() => {
@@ -391,6 +431,16 @@ export default function ChatStream() {
   return (
     <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
       <div className="chat-inner">
+        {messages.length > 0 && messages[0]?.seq != null && !older.exhausted && (
+          <div className="load-older-row">
+            <button className="load-older-btn" disabled={older.loading} onClick={onLoadOlder}>
+              {older.loading ? "翻找中……" : "加载更早"}
+            </button>
+          </div>
+        )}
+        {older.exhausted && messages.length > 0 && (
+          <div className="history-start-hint">—— 已经是最早的了 ——</div>
+        )}
         {messages.length === 0 && (
           <div className="empty-state">
           <span className="empty-face">
