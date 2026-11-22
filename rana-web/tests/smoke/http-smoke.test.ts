@@ -67,9 +67,9 @@ afterAll(async () => {
 });
 
 describe("①插件注册", () => {
-  it("26 组 /__rana 中间件全部注册（起服务不炸=注册成功；rana-* 计数=26，合并后含 usage）", () => {
+  it("27 组 /__rana 中间件全部注册（起服务不炸=注册成功；rana-* 计数=27，合并后含 usage）", () => {
     const rana = (server!.config.plugins).filter((p) => p.name?.startsWith("rana-"));
-    expect(rana).toHaveLength(26);
+    expect(rana).toHaveLength(27);
   });
 });
 

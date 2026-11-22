@@ -25,6 +25,7 @@ import { ranaSessionEditMiddleware } from "./plugins/session-edit";
 import { ranaUsageMiddleware } from "./plugins/usage";
 import { bridgeSyncMiddleware } from "./plugins/bridge-sync";
 import { cloudSyncMiddleware } from "./plugins/cloud-sync";
+import { ranaPetConsoleMiddleware } from "./plugins/pet-console";
 
 /** 按原有顺序装配全部 /__rana 中间件（react() 由 vite.config.ts 自行前置）。 */
 export function buildServerPlugins(): Plugin[] {
@@ -55,5 +56,6 @@ export function buildServerPlugins(): Plugin[] {
     ranaUsageMiddleware(),
     bridgeSyncMiddleware(),
     cloudSyncMiddleware(),
+    ranaPetConsoleMiddleware(),
   ];
 }

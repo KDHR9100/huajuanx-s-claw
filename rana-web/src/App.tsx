@@ -11,6 +11,7 @@ import ChatStream from "./components/ChatStream";
 import Composer from "./components/Composer";
 import UsagePanel from "./components/UsagePanel";
 import SysPage from "./components/SysPage";
+import PetPage from "./components/PetPage";
 import CronPage from "./components/CronPage";
 import ApprovalsPage from "./components/ApprovalsPage";
 import NewsPage from "./components/NewsPage";
@@ -98,6 +99,12 @@ export default function App() {
             <main className="main">
               {connBanner}
               {page("Rana 的状态", <SysPage />)}
+            </main>
+          )}
+          {view === "pet" && (
+            <main className="main">
+              {connBanner}
+              {page("桌宠", <PetPage />)}
             </main>
           )}
           {view === "cron" && (
