@@ -109,6 +109,10 @@ function mapHistoryRow(m: Record<string, unknown>, fallbackIndex: number): ChatM
   if (!text && !atts) return null;
   const meta = m.__openclaw as Record<string, unknown> | undefined;
   const seq = typeof meta?.seq === "number" && Number.isFinite(meta.seq) && meta.seq > 0 ? meta.seq : undefined;
+  // 程序注入的系统来源行（systemInputProvenance，如桌宠待机自言自语 kind=internal_system）：
+  // 标记 systemNote，前端渲染成系统提示行而非主人气泡（行顶层或 __openclaw 封套内都可能带 provenance）
+  const prov = (m.provenance ?? meta?.provenance) as Record<string, unknown> | undefined;
+  const isSystemNote = !!prov && typeof prov === "object" && prov.kind === "internal_system";
   return {
     id: String(m.id ?? m.messageId ?? `h-${fallbackIndex}`),
     role: role as "user" | "assistant",
@@ -116,6 +120,7 @@ function mapHistoryRow(m: Record<string, unknown>, fallbackIndex: number): ChatM
     ts: (m.timestamp as number) ?? (m.ts as number) ?? 0,
     model: m.model ? String(m.model) : undefined,
     ...(seq ? { seq } : {}),
+    ...(isSystemNote ? { systemNote: true } : {}),
     ...(atts ? { attachments: atts } : {}),
     ...(thinking ? { reasoning: thinking } : {}),
   };

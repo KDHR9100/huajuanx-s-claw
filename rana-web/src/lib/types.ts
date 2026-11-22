@@ -39,6 +39,8 @@ export interface ChatMessage {
   reasoning?: string;
   /** 转录记录号（__openclaw.seq，1 基升序，「加载更早」的翻页锚点；本地乐观消息没有） */
   seq?: number;
+  /** 程序以系统来源（provenance.kind = internal_system）注入的唤醒指令行：前端渲染成居中系统提示行，不渲染成主人气泡 */
+  systemNote?: boolean;
 }
 
 export interface SessionRow {

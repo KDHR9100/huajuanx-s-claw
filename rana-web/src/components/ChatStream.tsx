@@ -453,7 +453,13 @@ export default function ChatStream() {
                 {messages.map((m, i) => {
           // 回退锚点：user 消息锚自己；她的回复锚到上面最近一条 user 消息（本地 id 形态不限，服务端按前缀+ts 定位）
           const anchor = m.role === "user" ? m : findRewindAnchor(messages, i - 1);
-          return (
+          // 桌宠待机自言自语的注入指令行 → 居中淡色系统行（复用 history-start-hint 样式），不渲染成任何气泡：
+          // systemNote 由 chat.history 行的 provenance（internal_system）标记；「（待机自言自语触发」前缀兜底历史旧数据与实时落库推送
+          const isSystemLine =
+            m.systemNote === true || (m.role === "user" && m.text.startsWith("（待机自言自语触发"));
+          return isSystemLine ? (
+            <div key={m.id} className="history-start-hint">—— 她自言自语了一下 ——</div>
+          ) : (
             <Bubble key={m.id} msgId={m.id} role={m.role} text={m.text} reasoning={m.reasoning} streaming={m.streaming} error={m.error} model={m.model} ts={m.ts} status={m.status} attachments={m.attachments} anchorId={anchor?.id} anchorText={anchor?.text} anchorTs={anchor?.ts ?? 0} />
           );
         })}
